@@ -22,7 +22,7 @@ This guide covers integrating **Browserbase** for automated video platform inter
 ## 🏗️ Architecture Overview
 
 ```
-Phoenix Backend
+Backend
 │
 ├── AgentSession (GenServer)
 │   └── Posts event: {:note_ready, note_id}
@@ -43,7 +43,7 @@ Phoenix Backend
 ## 📁 Repository Structure
 
 ```
-phoenix_backend/
+lossy/
 ├── lib/lossy/automation/
 │   ├── browserbase_client.ex      # API wrapper
 │   ├── note_poster.ex              # Oban worker

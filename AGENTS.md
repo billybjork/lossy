@@ -4,7 +4,7 @@ This is a **Phoenix + Chrome Extension** project that captures voice feedback wh
 
 ## Project Structure
 
-- **`phoenix_backend/`** - Phoenix 1.7 backend with LiveView, Channels, Oban, and Browserbase integration
+- **`lossy/`** - Backend application with Phoenix/LiveView, Channels, Oban, and Browserbase integration
 - **`extension/`** - Chrome MV3 extension with LiveView UI, WASM inference (future), and content scripts
 - **`docs/`** - Complete technical documentation (architecture, implementation phases, patterns)
 

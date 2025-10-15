@@ -21,12 +21,12 @@ This document breaks down implementation into **5 phases**, each delivering work
 
 **Goal:** Get all project foundations in place, nothing functional yet but clean structure.
 
-### Phoenix Backend Setup
+### Backend Setup
 
 ```bash
 cd /Users/billy/Dropbox/Projects/lossy/code
-mix phx.new phoenix_backend --no-html --no-assets --binary-id
-cd phoenix_backend
+mix phx.new lossy --no-html --no-assets --binary-id
+cd lossy
 ```
 
 **mix.exs dependencies:**
@@ -347,7 +347,7 @@ git commit -m "Initial project scaffolding"
 ```
 
 **Deliverables:**
-- ✅ Phoenix server runs on :4000
+- ✅ Backend server runs on :4000
 - ✅ Database schema created
 - ✅ Extension builds with webpack
 - ✅ Can load extension in Chrome (shows blank popup)
@@ -572,7 +572,7 @@ init();
 
 ### Testing Phase 1
 
-1. Start Phoenix: `mix phx.server`
+1. Start backend: `mix phx.server`
 2. Build extension: `cd extension && npm run build`
 3. Load extension in Chrome
 4. Create test user in IEx: `Lossy.Accounts.create_user(%{email: "test@test.com", password: "password123"})`
@@ -866,8 +866,8 @@ const liveSocket = new LiveSocket("ws://localhost:4000/live", Socket, {
 
 **Deliverables:**
 - ✅ Mic captures audio in offscreen document
-- ✅ Audio streams to Phoenix via WebSocket (binary)
-- ✅ Phoenix receives audio and sends back fake transcript
+- ✅ Audio streams to backend via WebSocket (binary)
+- ✅ Backend receives audio and sends back fake transcript
 - ✅ Transcript appears in side panel
 
 ---
@@ -1136,7 +1136,7 @@ end
 
 ```bash
 # Create Python agent structure in priv/python
-mkdir -p phoenix_backend/priv/python/automation
+mkdir -p lossy/priv/python/automation
 # Python agents can be ported from external reference or built from scratch
 # following Browserbase API documentation
 ```

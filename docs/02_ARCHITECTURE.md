@@ -50,7 +50,7 @@
                          │ - LiveView connection
                          │
 ┌────────────────────────▼────────────────────────────────────────┐
-│  Phoenix Backend (Elixir)                                       │
+│  Backend (Elixir)                                               │
 │                                                                  │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │ Phoenix Endpoint                                          │  │
@@ -230,7 +230,7 @@ const liveSocket = new LiveSocket("wss://...", Socket, {
 
 ---
 
-### 2. Phoenix Backend Components
+### 2. Backend Components
 
 #### Phoenix Endpoint
 

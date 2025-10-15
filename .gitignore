@@ -8,7 +8,7 @@ dist/
 *.beam
 *.ez
 
-# Elixir/Phoenix
+# Elixir/Phoenix (@lossy backend)
 .elixir_ls/
 erl_crash.dump
 .fetch

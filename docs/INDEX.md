@@ -55,7 +55,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 **Key sections:**
 - ASCII architecture diagram
 - Extension components breakdown
-- Phoenix backend components breakdown
+- Backend components breakdown
 - Voice note creation flow (step-by-step)
 - Video context change flow
 - Automated posting flow

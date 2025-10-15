@@ -168,7 +168,7 @@ Based on blueprint and research:
 ### Default: Local-First
 
 ```
-Browser (WASM)                Phoenix Backend (Cloud)
+Browser (WASM)                Backend (Cloud)
 ├── Audio capture            ├── Receives: transcript text only
 ├── STT (Whisper)           ├── Structures with LLM
 ├── Frame capture (CLIP)    ├── Stores: notes, timestamps
@@ -198,7 +198,7 @@ lossy/
 │   ├── 04_LIVEVIEW_PATTERNS.md
 │   └── 05_BROWSERBASE_INTEGRATION.md
 │
-├── phoenix_backend/               # 🔥 Elixir/Phoenix backend
+├── lossy/                         # 🔥 Elixir/Phoenix application (@lossy namespace)
 │   ├── lib/lossy/
 │   │   ├── accounts/             # User management
 │   │   ├── videos/               # Video & note storage
@@ -275,7 +275,7 @@ From research and prototype:
 
 ```bash
 # Backend
-cd phoenix_backend
+cd lossy
 mix deps.get
 mix ecto.setup
 mix phx.server

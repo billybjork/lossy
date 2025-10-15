@@ -7,7 +7,7 @@ A browser extension for capturing voice feedback while reviewing videos, with au
 ### Initial Setup (First Time)
 
 ```bash
-# Install Phoenix dependencies
+# Install backend dependencies
 cd lossy
 mix deps.get
 mix ecto.setup  # Creates DB and runs migrations
@@ -22,7 +22,7 @@ cd ..
 
 ### Development
 
-**Terminal 1** - Phoenix server:
+**Terminal 1** - Backend server:
 ```bash
 cd lossy
 mix phx.server  # Runs at http://localhost:4000
@@ -45,7 +45,7 @@ npm run dev  # Auto-rebuilds on file changes
 
 ```
 code/
-├── lossy/               # Elixir/Phoenix application
+├── lossy/               # Backend application (Elixir/Phoenix)
 │   ├── lib/lossy/       # Core business logic
 │   ├── lib/lossy_web/   # Web layer (LiveView, Channels, API)
 │   └── priv/repo/       # Database migrations
@@ -57,7 +57,7 @@ code/
 
 ## 🛠️ Manual Commands
 
-### Phoenix Application
+### Backend Application
 
 ```bash
 cd lossy
@@ -112,7 +112,7 @@ Recommended extensions will be suggested automatically when you open the project
 
 ## 🔥 Hot Reload
 
-### Phoenix Application
+### Backend Application
 - **Elixir code**: Auto-reloads on save (code_reloader enabled)
 - **Database schema**: Run `mix ecto.migrate` after changes
 - **Config changes**: Restart server
@@ -136,7 +136,7 @@ Recommended extensions will be suggested automatically when you open the project
 
 2. Make changes to code
 
-3. **Phoenix changes**: Auto-reload (just refresh browser)
+3. **Backend changes**: Auto-reload (just refresh browser)
 
 4. **Extension changes**:
    - Webpack auto-rebuilds (watch Terminal 2)
@@ -167,7 +167,7 @@ mix ecto.reset
 ## 🧪 Testing
 
 ```bash
-# Phoenix tests
+# Backend tests
 cd lossy
 mix test
 
