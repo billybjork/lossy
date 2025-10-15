@@ -100,30 +100,6 @@ npm run dev
 # The built extension will be in dist/
 ```
 
-## 🔧 VS Code Setup
-
-The `.vscode/settings.json` configures:
-- ✅ ElixirLS pointing to `lossy/` directory
-- ✅ Format on save for Elixir and JavaScript
-- ✅ Recommended extensions
-- ✅ Proper file exclusions for search/watch
-
-Recommended extensions will be suggested automatically when you open the project.
-
-## 🔥 Hot Reload
-
-### Backend Application
-- **Elixir code**: Auto-reloads on save (code_reloader enabled)
-- **Database schema**: Run `mix ecto.migrate` after changes
-- **Config changes**: Restart server
-
-### Extension
-- **JavaScript**: Webpack rebuilds automatically in watch mode (`npm run dev`)
-- **HTML/Manifest**: Copied to dist/ automatically
-- **To apply changes**: Click reload button in `chrome://extensions`
-
-**Note**: Chrome extensions don't support true hot reload. You must manually reload the extension after webpack rebuilds.
-
 ## 🎯 Development Workflow
 
 ### Typical Session
@@ -192,38 +168,6 @@ See `docs/` directory for detailed guides:
 - `04_BROWSERBASE_INTEGRATION.md` - Automation setup
 - `TECHNICAL_REFERENCES.md` - WASM, WebGPU, model caching
 
-## 🐛 Troubleshooting
-
-### ElixirLS Not Working
-- Check `.vscode/settings.json` has `"elixirLS.projectDir": "lossy"`
-- Restart VS Code
-- Run "ElixirLS: Restart" from VS Code command palette
-
-### Database Connection Errors
-```bash
-# Check PostgreSQL is running
-pg_isready
-
-# Start PostgreSQL (macOS)
-brew services start postgresql
-
-# Start PostgreSQL (Linux)
-sudo systemctl start postgresql
-```
-
-### Extension Not Loading
-- Check `extension/dist/` directory exists and has files
-- Run `npm run build` in extension directory
-- Check Chrome DevTools console for errors
-
-### Webpack Build Errors
-```bash
-cd extension
-rm -rf node_modules dist
-npm install
-npm run build
-```
-
 ## 📦 Production Build
 
 ```bash
@@ -241,39 +185,36 @@ cd dist && zip -r ../extension.zip . && cd ..
 
 ## 🔐 Environment Variables
 
-Create a `.env` file in the `lossy/` directory for sensitive config (not committed to git):
+Create a `.env` file in the **repo root** (`code/.env`) for configuration (not committed to git).
 
-**`lossy/.env`**:
+The `.env` file is automatically loaded by `lossy/config/runtime.exs` in development and test environments.
+
+**`.env`** (in repo root):
 ```bash
-# OpenAI API Configuration
+# OpenAI API Configuration (Required)
 # Get your API key from: https://platform.openai.com/api-keys
-export OPENAI_API_KEY="sk-proj-..."
+OPENAI_API_KEY=sk-proj-...
 
-# Database Configuration
-# Development uses lossy_dev by default (configured in config/dev.exs)
-# For production:
-export DATABASE_URL="postgresql://user:pass@localhost/lossy_prod"
+# Database Configuration (Production only)
+# Development uses defaults from config/dev.exs:
+#   - username: postgres
+#   - password: postgres
+#   - database: lossy_dev
+# DATABASE_URL=postgresql://user:pass@localhost/lossy_prod
 
-# Phoenix Secret Key Base
+# Phoenix Secret Key Base (Production only)
 # Generate with: mix phx.gen.secret
-export SECRET_KEY_BASE="your-secret-key-base-here"
+# SECRET_KEY_BASE=your-secret-key-base-here
 
-# Phoenix Host (for production)
-export PHX_HOST="localhost"
+# Phoenix Host (Production only)
+# PHX_HOST=example.com
 
 # Optional: Set to "true" to enable server mode
-# export PHX_SERVER="true"
+# PHX_SERVER=true
 
 # Optional: Browserbase Integration (for automated posting)
-# export BROWSERBASE_API_KEY="..."
-# export BROWSERBASE_PROJECT_ID="..."
+# BROWSERBASE_API_KEY=...
+# BROWSERBASE_PROJECT_ID=...
 ```
 
-**Load environment variables:**
-```bash
-source .env && mix phx.server
-```
-
-## 📄 License
-
-[Your License Here]
+**Note:** No `export` needed - Phoenix loads variables directly from `.env` via `DotenvParser` in `runtime.exs`.

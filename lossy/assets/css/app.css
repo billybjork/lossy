@@ -1,3 +1,13 @@
+/* Phoenix Backend Assets (lossy/assets/)
+ *
+ * Purpose: Styles for Phoenix LiveView templates served by the backend
+ * - Used by web UI (options pages, admin panels, etc.)
+ * - NOT for extension UI (see extension/src/)
+ *
+ * Extension components (sidepanel, popup) will connect to LiveView via WebSocket,
+ * but may have their own inline styles or be styled by LiveView templates.
+ */
+
 /* See the Tailwind configuration guide for advanced usage
    https://tailwindcss.com/docs/configuration */
 

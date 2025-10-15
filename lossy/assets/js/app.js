@@ -1,3 +1,13 @@
+// Phoenix Backend Assets (lossy/assets/)
+//
+// Purpose: Server-side JavaScript for Phoenix LiveView templates
+// - Establishes LiveView socket connection for web UI (not extension)
+// - Defines hooks for LiveView client-side interop
+// - Handles Phoenix Channels for real-time features
+//
+// Note: Extension code is separate (see extension/src/)
+// Extension components connect TO this LiveView backend via WebSocket
+
 // If you want to use Phoenix channels, run `mix help phx.gen.channel`
 // to get started and then uncomment the line below.
 // import "./user_socket.js"

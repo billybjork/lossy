@@ -1,5 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+<!--
+  Extension Side Panel (extension/src/sidepanel/)
+
+  Current (Sprint 01-02): Vanilla JS with inline styles
+  Future: Will connect to Phoenix LiveView via WebSocket for real-time updates
+
+  Architecture:
+  - This HTML loads locally in extension
+  - sidepanel.js bundles phoenix.js (via webpack)
+  - Connects to backend via WebSocket (wss://...)
+  - LiveView manages state, this renders updates
+
+  See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
+-->
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">

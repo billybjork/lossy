@@ -1,5 +1,15 @@
-// Side Panel JavaScript
-// Sprint 01: Audio streaming UI
+// Extension Side Panel JavaScript (extension/src/sidepanel/)
+//
+// Purpose: Client-side UI for extension side panel
+// - Currently: Vanilla JS communicating with service worker
+// - Future: Will bundle phoenix.js and connect to LiveView backend via WebSocket
+//
+// Architecture:
+// - Runs in extension context (chrome-extension:// origin)
+// - Communicates with service worker (chrome.runtime.sendMessage)
+// - Will connect to Phoenix backend at wss://... for LiveView streaming
+//
+// See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
 
 console.log('Side panel loaded');
 
