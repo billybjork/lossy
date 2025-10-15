@@ -74,7 +74,8 @@ defmodule Lossy.MixProject do
       {:httpoison, "~> 2.0"},
 
       # Dev/test tools
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
+      {:dotenv_parser, "~> 2.0", only: [:dev, :test]}
     ]
   end
 

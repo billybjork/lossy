@@ -5,7 +5,6 @@ defmodule Lossy.Inference.Cloud do
 
   require Logger
 
-  @openai_api_key Application.compile_env(:lossy, :openai_api_key)
   @whisper_url "https://api.openai.com/v1/audio/transcriptions"
   @chat_url "https://api.openai.com/v1/chat/completions"
 
@@ -75,10 +74,7 @@ defmodule Lossy.Inference.Cloud do
   # Private Helpers
 
   defp get_api_key do
-    # Runtime config (for dev/test with .env)
     Application.get_env(:lossy, :openai_api_key) ||
-      # Compile-time config (fallback)
-      @openai_api_key ||
       raise "OPENAI_API_KEY not configured"
   end
 

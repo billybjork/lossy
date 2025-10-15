@@ -82,13 +82,36 @@ async function startRecording() {
   const sessionId = crypto.randomUUID();
   audioChannel = socket.channel(`audio:${sessionId}`, {});
 
-  audioChannel.on('transcript', (payload) => {
-    console.log('Received transcript:', payload);
+  // Listen for structured note events (we only send the final structured note, not raw transcript)
+  audioChannel.on('note_created', (payload) => {
+    console.log('Received structured note:', payload);
+
     // Forward to sidepanel
     chrome.runtime.sendMessage({
       action: 'transcript',
-      data: payload
+      data: {
+        text: payload.text,
+        category: payload.category,
+        confidence: payload.confidence,
+        raw_transcript: payload.raw_transcript,
+        timestamp: payload.timestamp
+      }
     }).catch(err => console.log('No sidepanel listening:', err));
+
+    // Now we can safely cleanup the channel
+    if (!isRecording && audioChannel) {
+      console.log('Note received, cleaning up channel');
+      setTimeout(() => {
+        if (audioChannel) {
+          audioChannel.leave();
+          audioChannel = null;
+        }
+        if (socket) {
+          socket.disconnect();
+          socket = null;
+        }
+      }, 500); // Small delay to ensure message is sent
+    }
   });
 
   await new Promise((resolve, reject) => {
@@ -135,27 +158,41 @@ async function stopRecording() {
     }).catch(err => console.error('Failed to stop offscreen recording:', err));
   }
 
-  // 2. Tell backend to finalize transcription
+  // 2. Tell backend to finalize transcription and wait for confirmation
   if (audioChannel) {
-    audioChannel.push('stop_recording', {})
-      .receive('ok', () => console.log('Backend notified to finalize'))
-      .receive('error', (err) => console.error('Failed to notify backend:', err));
+    await new Promise((resolve) => {
+      audioChannel.push('stop_recording', {})
+        .receive('ok', () => {
+          console.log('Backend notified to finalize');
+          resolve();
+        })
+        .receive('error', (err) => {
+          console.error('Failed to notify backend:', err);
+          resolve(); // Resolve anyway to continue cleanup
+        })
+        .receive('timeout', () => {
+          console.error('Backend notification timed out');
+          resolve();
+        });
+    });
   }
 
-  // 3. Leave channel (after stop_recording sent)
+  // 3. DON'T leave the channel yet - wait for note_created event
+  // The channel will be cleaned up when the note arrives or after a timeout
+  // We'll set a timeout to cleanup after 30 seconds if no note arrives
   setTimeout(() => {
     if (audioChannel) {
+      console.log('Cleaning up channel after timeout');
       audioChannel.leave();
       audioChannel = null;
     }
-
     if (socket) {
       socket.disconnect();
       socket = null;
     }
+  }, 30000); // 30 second timeout
 
-    isRecording = false;
-  }, 500);
+  isRecording = false;
 }
 
 async function createOffscreenDocument() {
