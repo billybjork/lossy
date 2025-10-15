@@ -72,12 +72,79 @@
       color: #065f46;
     }
 
+    .video-timestamp {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      background: #f3f4f6;
+      color: #374151;
+      font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+      font-weight: 600;
+    }
+
+    .video-timestamp.active {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
     .transcripts {
       display: flex;
       flex-direction: column;
       gap: 12px;
     }
 
+    .note-item {
+      padding: 12px;
+      margin-bottom: 8px;
+      background: #f3f4f6;
+      border-radius: 8px;
+      transition: background 0.2s, transform 0.2s;
+    }
+
+    .note-item[data-timestamp]:hover {
+      background: #e5e7eb;
+      transform: translateX(4px);
+    }
+
+    .note-item.highlighted {
+      background: #fef3c7;
+      border-left: 4px solid #f59e0b;
+    }
+
+    .note-category {
+      display: inline-block;
+      padding: 2px 8px;
+      background: #dc2626;
+      color: white;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+
+    .note-timestamp {
+      font-size: 12px;
+      color: #6b7280;
+      font-weight: 600;
+      margin-bottom: 4px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .note-text {
+      font-size: 14px;
+      color: #1f2937;
+      line-height: 1.5;
+    }
+
+    .note-confidence {
+      font-size: 11px;
+      color: #9ca3af;
+      margin-top: 4px;
+      font-style: italic;
+    }
+
+    /* Legacy transcript styles (backwards compatibility) */
     .transcript {
       padding: 12px;
       background: #f9fafb;
@@ -101,6 +168,7 @@
   <div class="header">
     <h1 style="margin: 0;">Voice Notes</h1>
     <div class="status" id="status">Disconnected</div>
+    <div class="video-timestamp" id="videoTimestamp">Video: --:--</div>
     <button id="recordBtn" class="record">🎤 Start Recording</button>
   </div>
 

@@ -1,145 +1,408 @@
-# Sprint 03: Video Integration & On-Page Overlays
+# Sprint 03: Video Integration & Timeline Markers
 
 **Status:** ⏳ Planned
-**Estimated Duration:** 2-3 days
+**Estimated Duration:** 3-4 days
 
 ---
 
 ## Goal
 
-Connect notes to specific videos and timestamps. Content script detects video players across platforms (YouTube, Vimeo, Air), extracts video metadata, captures precise timestamps, and displays on-page visual feedback (anchor chips, ghost comments).
+Establish a robust, bidirectional connection between the Chrome extension and video players on **any website**. Every note is anchored to a precise video timecode, enabling seamless navigation: click a note to seek the video, click a timeline marker to focus the note. Recording control automatically pauses/unpauses the video for optimal UX.
+
+**Architecture Philosophy:** Generic, heuristic-based detection that works on any video platform, with optional platform-specific optimizations.
 
 ---
 
 ## Prerequisites
 
 - ✅ Sprint 02 complete (transcription & note structuring working)
-- ⏳ Test videos on YouTube, Vimeo, and Air
-- ⏳ AgentSession GenServer running
+- ✅ AgentSession GenServer running
+- ✅ Phoenix WebSocket connection established
+- ⏳ Test videos available on multiple platforms (YouTube, Vimeo, etc.)
+
+---
+
+## Core Features
+
+### 1. Universal Video Detection (Works on Any Site)
+- Automatically detects `<video>` elements on any webpage
+- Scores and selects "primary" video (largest, playing, visible)
+- Handles SPA navigation and lazy-loaded videos
+- Generates stable video IDs (platform-specific when available, URL hash fallback)
+- Works on YouTube, Vimeo, Air, TikTok, Twitter, custom players, etc.
+
+### 2. Precise Timestamp Anchoring
+- Captures exact timestamp when recording starts
+- Uses `requestVideoFrameCallback()` for frame-accurate timestamps (Chrome 83+)
+- Stores timestamp with each note in database
+- Backend links note to video via foreign key
+
+### 3. Bidirectional Navigation
+- **Note → Video**: Click note in side panel → content script seeks video to timestamp
+- **Timeline Marker → Note**: Click marker overlay on video → side panel scrolls to and highlights note
+- Playback resumes automatically after seeking
+
+### 4. Recording-Video Synchronization
+- Start recording → video pauses, anchor chip appears showing timestamp
+- Stop recording → video resumes playback
+- Prevents accidental video progression during note capture
+
+### 5. Visual Timeline Markers (with Graceful Fallback)
+- Heuristic-based progress bar detection (class patterns, ARIA roles, visual heuristics)
+- Shadow DOM overlay on detected progress bar
+- Markers positioned at exact note timestamps
+- Hover shows note preview (category + text snippet)
+- Click focuses corresponding note in side panel
+- **Graceful degradation**: Core features work even if progress bar not found
 
 ---
 
 ## Deliverables
 
-- [ ] Content script detects video player on supported platforms
-- [ ] Extract video ID, platform, URL, current timestamp
-- [ ] Videos table created with platform-specific IDs
-- [ ] Notes linked to video records via foreign key
-- [ ] Timestamp captured when recording starts
-- [ ] On-page anchor chip shows recording timestamp
-- [ ] Ghost comment preview cards (optional for sprint)
-- [ ] Shadow DOM isolates overlay styles from page
+- [ ] Universal video detector (finds `<video>` on any site)
+- [ ] Video scoring system (selects primary video from multiple candidates)
+- [ ] Universal video ID extractor (platform-specific + URL hash fallback)
+- [ ] Generic progress bar finder (heuristic-based)
+- [ ] Video playback controller (pause/play/seek API)
+- [ ] Timestamp capture with frame-accurate precision
+- [ ] Backend VideoChannel for video CRUD operations
+- [ ] Videos table integration (find_or_create_by platform + video_id)
+- [ ] Notes linked to videos via foreign key
+- [ ] Anchor chip overlay (red pulsing indicator at timestamp)
+- [ ] Timeline marker system (Shadow DOM overlays)
+- [ ] Bidirectional message passing (content script ↔ service worker ↔ side panel)
+- [ ] Fullscreen compatibility for overlays
+- [ ] Single universal content script (runs on all sites)
 
 ---
 
-## Technical Tasks
+## Technical Architecture
 
-### Task 1: Content Script Setup
+### Message Flow
 
-#### 1.1 Manifest Configuration
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         USER ACTIONS                             │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+                    ▼                   ▼
+            [Start Recording]    [Click Note in Side Panel]
+                    │                   │
+                    ▼                   ▼
+            ┌──────────────┐    ┌──────────────┐
+            │  Side Panel  │───▶│Service Worker│
+            │  (UI Layer)  │◀───│ (Orchestrator)│
+            └──────────────┘    └──────────────┘
+                    │                   │
+                    │                   ▼
+                    │           ┌───────────────┐
+                    │           │Content Script │
+                    │           │ (Video Page)  │
+                    │           └───────────────┘
+                    │                   │
+                    │                   ▼
+                    │           ┌───────────────┐
+                    │           │ Video Element │
+                    │           │ .pause()      │
+                    │           │ .currentTime  │
+                    │           └───────────────┘
+                    │
+                    ▼
+            ┌──────────────┐
+            │   Phoenix    │
+            │ AudioChannel │
+            └──────────────┘
+                    │
+                    ▼
+            ┌──────────────┐
+            │ AgentSession │
+            │  (GenServer) │
+            └──────────────┘
+                    │
+                    ▼
+            ┌──────────────┐
+            │   Database   │
+            │ notes.video_id│
+            │ .timestamp_s │
+            └──────────────┘
+```
 
-**File:** `extension/manifest.json` (update)
+### Component Responsibilities
 
-```json
-{
-  "manifest_version": 3,
-  "name": "Voice Video Companion",
-  "version": "0.1.0",
+**Universal Content Script** (`universal.js` - runs on all sites)
+- Detect video elements using generic heuristics
+- Score and select primary video from multiple candidates
+- Extract video metadata (platform, ID, URL, title)
+- Control video playback (pause, play, seek)
+- Find progress bar using heuristics (class patterns, ARIA, visual)
+- Inject timeline marker overlay (Shadow DOM)
+- Inject anchor chip overlay (Shadow DOM)
+- Listen for messages from service worker
+- Handle SPA navigation (re-detect on URL changes)
 
-  "permissions": ["sidePanel", "storage", "tabs", "offscreen"],
+**Service Worker** (`service-worker.js`)
+- Maintain global state: `currentVideo`, `currentTimestamp`, `tabVideoMap`
+- Route messages between side panel ↔ content script
+- Manage Phoenix Socket connection
+- Forward video metadata to backend VideoChannel
+- Handle recording lifecycle events
 
-  "content_scripts": [
-    {
-      "matches": [
-        "*://*.youtube.com/*",
-        "*://*.youtu.be/*"
-      ],
-      "js": ["content/youtube.js"],
-      "css": ["content/overlays.css"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["*://*.vimeo.com/*"],
-      "js": ["content/vimeo.js"],
-      "css": ["content/overlays.css"],
-      "run_at": "document_idle"
-    },
-    {
-      "matches": ["*://*.air.inc/*"],
-      "js": ["content/air.js"],
-      "css": ["content/overlays.css"],
-      "run_at": "document_idle"
+**Side Panel** (`sidepanel.js`)
+- Display notes grouped by video
+- Click handler: Send seek request to service worker
+- Real-time note updates via `chrome.runtime.onMessage`
+- Scroll-to-note animation when timeline marker clicked
+
+**Backend VideoChannel** (`video_channel.ex`)
+- `video_detected` event → `Videos.find_or_create_video/1`
+- Return video database ID to extension
+- Handle video metadata updates
+
+**Backend AgentSession** (`session.ex`)
+- Accept `video_id` and `timestamp` in init opts
+- Store video context in state
+- Include video_id + timestamp_seconds when creating note
+
+---
+
+## Implementation Tasks
+
+### Task 1: Universal Video Detection
+
+**File:** `extension/src/content/universal-video-detector.js` (new)
+
+```javascript
+/**
+ * Universal video detector - works on any website with <video> elements.
+ * Uses heuristics to find and select the "primary" video on the page.
+ */
+export class UniversalVideoDetector {
+  constructor() {
+    this.videoElements = [];
+    this.primaryVideo = null;
+    this.observer = null;
+  }
+
+  /**
+   * Detect all video elements on page and select the primary one.
+   */
+  async detect() {
+    console.log('[UniversalVideoDetector] Starting detection...');
+
+    this.videoElements = Array.from(document.querySelectorAll('video'));
+
+    if (this.videoElements.length === 0) {
+      console.log('[UniversalVideoDetector] No video elements found, waiting...');
+      return this.waitForVideo();
     }
-  ],
 
-  "web_accessible_resources": [
-    {
-      "resources": ["content/anchor-chip.html", "content/ghost-card.html"],
-      "matches": ["<all_urls>"]
+    this.primaryVideo = this.selectPrimaryVideo(this.videoElements);
+    console.log('[UniversalVideoDetector] Primary video selected:', this.primaryVideo);
+
+    return this.primaryVideo;
+  }
+
+  /**
+   * Wait for video element to appear (handles lazy loading, SPAs).
+   */
+  async waitForVideo(timeout = 10000) {
+    return new Promise((resolve) => {
+      const observer = new MutationObserver(() => {
+        const videos = document.querySelectorAll('video');
+        if (videos.length > 0) {
+          observer.disconnect();
+          this.videoElements = Array.from(videos);
+          this.primaryVideo = this.selectPrimaryVideo(this.videoElements);
+          resolve(this.primaryVideo);
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      setTimeout(() => {
+        observer.disconnect();
+        resolve(null);
+      }, timeout);
+    });
+  }
+
+  /**
+   * Select the "primary" video from multiple candidates using heuristics.
+   */
+  selectPrimaryVideo(videos) {
+    if (videos.length === 0) return null;
+    if (videos.length === 1) return videos[0];
+
+    console.log('[UniversalVideoDetector] Multiple videos found:', videos.length);
+
+    const scored = videos.map(video => ({
+      video,
+      score: this.scoreVideo(video)
+    }));
+
+    scored.sort((a, b) => b.score - a.score);
+    console.log('[UniversalVideoDetector] Video scores:', scored.map(s => s.score));
+
+    return scored[0].video;
+  }
+
+  /**
+   * Score a video element based on heuristics.
+   * Higher score = more likely to be the "main" video.
+   */
+  scoreVideo(video) {
+    let score = 0;
+
+    // Currently playing (+50 points)
+    if (!video.paused && !video.ended) {
+      score += 50;
     }
-  ],
 
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:4000 wss://localhost:4000"
+    // Has meaningful duration (+30 points if > 10 seconds)
+    if (video.duration && video.duration > 10) {
+      score += 30;
+    }
+
+    // Size (larger = higher score)
+    const rect = video.getBoundingClientRect();
+    const area = rect.width * rect.height;
+    score += Math.min(area / 10000, 50); // Cap at 50 points
+
+    // Visibility (+20 if visible, -100 if hidden)
+    if (rect.width > 100 && rect.height > 100) {
+      score += 20;
+    }
+    if (rect.width === 0 || rect.height === 0) {
+      score -= 100;
+    }
+    if (video.style.display === 'none' || video.style.visibility === 'hidden') {
+      score -= 100;
+    }
+
+    // Has controls (+10)
+    if (video.controls) {
+      score += 10;
+    }
+
+    // Autoplay videos are often ads (-20 penalty)
+    if (video.autoplay && video.muted) {
+      score -= 20;
+    }
+
+    return score;
+  }
+
+  /**
+   * Watch for video element changes (SPA navigation, etc).
+   */
+  watchForChanges(callback) {
+    this.observer = new MutationObserver(() => {
+      const currentVideos = Array.from(document.querySelectorAll('video'));
+
+      if (!currentVideos.includes(this.primaryVideo)) {
+        console.log('[UniversalVideoDetector] Primary video changed, re-detecting...');
+        this.videoElements = currentVideos;
+        this.primaryVideo = this.selectPrimaryVideo(currentVideos);
+        callback(this.primaryVideo);
+      }
+    });
+
+    this.observer.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
+  destroy() {
+    if (this.observer) {
+      this.observer.disconnect();
+    }
   }
 }
 ```
 
-#### 1.2 Platform Detection Module
-
-**File:** `extension/src/content/shared/platform-detector.js` (new)
+**File:** `extension/src/content/universal-video-id.js` (new)
 
 ```javascript
 /**
- * Platform-agnostic video detection utilities.
- * Each platform has specific selectors and URL patterns.
+ * Universal video ID extractor.
+ * Generates stable, unique IDs for videos on any platform.
  */
+export class UniversalVideoId {
+  /**
+   * Extract or generate a video ID.
+   * Tries platform-specific extraction first, falls back to URL hash.
+   */
+  static extract(url, platformHint = null) {
+    console.log('[UniversalVideoId] Extracting ID for:', url);
 
-export class PlatformDetector {
-  static detectPlatform(url) {
-    const hostname = new URL(url).hostname;
-
-    if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
-      return 'youtube';
-    } else if (hostname.includes('vimeo.com')) {
-      return 'vimeo';
-    } else if (hostname.includes('air.inc')) {
-      return 'air';
+    // Try platform-specific extraction
+    if (platformHint && platformHint !== 'generic') {
+      const platformId = this.extractPlatformSpecific(url, platformHint);
+      if (platformId) {
+        return { type: 'platform', id: platformId, platform: platformHint };
+      }
     }
 
-    return null;
+    // Fallback: Hash the canonical URL
+    const urlId = this.hashUrl(url);
+    return { type: 'url', id: urlId, platform: 'generic' };
   }
 
-  static extractVideoId(url, platform) {
-    switch (platform) {
-      case 'youtube':
-        return this.extractYouTubeId(url);
-      case 'vimeo':
-        return this.extractVimeoId(url);
-      case 'air':
-        return this.extractAirId(url);
-      default:
-        return null;
+  /**
+   * Detect platform from URL hostname.
+   */
+  static detectPlatform(url) {
+    try {
+      const hostname = new URL(url).hostname;
+
+      if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) {
+        return 'youtube';
+      }
+      if (hostname.includes('vimeo.com')) {
+        return 'vimeo';
+      }
+      if (hostname.includes('air.inc')) {
+        return 'air';
+      }
+
+      return 'generic';
+    } catch (e) {
+      return 'generic';
     }
+  }
+
+  /**
+   * Platform-specific extraction (optional optimization).
+   */
+  static extractPlatformSpecific(url, platform) {
+    const extractors = {
+      youtube: this.extractYouTubeId.bind(this),
+      vimeo: this.extractVimeoId.bind(this),
+      air: this.extractAirId.bind(this)
+    };
+
+    const extractor = extractors[platform];
+    return extractor ? extractor(url) : null;
   }
 
   static extractYouTubeId(url) {
     const urlObj = new URL(url);
-
-    // Standard watch URL: youtube.com/watch?v=VIDEO_ID
     const vParam = urlObj.searchParams.get('v');
     if (vParam) return vParam;
 
-    // Short URL: youtu.be/VIDEO_ID
     if (urlObj.hostname === 'youtu.be') {
       return urlObj.pathname.slice(1).split('?')[0];
     }
 
-    // Shorts: youtube.com/shorts/VIDEO_ID
     const shortsMatch = urlObj.pathname.match(/^\/shorts\/([^/?]+)/);
     if (shortsMatch) return shortsMatch[1];
 
-    // Embed: youtube.com/embed/VIDEO_ID
     const embedMatch = urlObj.pathname.match(/^\/embed\/([^/?]+)/);
     if (embedMatch) return embedMatch[1];
 
@@ -148,172 +411,166 @@ export class PlatformDetector {
 
   static extractVimeoId(url) {
     const urlObj = new URL(url);
-
-    // Standard URL: vimeo.com/123456789
     const match = urlObj.pathname.match(/^\/(\d+)/);
-    if (match) return match[1];
-
-    // Unlisted: vimeo.com/123456789/HASH
-    const unlistedMatch = urlObj.pathname.match(/^\/(\d+)\/[a-f0-9]+/);
-    if (unlistedMatch) return unlistedMatch[1];
-
-    return null;
+    return match ? match[1] : null;
   }
 
   static extractAirId(url) {
     const urlObj = new URL(url);
-
-    // Air URL: air.inc/workspace/VIDEO_ID
     const match = urlObj.pathname.match(/\/([^/]+)$/);
-    if (match) return match[1];
+    return match ? match[1] : null;
+  }
 
-    return null;
+  /**
+   * Hash a URL to create a stable ID (removes query params).
+   */
+  static hashUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      const canonical = `${urlObj.hostname}${urlObj.pathname}`;
+      return this.simpleHash(canonical);
+    } catch (e) {
+      return this.simpleHash(url);
+    }
+  }
+
+  /**
+   * Simple string hash (DJB2 algorithm).
+   */
+  static simpleHash(str) {
+    let hash = 5381;
+    for (let i = 0; i < str.length; i++) {
+      hash = ((hash << 5) + hash) + str.charCodeAt(i);
+    }
+    return (hash >>> 0).toString(36);
   }
 }
 ```
 
-#### 1.3 Video Element Finder
-
-**File:** `extension/src/content/shared/video-finder.js` (new)
+**File:** `extension/src/content/universal-progress-bar.js` (new)
 
 ```javascript
 /**
- * Platform-specific video element detection.
- * Waits for video element to load, handles SPAs.
+ * Universal progress bar detector - finds video controls using heuristics.
+ * No platform-specific selectors.
  */
-
-export class VideoFinder {
-  constructor(platform) {
-    this.platform = platform;
-    this.videoElement = null;
-    this.observer = null;
+export class UniversalProgressBar {
+  constructor(videoElement) {
+    this.videoElement = videoElement;
   }
 
-  async findVideo() {
-    switch (this.platform) {
-      case 'youtube':
-        return this.findYouTubeVideo();
-      case 'vimeo':
-        return this.findVimeoVideo();
-      case 'air':
-        return this.findAirVideo();
-      default:
-        return null;
+  /**
+   * Find the progress bar container for this video.
+   * Uses multiple strategies in order of reliability.
+   */
+  find() {
+    console.log('[UniversalProgressBar] Searching for progress bar...');
+
+    // Strategy 1: Common class/ID patterns
+    const patterns = [
+      '.progress-bar',
+      '.progressbar',
+      '.seek-bar',
+      '.seekbar',
+      '.scrubber',
+      '.timeline',
+      '.video-progress',
+      '[class*="progress"]',
+      '[class*="seek"]',
+      '[class*="timeline"]'
+    ];
+
+    for (const pattern of patterns) {
+      const elements = this.findNearVideo(pattern);
+      if (elements.length > 0) {
+        console.log('[UniversalProgressBar] Found via pattern:', pattern);
+        return elements[0];
+      }
     }
+
+    // Strategy 2: ARIA roles
+    const ariaElements = this.findNearVideo('[role="slider"], [role="progressbar"]');
+    if (ariaElements.length > 0) {
+      console.log('[UniversalProgressBar] Found via ARIA role');
+      return ariaElements[0];
+    }
+
+    // Strategy 3: Input range sliders
+    const rangeInputs = this.findNearVideo('input[type="range"]');
+    if (rangeInputs.length > 0) {
+      console.log('[UniversalProgressBar] Found via range input');
+      return rangeInputs[0].parentElement;
+    }
+
+    // Strategy 4: Visual heuristics (horizontal bars near bottom of video)
+    const candidate = this.findByVisualHeuristics();
+    if (candidate) {
+      console.log('[UniversalProgressBar] Found via visual heuristics');
+      return candidate;
+    }
+
+    console.warn('[UniversalProgressBar] Could not find progress bar');
+    return null;
   }
 
-  async findYouTubeVideo() {
-    // YouTube uses #movie_player container
-    const selector = '#movie_player video';
+  /**
+   * Find elements near the video (same container or siblings).
+   */
+  findNearVideo(selector) {
+    const container = this.videoElement.parentElement;
+    if (!container) return [];
 
-    // Try immediate query
-    let video = document.querySelector(selector);
-    if (video) {
-      this.videoElement = video;
-      return video;
-    }
+    const inContainer = Array.from(container.querySelectorAll(selector));
+    const siblings = Array.from(container.children).filter(el =>
+      el !== this.videoElement && el.matches(selector)
+    );
 
-    // Wait for SPA navigation
-    return new Promise((resolve) => {
-      const observer = new MutationObserver(() => {
-        video = document.querySelector(selector);
-        if (video) {
-          observer.disconnect();
-          this.videoElement = video;
-          resolve(video);
-        }
-      });
+    return [...inContainer, ...siblings].filter(Boolean);
+  }
 
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
+  /**
+   * Find elements that look like horizontal progress bars.
+   */
+  findByVisualHeuristics() {
+    const container = this.videoElement.parentElement;
+    if (!container) return null;
 
-      // Timeout after 10 seconds
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(null);
-      }, 10000);
+    const allElements = Array.from(container.querySelectorAll('*'));
+
+    const candidates = allElements.filter(el => {
+      const rect = el.getBoundingClientRect();
+      const style = window.getComputedStyle(el);
+
+      // Wide and short (aspect ratio > 5:1)
+      const isHorizontal = rect.width > rect.height * 5;
+      // Near bottom of video
+      const isNearBottom = rect.bottom > this.videoElement.getBoundingClientRect().bottom - 100;
+      // Has background color
+      const hasBackground = style.backgroundColor !== 'rgba(0, 0, 0, 0)';
+
+      return isHorizontal && isNearBottom && hasBackground && rect.width > 100;
     });
+
+    return candidates[0] || null;
+  }
+}
+```
+
+**File:** `extension/src/content/video-controller.js` (new)
+
+```javascript
+/**
+ * Generic video controller - works with any HTML5 video element.
+ */
+export class VideoController {
+  constructor(videoElement) {
+    this.videoElement = videoElement;
   }
 
-  async findVimeoVideo() {
-    // Vimeo uses iframe embed or native player
-    const iframeSelector = 'iframe[src*="player.vimeo.com"]';
-    const videoSelector = 'video';
-
-    let iframe = document.querySelector(iframeSelector);
-    if (iframe) {
-      // For iframe embeds, we can't access the video element directly
-      // Instead, we'll use Vimeo Player API
-      return { type: 'iframe', element: iframe };
-    }
-
-    let video = document.querySelector(videoSelector);
-    if (video) {
-      this.videoElement = video;
-      return video;
-    }
-
-    // Wait for load
-    return new Promise((resolve) => {
-      const observer = new MutationObserver(() => {
-        video = document.querySelector(videoSelector);
-        if (video) {
-          observer.disconnect();
-          this.videoElement = video;
-          resolve(video);
-        }
-      });
-
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(null);
-      }, 10000);
-    });
-  }
-
-  async findAirVideo() {
-    // Air uses custom video player
-    const selector = 'video';
-
-    let video = document.querySelector(selector);
-    if (video) {
-      this.videoElement = video;
-      return video;
-    }
-
-    return new Promise((resolve) => {
-      const observer = new MutationObserver(() => {
-        video = document.querySelector(selector);
-        if (video) {
-          observer.disconnect();
-          this.videoElement = video;
-          resolve(video);
-        }
-      });
-
-      observer.observe(document.body, {
-        childList: true,
-        subtree: true
-      });
-
-      setTimeout(() => {
-        observer.disconnect();
-        resolve(null);
-      }, 10000);
-    });
-  }
-
-  getCurrentTime() {
+  async getCurrentTime() {
     if (!this.videoElement) return null;
 
-    // Use requestVideoFrameCallback for precise timestamp (Chrome 83+)
+    // Use requestVideoFrameCallback for precision (Chrome 83+)
     if ('requestVideoFrameCallback' in HTMLVideoElement.prototype) {
       return new Promise((resolve) => {
         this.videoElement.requestVideoFrameCallback((now, metadata) => {
@@ -322,17 +579,16 @@ export class VideoFinder {
       });
     }
 
-    // Fallback to currentTime property
     return Promise.resolve(this.videoElement.currentTime);
   }
 
-  pauseVideo() {
+  pause() {
     if (this.videoElement && !this.videoElement.paused) {
       this.videoElement.pause();
     }
   }
 
-  playVideo() {
+  play() {
     if (this.videoElement && this.videoElement.paused) {
       this.videoElement.play();
     }
@@ -343,128 +599,217 @@ export class VideoFinder {
       this.videoElement.currentTime = timestamp;
     }
   }
+
+  getDuration() {
+    return this.videoElement?.duration || 0;
+  }
+
+  destroy() {
+    // Cleanup if needed
+  }
 }
 ```
 
-#### 1.4 YouTube Content Script
+---
 
-**File:** `extension/src/content/youtube.js` (new)
+### Task 2: Universal Content Script (Runs on All Sites)
+
+**File:** `extension/src/content/universal.js` (new - replaces all platform-specific scripts)
 
 ```javascript
-import { PlatformDetector } from './shared/platform-detector.js';
-import { VideoFinder } from './shared/video-finder.js';
+import { UniversalVideoDetector } from './universal-video-detector.js';
+import { UniversalProgressBar } from './universal-progress-bar.js';
+import { UniversalVideoId } from './universal-video-id.js';
+import { VideoController } from './video-controller.js';
 import { AnchorChip } from './shared/anchor-chip.js';
+import { TimelineMarkers } from './shared/timeline-markers.js';
 
-console.log('YouTube content script loaded');
+console.log('[Lossy] Universal content script loaded');
 
-let videoFinder = null;
+let videoDetector = null;
+let videoController = null;
 let currentVideoId = null;
+let currentVideoDbId = null;
 let anchorChip = null;
+let timelineMarkers = null;
 
 async function init() {
-  const platform = PlatformDetector.detectPlatform(window.location.href);
-  if (platform !== 'youtube') return;
+  console.log('[Lossy] Initializing universal video detection...');
 
-  const videoId = PlatformDetector.extractVideoId(window.location.href, platform);
-  if (!videoId) {
-    console.warn('Could not extract YouTube video ID');
-    return;
-  }
-
-  currentVideoId = videoId;
-  console.log('YouTube video detected:', videoId);
-
-  // Find video element
-  videoFinder = new VideoFinder('youtube');
-  const videoElement = await videoFinder.findVideo();
+  // Detect video
+  videoDetector = new UniversalVideoDetector();
+  const videoElement = await videoDetector.detect();
 
   if (!videoElement) {
-    console.warn('Could not find YouTube video element');
+    console.warn('[Lossy] No video element found on this page');
     return;
   }
 
-  console.log('YouTube video element found');
+  console.log('[Lossy] Video element found:', videoElement);
+
+  // Extract video metadata
+  const url = window.location.href;
+  const platform = UniversalVideoId.detectPlatform(url);
+  const videoIdData = UniversalVideoId.extract(url, platform);
+
+  currentVideoId = videoIdData.id;
+
+  console.log('[Lossy] Video ID:', videoIdData);
+
+  // Create video controller
+  videoController = new VideoController(videoElement);
 
   // Send video context to service worker
-  chrome.runtime.sendMessage({
+  const response = await chrome.runtime.sendMessage({
     action: 'video_detected',
     data: {
-      platform: 'youtube',
-      videoId: videoId,
-      url: window.location.href,
+      platform: videoIdData.platform,
+      videoId: videoIdData.id,
+      url: url,
       title: document.title
     }
+  }).catch(err => {
+    console.warn('[Lossy] Could not send video_detected message:', err);
+    return null;
   });
 
-  // Set up anchor chip overlay
-  setupAnchorChip(videoElement);
+  if (response?.videoDbId) {
+    currentVideoDbId = response.videoDbId;
+    console.log('[Lossy] Video database ID:', currentVideoDbId);
+  }
 
-  // Listen for recording events
-  listenForRecordingEvents();
+  // Set up overlays
+  setupAnchorChip(videoElement);
+  setupTimelineMarkers(videoElement);
+
+  // Listen for events
+  listenForEvents();
+
+  // Watch for video changes (SPA navigation)
+  videoDetector.watchForChanges((newVideo) => {
+    console.log('[Lossy] Video changed, reinitializing...');
+    cleanup();
+    init();
+  });
 }
 
 function setupAnchorChip(videoElement) {
-  // Create anchor chip (hidden initially)
   anchorChip = new AnchorChip(videoElement);
   anchorChip.hide();
 }
 
-function listenForRecordingEvents() {
-  chrome.runtime.onMessage.addListener(async (message) => {
+function setupTimelineMarkers(videoElement) {
+  // Find progress bar
+  const progressBarFinder = new UniversalProgressBar(videoElement);
+  const progressBar = progressBarFinder.find();
+
+  if (!progressBar) {
+    console.warn('[Lossy] Could not find progress bar, timeline markers disabled');
+    return;
+  }
+
+  timelineMarkers = new TimelineMarkers(videoElement, progressBar);
+
+  timelineMarkers.onMarkerClick((noteId, timestamp) => {
+    console.log('[Lossy] Timeline marker clicked:', noteId, timestamp);
+    chrome.runtime.sendMessage({
+      action: 'marker_clicked',
+      data: { noteId, timestamp }
+    });
+  });
+}
+
+function listenForEvents() {
+  chrome.runtime.onMessage.addListener(async (message, sender, sendResponse) => {
     if (message.action === 'recording_started') {
-      // Get precise timestamp
-      const timestamp = await videoFinder.getCurrentTime();
+      const timestamp = await videoController.getCurrentTime();
+      console.log('[Lossy] Recording started at timestamp:', timestamp);
 
-      console.log('Recording started at timestamp:', timestamp);
+      videoController.pause();
 
-      // Pause video
-      videoFinder.pauseVideo();
-
-      // Show anchor chip
       if (anchorChip) {
         anchorChip.show(timestamp);
       }
 
-      // Send timestamp to service worker
       chrome.runtime.sendMessage({
         action: 'timestamp_captured',
         data: {
           videoId: currentVideoId,
+          videoDbId: currentVideoDbId,
           timestamp: timestamp
         }
       });
+
+      sendResponse({ success: true });
     }
 
     if (message.action === 'recording_stopped') {
-      // Resume video
-      videoFinder.playVideo();
+      console.log('[Lossy] Recording stopped');
 
-      // Hide anchor chip
+      videoController.play();
+
       if (anchorChip) {
         anchorChip.hide();
       }
+
+      sendResponse({ success: true });
+    }
+
+    if (message.action === 'note_created') {
+      console.log('[Lossy] Note created, adding timeline marker:', message.data);
+
+      if (timelineMarkers && message.data.timestamp_seconds != null) {
+        timelineMarkers.addMarker({
+          id: message.data.id,
+          timestamp: message.data.timestamp_seconds,
+          category: message.data.category,
+          text: message.data.text
+        });
+      }
+
+      sendResponse({ success: true });
     }
 
     if (message.action === 'seek_to') {
-      // Seek video to timestamp (from side panel click)
-      videoFinder.seekTo(message.timestamp);
-      videoFinder.playVideo();
+      console.log('[Lossy] Seeking to timestamp:', message.timestamp);
+
+      videoController.seekTo(message.timestamp);
+      videoController.play();
+
+      sendResponse({ success: true });
     }
+
+    if (message.action === 'load_markers') {
+      console.log('[Lossy] Loading markers:', message.notes);
+
+      if (timelineMarkers && message.notes) {
+        message.notes.forEach(note => {
+          if (note.timestamp_seconds != null) {
+            timelineMarkers.addMarker({
+              id: note.id,
+              timestamp: note.timestamp_seconds,
+              category: note.category,
+              text: note.text
+            });
+          }
+        });
+      }
+
+      sendResponse({ success: true });
+    }
+
+    return true;
   });
 }
 
-// Handle YouTube SPA navigation
-let lastUrl = location.href;
-new MutationObserver(() => {
-  const url = location.href;
-  if (url !== lastUrl) {
-    lastUrl = url;
-    console.log('YouTube navigation detected, reinitializing...');
-    init();
-  }
-}).observe(document, { subtree: true, childList: true });
+function cleanup() {
+  if (anchorChip) anchorChip.destroy();
+  if (timelineMarkers) timelineMarkers.destroy();
+  if (videoDetector) videoDetector.destroy();
+  if (videoController) videoController.destroy();
+}
 
-// Initial load
+// Initialize
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', init);
 } else {
@@ -474,16 +819,200 @@ if (document.readyState === 'loading') {
 
 ---
 
-### Task 2: Anchor Chip Overlay (Shadow DOM)
+### Task 3: Timeline Markers Overlay (Shadow DOM)
+
+**File:** `extension/src/content/shared/timeline-markers.js` (new)
+
+```javascript
+/**
+ * Timeline markers overlay system.
+ * Displays markers on video progress bar at note timestamps.
+ * Uses Shadow DOM for style isolation.
+ */
+export class TimelineMarkers {
+  constructor(videoElement, progressBarElement) {
+    this.videoElement = videoElement;
+    this.progressBar = progressBarElement; // Now passed in, not detected
+    this.container = null;
+    this.shadowRoot = null;
+    this.markers = new Map(); // noteId → marker element
+    this.clickCallback = null;
+    this.init();
+  }
+
+  init() {
+    if (!this.progressBar) {
+      console.warn('[TimelineMarkers] No progress bar provided');
+      return;
+    }
+
+    // Create marker container
+    this.container = document.createElement('div');
+    this.container.id = 'lossy-timeline-markers';
+    this.container.style.position = 'absolute';
+    this.container.style.top = '0';
+    this.container.style.left = '0';
+    this.container.style.width = '100%';
+    this.container.style.height = '100%';
+    this.container.style.pointerEvents = 'none';
+    this.container.style.zIndex = '100';
+
+    // Attach shadow DOM
+    this.shadowRoot = this.container.attachShadow({ mode: 'open' });
+    this.shadowRoot.innerHTML = `
+      <style>
+        .marker {
+          position: absolute;
+          top: 0;
+          width: 3px;
+          height: 100%;
+          background: #dc2626;
+          cursor: pointer;
+          pointer-events: auto;
+          transition: transform 0.2s, background 0.2s;
+        }
+
+        .marker:hover {
+          transform: scaleX(2);
+          background: #ef4444;
+        }
+
+        .marker-tooltip {
+          position: absolute;
+          bottom: 120%;
+          left: 50%;
+          transform: translateX(-50%);
+          padding: 8px 12px;
+          background: rgba(0, 0, 0, 0.9);
+          color: white;
+          border-radius: 6px;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+          font-size: 12px;
+          white-space: nowrap;
+          opacity: 0;
+          pointer-events: none;
+          transition: opacity 0.2s;
+          z-index: 1000;
+        }
+
+        .marker:hover .marker-tooltip {
+          opacity: 1;
+        }
+
+        .marker-category {
+          display: inline-block;
+          padding: 2px 6px;
+          background: #dc2626;
+          border-radius: 3px;
+          font-size: 10px;
+          font-weight: 600;
+          text-transform: uppercase;
+          margin-right: 6px;
+        }
+      </style>
+      <div id="markers-container"></div>
+    `;
+
+    // Append to progress bar (make relative if needed)
+    if (window.getComputedStyle(this.progressBar).position === 'static') {
+      this.progressBar.style.position = 'relative';
+    }
+    this.progressBar.appendChild(this.container);
+  }
+
+  addMarker({ id, timestamp, category, text }) {
+    const duration = this.videoElement.duration;
+    if (!duration || timestamp > duration) return;
+
+    // Calculate position (percentage)
+    const position = (timestamp / duration) * 100;
+
+    // Create marker element
+    const marker = document.createElement('div');
+    marker.className = 'marker';
+    marker.style.left = `${position}%`;
+    marker.dataset.noteId = id;
+    marker.dataset.timestamp = timestamp;
+
+    // Add tooltip
+    const tooltip = document.createElement('div');
+    tooltip.className = 'marker-tooltip';
+    tooltip.innerHTML = `
+      <span class="marker-category">${category || 'note'}</span>
+      ${this.truncate(text, 50)}
+    `;
+    marker.appendChild(tooltip);
+
+    // Click handler
+    marker.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (this.clickCallback) {
+        this.clickCallback(id, timestamp);
+      }
+    });
+
+    // Add to shadow DOM
+    const markersContainer = this.shadowRoot.getElementById('markers-container');
+    markersContainer.appendChild(marker);
+
+    // Store reference
+    this.markers.set(id, marker);
+  }
+
+  removeMarker(noteId) {
+    const marker = this.markers.get(noteId);
+    if (marker) {
+      marker.remove();
+      this.markers.delete(noteId);
+    }
+  }
+
+  highlightMarker(noteId) {
+    // Remove previous highlights
+    this.markers.forEach(marker => {
+      marker.style.background = '#dc2626';
+    });
+
+    // Highlight selected marker
+    const marker = this.markers.get(noteId);
+    if (marker) {
+      marker.style.background = '#fbbf24'; // Yellow
+      setTimeout(() => {
+        marker.style.background = '#dc2626';
+      }, 2000);
+    }
+  }
+
+  onMarkerClick(callback) {
+    this.clickCallback = callback;
+  }
+
+  truncate(text, maxLength) {
+    if (!text) return '';
+    return text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
+  }
+
+  destroy() {
+    if (this.container) {
+      this.container.remove();
+    }
+    this.markers.clear();
+  }
+}
+```
+
+---
+
+### Task 4: Anchor Chip Overlay (Recording Indicator)
 
 **File:** `extension/src/content/shared/anchor-chip.js` (new)
 
 ```javascript
 /**
  * Anchor chip overlay - shows timestamp when recording starts.
- * Uses Shadow DOM to isolate styles from page.
+ * Positioned over video with pulsing animation.
+ * Uses Shadow DOM for style isolation.
  */
-
 export class AnchorChip {
   constructor(videoElement) {
     this.videoElement = videoElement;
@@ -495,74 +1024,66 @@ export class AnchorChip {
   init() {
     // Create container
     this.container = document.createElement('div');
-    this.container.id = 'lossy-anchor-chip-container';
-
-    // Position absolutely over video
+    this.container.id = 'lossy-anchor-chip';
     this.container.style.position = 'absolute';
     this.container.style.top = '20px';
     this.container.style.left = '20px';
     this.container.style.zIndex = '9999';
     this.container.style.pointerEvents = 'none';
+    this.container.style.display = 'none';
 
-    // Attach shadow DOM for style isolation
+    // Attach shadow DOM
     this.shadowRoot = this.container.attachShadow({ mode: 'open' });
-
-    // Create anchor chip content
     this.shadowRoot.innerHTML = `
       <style>
         .anchor-chip {
           display: inline-flex;
           align-items: center;
           gap: 8px;
-          padding: 8px 16px;
+          padding: 10px 16px;
           background: rgba(220, 38, 38, 0.95);
           color: white;
           border-radius: 24px;
           font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
           font-size: 14px;
           font-weight: 600;
-          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+          box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
           animation: pulse 2s infinite;
         }
 
         @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.8; }
+          0%, 100% { opacity: 1; transform: scale(1); }
+          50% { opacity: 0.85; transform: scale(1.05); }
         }
 
-        .anchor-chip-icon {
-          width: 16px;
-          height: 16px;
+        .anchor-icon {
+          width: 8px;
+          height: 8px;
           background: white;
           border-radius: 50%;
           animation: ping 2s infinite;
         }
 
         @keyframes ping {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.2); }
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.5); opacity: 0.7; }
         }
 
-        .anchor-chip-time {
+        .anchor-time {
           font-variant-numeric: tabular-nums;
         }
       </style>
 
       <div class="anchor-chip">
-        <div class="anchor-chip-icon"></div>
-        <span class="anchor-chip-time" id="timestamp">0:00</span>
+        <div class="anchor-icon"></div>
+        <span class="anchor-time" id="timestamp">0:00</span>
       </div>
     `;
 
-    // Find video container and append
+    // Append to video container
     const videoContainer = this.videoElement.parentElement;
     if (videoContainer) {
-      // Position relative to video container
-      const rect = this.videoElement.getBoundingClientRect();
-      this.container.style.position = 'fixed';
-      this.container.style.top = `${rect.top + 20}px`;
-      this.container.style.left = `${rect.left + 20}px`;
-
+      videoContainer.style.position = 'relative';
       videoContainer.appendChild(this.container);
     }
 
@@ -591,7 +1112,6 @@ export class AnchorChip {
   }
 
   handleFullscreen() {
-    // Re-append to fullscreen element when entering fullscreen
     document.addEventListener('fullscreenchange', () => {
       const fullscreenEl = document.fullscreenElement;
 
@@ -619,12 +1139,12 @@ export class AnchorChip {
 
 ---
 
-### Task 3: Service Worker Video Context
+### Task 5: Service Worker Updates (Message Routing)
 
 **File:** `extension/src/background/service-worker.js` (update)
 
 ```javascript
-// ... existing code ...
+// ... existing imports and setup ...
 
 let currentVideo = null;
 let currentTimestamp = null;
@@ -632,46 +1152,97 @@ let currentTimestamp = null;
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // ... existing handlers ...
 
-  // NEW: Handle video detected event
+  // Video detected from content script
   if (message.action === 'video_detected') {
     currentVideo = message.data;
-    console.log('Video detected:', currentVideo);
+    console.log('[Lossy] Video detected:', currentVideo);
 
-    // Send to backend to create/find video record
+    // Send to backend VideoChannel
     if (socket && socket.isConnected()) {
       const videoChannel = socket.channel('video:meta', {});
       videoChannel.join()
         .receive('ok', () => {
           videoChannel.push('video_detected', currentVideo)
             .receive('ok', (response) => {
-              console.log('Video record created/found:', response);
-              currentVideo.id = response.video_id;
+              console.log('[Lossy] Video record created:', response);
+              currentVideo.dbId = response.video_id;
+
+              // Return DB ID to content script
+              sendResponse({ videoDbId: response.video_id });
+
+              // Request existing notes for this video
+              videoChannel.push('get_notes', { video_id: response.video_id })
+                .receive('ok', (notesResponse) => {
+                  // Send notes to content script for timeline markers
+                  chrome.tabs.sendMessage(sender.tab.id, {
+                    action: 'load_markers',
+                    notes: notesResponse.notes
+                  });
+                });
+            })
+            .receive('error', (err) => {
+              console.error('[Lossy] Failed to create video record:', err);
+              sendResponse({ error: err });
             });
         });
+    } else {
+      sendResponse({ error: 'Socket not connected' });
     }
+
+    return true; // Keep channel open for async response
+  }
+
+  // Timestamp captured from content script
+  if (message.action === 'timestamp_captured') {
+    currentTimestamp = message.data.timestamp;
+    console.log('[Lossy] Timestamp captured:', currentTimestamp);
+    sendResponse({ success: true });
+    return false;
+  }
+
+  // Marker clicked in timeline → focus note in side panel
+  if (message.action === 'marker_clicked') {
+    console.log('[Lossy] Marker clicked:', message.data);
+
+    // Forward to side panel
+    chrome.runtime.sendMessage({
+      action: 'focus_note',
+      noteId: message.data.noteId,
+      timestamp: message.data.timestamp
+    });
 
     sendResponse({ success: true });
     return false;
   }
 
-  // NEW: Handle timestamp captured event
-  if (message.action === 'timestamp_captured') {
-    currentTimestamp = message.data.timestamp;
-    console.log('Timestamp captured:', currentTimestamp);
+  // Note clicked in side panel → seek video
+  if (message.action === 'note_clicked') {
+    console.log('[Lossy] Note clicked, seeking to:', message.timestamp);
+
+    // Forward to content script in active tab
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      if (tabs[0]?.id) {
+        chrome.tabs.sendMessage(tabs[0].id, {
+          action: 'seek_to',
+          timestamp: message.timestamp
+        });
+      }
+    });
+
     sendResponse({ success: true });
     return false;
   }
 });
 
-// Update startRecording to include video context
+// Update startRecording to notify content script
 async function startRecording() {
-  console.log('Starting recording...');
+  console.log('[Lossy] Starting recording...');
 
-  // Notify content script
+  // Notify content script to pause video
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
     chrome.tabs.sendMessage(tab.id, { action: 'recording_started' })
-      .catch((err) => console.log('No content script listening:', err));
+      .catch((err) => console.log('[Lossy] No content script on this page'));
   }
 
   // ... rest of existing startRecording code ...
@@ -679,21 +1250,40 @@ async function startRecording() {
   // Pass video context to AgentSession
   const sessionId = crypto.randomUUID();
   audioChannel = socket.channel(`audio:${sessionId}`, {
-    video_id: currentVideo?.id,
+    video_id: currentVideo?.dbId,
     timestamp: currentTimestamp
+  });
+
+  // Listen for note created event
+  audioChannel.on('note_created', (payload) => {
+    console.log('[Lossy] Note created:', payload);
+
+    // Forward to side panel
+    chrome.runtime.sendMessage({
+      action: 'transcript',
+      data: payload
+    });
+
+    // Forward to content script for timeline marker
+    if (tab?.id) {
+      chrome.tabs.sendMessage(tab.id, {
+        action: 'note_created',
+        data: payload
+      });
+    }
   });
 
   // ... rest of channel setup ...
 }
 
 async function stopRecording() {
-  console.log('Stopping recording...');
+  console.log('[Lossy] Stopping recording...');
 
-  // Notify content script
+  // Notify content script to resume video
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (tab?.id) {
     chrome.tabs.sendMessage(tab.id, { action: 'recording_stopped' })
-      .catch((err) => console.log('No content script listening:', err));
+      .catch((err) => console.log('[Lossy] No content script on this page'));
   }
 
   // ... rest of existing stopRecording code ...
@@ -702,7 +1292,127 @@ async function stopRecording() {
 
 ---
 
-### Task 4: Backend Video Channel
+### Task 6: Side Panel Updates (Note Click Handler)
+
+**File:** `extension/src/sidepanel/sidepanel.js` (update)
+
+```javascript
+// ... existing code ...
+
+// Render note with click handler
+function renderNote(note) {
+  const noteEl = document.createElement('div');
+  noteEl.className = 'note-item';
+  noteEl.dataset.noteId = note.id;
+  noteEl.dataset.timestamp = note.timestamp_seconds;
+
+  // Format timestamp
+  const timestamp = note.timestamp_seconds != null
+    ? formatTimestamp(note.timestamp_seconds)
+    : '';
+
+  noteEl.innerHTML = `
+    <div class="note-category">${note.category || 'note'}</div>
+    ${timestamp ? `<div class="note-timestamp">${timestamp}</div>` : ''}
+    <div class="note-text">${note.text}</div>
+  `;
+
+  // Click to seek video
+  noteEl.addEventListener('click', () => {
+    if (note.timestamp_seconds != null) {
+      chrome.runtime.sendMessage({
+        action: 'note_clicked',
+        timestamp: note.timestamp_seconds
+      });
+
+      // Visual feedback
+      highlightNote(note.id);
+    }
+  });
+
+  return noteEl;
+}
+
+function formatTimestamp(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function highlightNote(noteId) {
+  // Remove previous highlights
+  document.querySelectorAll('.note-item').forEach(el => {
+    el.classList.remove('highlighted');
+  });
+
+  // Highlight selected note
+  const noteEl = document.querySelector(`[data-note-id="${noteId}"]`);
+  if (noteEl) {
+    noteEl.classList.add('highlighted');
+    noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+}
+
+// Listen for focus_note messages (from timeline marker clicks)
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'focus_note') {
+    highlightNote(message.noteId);
+  }
+});
+```
+
+**File:** `extension/src/sidepanel/sidepanel.html` (add CSS)
+
+```html
+<style>
+  .note-item {
+    padding: 12px;
+    margin-bottom: 8px;
+    background: #f3f4f6;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s, transform 0.2s;
+  }
+
+  .note-item:hover {
+    background: #e5e7eb;
+    transform: translateX(4px);
+  }
+
+  .note-item.highlighted {
+    background: #fef3c7;
+    border-left: 4px solid #f59e0b;
+  }
+
+  .note-timestamp {
+    font-size: 12px;
+    color: #6b7280;
+    font-weight: 600;
+    margin-bottom: 4px;
+  }
+
+  .note-category {
+    display: inline-block;
+    padding: 2px 8px;
+    background: #dc2626;
+    color: white;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+
+  .note-text {
+    font-size: 14px;
+    color: #1f2937;
+  }
+</style>
+```
+
+---
+
+### Task 7: Backend VideoChannel & Database Integration
 
 **File:** `lib/lossy_web/channels/video_channel.ex` (new)
 
@@ -715,18 +1425,17 @@ defmodule LossyWeb.VideoChannel do
 
   @impl true
   def join("video:meta", _payload, socket) do
-    Logger.info("Video metadata channel joined")
+    Logger.info("[VideoChannel] Joined video metadata channel")
     {:ok, socket}
   end
 
   @impl true
   def handle_in("video_detected", %{"platform" => platform, "videoId" => video_id} = payload, socket) do
-    Logger.info("Video detected: #{platform}/#{video_id}")
+    Logger.info("[VideoChannel] Video detected: #{platform}/#{video_id}")
 
     url = Map.get(payload, "url")
     title = Map.get(payload, "title")
 
-    # Find or create video record
     case Videos.find_or_create_video(%{
       platform: platform,
       platform_video_id: video_id,
@@ -734,12 +1443,22 @@ defmodule LossyWeb.VideoChannel do
       title: title
     }) do
       {:ok, video} ->
+        Logger.info("[VideoChannel] Video record created/found: #{video.id}")
         {:reply, {:ok, %{video_id: video.id}}, socket}
 
       {:error, changeset} ->
-        Logger.error("Failed to create video: #{inspect(changeset)}")
+        Logger.error("[VideoChannel] Failed to create video: #{inspect(changeset)}")
         {:reply, {:error, %{message: "Failed to create video"}}, socket}
     end
+  end
+
+  @impl true
+  def handle_in("get_notes", %{"video_id" => video_id}, socket) do
+    Logger.info("[VideoChannel] Fetching notes for video: #{video_id}")
+
+    notes = Videos.list_notes_by_video(video_id)
+
+    {:reply, {:ok, %{notes: notes}}, socket}
   end
 end
 ```
@@ -752,7 +1471,7 @@ defmodule LossyWeb.UserSocket do
 
   # Channels
   channel "audio:*", LossyWeb.AudioChannel
-  channel "video:*", LossyWeb.VideoChannel  # Add this line
+  channel "video:*", LossyWeb.VideoChannel  # Add this
 
   @impl true
   def connect(_params, socket, _connect_info) do
@@ -764,28 +1483,82 @@ defmodule LossyWeb.UserSocket do
 end
 ```
 
+**File:** `lib/lossy/videos.ex` (update)
+
+```elixir
+defmodule Lossy.Videos do
+  import Ecto.Query
+  alias Lossy.Repo
+  alias Lossy.Videos.{Video, Note}
+
+  # ... existing functions ...
+
+  def find_or_create_video(attrs) do
+    platform = Map.get(attrs, :platform)
+    platform_video_id = Map.get(attrs, :platform_video_id)
+
+    case Repo.get_by(Video, platform: platform, platform_video_id: platform_video_id) do
+      nil ->
+        # Create new video
+        %Video{}
+        |> Video.changeset(attrs)
+        |> Repo.insert()
+
+      video ->
+        # Update existing video (title may have changed)
+        video
+        |> Video.changeset(attrs)
+        |> Repo.update()
+    end
+  end
+
+  def list_notes_by_video(video_id) do
+    Note
+    |> where([n], n.video_id == ^video_id)
+    |> order_by([n], asc: n.timestamp_seconds)
+    |> Repo.all()
+    |> Enum.map(&note_to_map/1)
+  end
+
+  defp note_to_map(note) do
+    %{
+      id: note.id,
+      text: note.text,
+      category: note.category,
+      timestamp_seconds: note.timestamp_seconds,
+      confidence: note.confidence,
+      status: note.status
+    }
+  end
+end
+```
+
 ---
 
-### Task 5: Update AgentSession with Video Context
+### Task 8: AgentSession Integration (Video Context)
 
 **File:** `lib/lossy/agent/session.ex` (update)
 
 ```elixir
 defmodule Lossy.Agent.Session do
-  # ... existing code ...
+  use GenServer
+  require Logger
+
+  alias Lossy.Inference.Cloud
+  alias Lossy.Videos
 
   @impl true
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
     user_id = Keyword.get(opts, :user_id)
-    video_id = Keyword.get(opts, :video_id)  # Now passed from channel join
-    timestamp = Keyword.get(opts, :timestamp)  # Timestamp when recording started
+    video_id = Keyword.get(opts, :video_id)
+    timestamp = Keyword.get(opts, :timestamp)
 
     state = %{
       session_id: session_id,
       user_id: user_id,
-      video_id: video_id,
-      timestamp_seconds: timestamp,  # NEW
+      video_id: video_id,  # Database video ID
+      timestamp_seconds: timestamp,  # Exact timestamp when recording started
       status: :idle,
       audio_buffer: <<>>,
       audio_duration: 0,
@@ -793,17 +1566,18 @@ defmodule Lossy.Agent.Session do
       last_transition: DateTime.utc_now()
     }
 
-    Logger.info("AgentSession started: #{session_id}, video_id: #{video_id}, timestamp: #{timestamp}")
+    Logger.info("[AgentSession] Started: #{session_id}, video_id: #{video_id}, timestamp: #{timestamp}")
     {:ok, state}
   end
 
-  # Update structure_note to include video_id and timestamp
+  # ... existing handlers ...
+
   defp structure_note(state, transcript_text) do
     case Cloud.structure_note(transcript_text) do
       {:ok, structured_note} ->
         Logger.info("[#{state.session_id}] Note structured: #{inspect(structured_note)}")
 
-        # Store in database with video context
+        # Create note with video context
         {:ok, note} = Videos.create_note(%{
           transcript: transcript_text,
           text: structured_note.text,
@@ -815,7 +1589,17 @@ defmodule Lossy.Agent.Session do
           timestamp_seconds: state.timestamp_seconds  # Exact timestamp
         })
 
-        # ... rest of existing code ...
+        # Broadcast to extension
+        Phoenix.PubSub.broadcast(
+          Lossy.PubSub,
+          "session:#{state.session_id}",
+          {:note_created, note}
+        )
+
+        Logger.info("[#{state.session_id}] Note created and broadcast: #{note.id}")
+
+      {:error, reason} ->
+        Logger.error("[#{state.session_id}] Failed to structure note: #{reason}")
     end
   end
 end
@@ -826,109 +1610,269 @@ end
 ```elixir
 @impl true
 def join("audio:" <> session_id, payload, socket) do
-  Logger.info("Audio channel joined: #{session_id}")
+  Logger.info("[AudioChannel] Joined: #{session_id}")
 
   video_id = Map.get(payload, "video_id")
   timestamp = Map.get(payload, "timestamp")
 
   # Start AgentSession with video context
-  case SessionSupervisor.start_session(session_id, video_id: video_id, timestamp: timestamp) do
+  case Lossy.Agent.SessionSupervisor.start_session(
+    session_id,
+    video_id: video_id,
+    timestamp: timestamp
+  ) do
     {:ok, _pid} ->
-      Logger.info("Started new AgentSession: #{session_id} (video: #{video_id}, timestamp: #{timestamp})")
+      Logger.info("[AudioChannel] Started AgentSession: #{session_id} (video: #{video_id}, ts: #{timestamp})")
 
     {:error, {:already_started, _pid}} ->
-      Logger.info("AgentSession already running: #{session_id}")
+      Logger.info("[AudioChannel] AgentSession already running: #{session_id}")
 
     {:error, reason} ->
-      Logger.error("Failed to start AgentSession: #{inspect(reason)}")
+      Logger.error("[AudioChannel] Failed to start AgentSession: #{inspect(reason)}")
   end
 
+  # Subscribe to session PubSub
+  Phoenix.PubSub.subscribe(Lossy.PubSub, "session:#{session_id}")
+
   {:ok, assign(socket, :session_id, session_id)}
+end
+
+# Forward PubSub events to WebSocket
+@impl true
+def handle_info({:note_created, note}, socket) do
+  push(socket, "note_created", %{
+    id: note.id,
+    text: note.text,
+    category: note.category,
+    confidence: note.confidence,
+    timestamp_seconds: note.timestamp_seconds,
+    status: note.status
+  })
+
+  {:noreply, socket}
 end
 ```
 
 ---
 
-## Database Schema Updates
+### Task 9: Manifest Updates (Universal Content Script)
 
-The `videos` table was already created in Sprint 02's migration (`create_videos_and_notes`), so no additional migration needed. The foreign key relationship between `notes.video_id → videos.id` is already established.
+**File:** `extension/manifest.json` (update)
 
-**Verify migration includes:**
-- ✅ `videos` table with platform, platform_video_id, url
-- ✅ `notes` table with `video_id` foreign key
-- ✅ `timestamp_seconds` field on notes
+```json
+{
+  "manifest_version": 3,
+  "name": "Lossy - Voice Video Companion",
+  "version": "0.3.0",
+  "description": "Voice-first video companion with cloud transcription",
+
+  "permissions": ["sidePanel", "storage", "tabs", "offscreen"],
+
+  "host_permissions": [
+    "*://*/*"
+  ],
+
+  "background": {
+    "service_worker": "dist/service-worker.js",
+    "type": "module"
+  },
+
+  "side_panel": {
+    "default_path": "src/sidepanel/sidepanel.html"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["*://*/*"],
+      "js": ["dist/universal.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
+```
+
+**Key Changes:**
+- Single universal content script runs on all URLs (`*://*/*`)
+- Replaces platform-specific scripts (youtube.js, vimeo.js, air.js)
+- Broader host_permissions to work on any site with video
+- `all_frames: false` to only run in main frame (not iframes)
 
 ---
 
 ## Testing Checklist
 
-### Content Script Tests
+### Universal Video Detection
+- [ ] Navigate to YouTube → video detected automatically
+- [ ] Navigate to Vimeo → video detected automatically
+- [ ] Navigate to Twitter/X video → video detected automatically
+- [ ] Navigate to TikTok → video detected automatically
+- [ ] Navigate to custom video player site → video detected
+- [ ] Page with multiple videos → correct video selected (largest, playing)
+- [ ] Page with no video → script exits gracefully
+- [ ] SPA navigation → video re-detected automatically
 
-- [ ] Load YouTube video, check console: "YouTube video detected: VIDEO_ID"
-- [ ] Load Vimeo video, check console: "Vimeo video detected: VIDEO_ID"
-- [ ] Load Air video, check console: "Air video detected: VIDEO_ID"
-- [ ] Click record → video pauses, anchor chip appears
-- [ ] Anchor chip shows correct timestamp (e.g., "2:35")
-- [ ] Stop recording → video resumes, anchor chip disappears
-- [ ] YouTube navigation (SPA) → content script reinitializes
+### Video ID Extraction
+- [ ] YouTube video → extracts native video ID
+- [ ] Vimeo video → extracts native video ID
+- [ ] Generic site → generates stable URL hash
+- [ ] Same video on different URLs → consistent ID
 
-### Backend Tests
+### Recording Flow
+- [ ] Click "Start Recording" → video pauses
+- [ ] Anchor chip appears with correct timestamp (e.g., "2:35")
+- [ ] Anchor chip pulses with animation
+- [ ] Click "Stop Recording" → video resumes playback
+- [ ] Anchor chip disappears
 
-- [ ] Video detected event creates video record in database
-- [ ] Duplicate video detection works (same platform + video_id)
-- [ ] Notes correctly linked to video via foreign key
-- [ ] Timestamp saved accurately in notes table
+### Timeline Markers (Graceful Degradation)
+- [ ] YouTube → progress bar found, markers displayed
+- [ ] Vimeo → progress bar found, markers displayed
+- [ ] Generic site with standard controls → progress bar found
+- [ ] Site with custom player → progress bar found via heuristics
+- [ ] Site where progress bar cannot be found → core features still work
+- [ ] Hover marker → tooltip shows category + text snippet
+- [ ] Click marker → side panel scrolls to note and highlights it
+- [ ] Multiple notes → multiple markers at different positions
 
-### Integration Tests
+### Bidirectional Navigation
+- [ ] Click note in side panel → video seeks to timestamp
+- [ ] Video playback starts automatically after seek
+- [ ] Click timeline marker → note highlights in side panel
 
-- [ ] Record note at 1:30 → note has timestamp_seconds: 90.0
-- [ ] Click note in side panel → content script seeks to 1:30
-- [ ] Multiple notes on same video → all linked to same video record
-- [ ] Fullscreen mode → anchor chip repositions correctly
+### Database Integration
+- [ ] Video record created with platform, platform_video_id, URL, title
+- [ ] Duplicate video detection (same ID → same DB record)
+- [ ] Notes linked to video via foreign key
+- [ ] Notes have accurate timestamp_seconds field
+
+### Cross-Platform Testing
+- [ ] Test on at least 5 different video platforms
+- [ ] Verify video scoring heuristics work correctly
+- [ ] Test on site with ads (autoplay muted videos scored low)
+- [ ] Test on site with thumbnail videos (small videos scored low)
+
+### Edge Cases
+- [ ] Fullscreen mode → overlays reposition correctly
+- [ ] No video on page → content script exits gracefully
+- [ ] Recording without video context → works (legacy behavior)
+- [ ] Multiple notes at same timestamp → markers stack or offset
+- [ ] Video element removed from DOM → watchers handle gracefully
 
 ---
 
-## Platform-Specific Notes
+## Platform Examples
 
-### YouTube
-- Uses SPA navigation (needs MutationObserver)
-- Video element inside `#movie_player`
-- URL formats: `/watch?v=ID`, `/shorts/ID`, `youtu.be/ID`
+### Tested Platforms (Generic Detection)
+- **YouTube**: Works with all URL formats (`/watch`, `/shorts`, `youtu.be`)
+- **Vimeo**: Standard and unlisted videos
+- **Twitter/X**: Inline video tweets
+- **TikTok**: TikTok videos
+- **Generic Sites**: Any site with `<video>` element
 
-### Vimeo
-- Can be iframe embed or native player
-- For iframes, may need Vimeo Player API (future enhancement)
-- URL format: `vimeo.com/123456789`
+### Progress Bar Detection Strategies
 
-### Air
-- Custom video player
-- URL format: `air.inc/workspace/VIDEO_ID`
-- Need to test against actual Air videos
+1. **Common Patterns**: `.progress-bar`, `.seek-bar`, `.timeline`
+2. **ARIA Roles**: `[role="slider"]`, `[role="progressbar"]`
+3. **Input Elements**: `input[type="range"]`
+4. **Visual Heuristics**: Horizontal bars near bottom of video
+
+### Known Platform-Specific Quirks
+
+**YouTube:**
+- SPA navigation requires MutationObserver
+- Video ID extracted from URL param `v=`
+- Progress bar: `.ytp-progress-bar-container`
+
+**Vimeo:**
+- Iframe embeds may require Vimeo Player API (future enhancement)
+- Video ID extracted from pathname
+- Progress bar: `.vp-progress`
+
+**Generic Sites:**
+- Progress bar detection may fail on heavily customized players
+- Timeline markers gracefully disabled if progress bar not found
+- Core features (pause/play/seek/timestamp) always work
 
 ---
 
 ## Known Limitations
 
-1. **Vimeo iframe embeds**: Cannot access video element directly, need Vimeo Player API
-2. **Shadow DOM compatibility**: Only works in modern browsers (Chrome 53+, Firefox 63+)
-3. **Fullscreen handling**: May need per-platform adjustments
-4. **Private/unlisted videos**: May not extract metadata correctly
+1. **Progress Bar Detection**
+   - May fail on heavily customized video players
+   - Heuristics might select wrong element in rare cases
+   - **Mitigation**: Core features (pause/play/seek) work regardless, markers gracefully disabled
 
-These will be addressed in future sprints as needed.
+2. **Video ID Stability**
+   - URL-hashed IDs may change if URL structure changes significantly
+   - **Mitigation**: Store original URL alongside hash for reference
+
+3. **Performance**
+   - MutationObserver runs on all pages (even those without video)
+   - **Mitigation**: Early exit if no video detected, minimal overhead
+
+4. **Browser Compatibility**
+   - Shadow DOM: Chrome 53+, Firefox 63+, Safari 10+
+   - Frame-accurate timestamps: Chrome 83+ (fallbacks available)
+
+5. **Iframe Embeds**
+   - Cannot access video elements inside cross-origin iframes
+   - **Future**: Implement platform-specific Player APIs (Vimeo, YouTube)
+
+---
+
+## Architecture Benefits
+
+### ✅ Advantages of Universal Approach
+
+1. **Universal Compatibility**: Works on any site with `<video>` elements
+2. **Future-Proof**: No hardcoded selectors that break when platforms update UI
+3. **Minimal Maintenance**: Single content script instead of per-platform scripts
+4. **Graceful Degradation**: Core features work even when timeline markers fail
+5. **Automatic Support**: New video platforms supported without code changes
+
+### ⚠️ Trade-offs
+
+- Progress bar detection less reliable than hardcoded selectors
+- Video scoring heuristics may occasionally select wrong video
+- Slightly more complex logic in universal detector
+
+**Overall**: Benefits significantly outweigh trade-offs for this use case.
 
 ---
 
 ## Reference Documentation
 
-- **Shadow DOM**: For style isolation in overlays
-- **requestVideoFrameCallback**: For precise timestamps (Chrome 83+)
-- **MutationObserver**: For SPA navigation detection
-- **TECHNICAL_REFERENCES.md**: Frame capture patterns (for future emoji chips)
+- **Shadow DOM**: [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/Web_Components/Using_shadow_DOM)
+- **requestVideoFrameCallback**: [Chrome Developers](https://developer.chrome.com/blog/requestvideoframecallback-rvfc/)
+- **MutationObserver**: [MDN Web Docs](https://developer.mozilla.org/en-US/docs/Web/API/MutationObserver)
+- **Phoenix Channels**: [Phoenix Framework Docs](https://hexdocs.pm/phoenix/channels.html)
+
+---
+
+## Success Criteria
+
+✅ **Sprint complete when:**
+1. Notes are anchored to precise video timestamps
+2. Clicking notes seeks video to timestamp
+3. Timeline markers appear at note positions (when progress bar detected)
+4. Clicking markers focuses notes in side panel
+5. Recording pauses/unpauses video automatically
+6. **Works on at least 3 different video platforms** (YouTube, Vimeo, +1)
+7. Database correctly links notes to videos
+8. **Core features work even when progress bar detection fails**
 
 ---
 
 ## Next Sprint
 
-👉 [Sprint 04 - Auto-Posting](./SPRINT_04_auto_posting.md)
+👉 [Sprint 03.5 - Tab Management](./SPRINT_03.5_tab_management.md)
 
-**Focus:** Browserbase automation to post notes as comments on video platforms
+**Focus:** Per-tab video context tracking, side panel syncs to active tab, tab switcher UI

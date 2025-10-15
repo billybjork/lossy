@@ -32,7 +32,7 @@ defmodule Lossy.Videos.Video do
       :duration_seconds
     ])
     |> validate_required([:platform, :external_id, :url])
-    |> validate_inclusion(:platform, ~w(youtube vimeo air))
+    |> validate_inclusion(:platform, ~w(youtube vimeo air generic))
     |> unique_constraint([:platform, :external_id])
   end
 end

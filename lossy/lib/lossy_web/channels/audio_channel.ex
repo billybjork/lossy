@@ -5,16 +5,25 @@ defmodule LossyWeb.AudioChannel do
   alias Lossy.Agent.SessionSupervisor
 
   @impl true
-  def join("audio:" <> session_id, _payload, socket) do
+  def join("audio:" <> session_id, payload, socket) do
     Logger.info("Audio channel joined: #{session_id}")
+
+    video_id = Map.get(payload, "video_id")
+    timestamp = Map.get(payload, "timestamp")
 
     # Subscribe to agent session events
     Phoenix.PubSub.subscribe(Lossy.PubSub, "session:#{session_id}")
 
-    # Start AgentSession if not already running
-    case SessionSupervisor.start_session(session_id) do
+    # Start AgentSession with video context
+    case SessionSupervisor.start_session(
+           session_id,
+           video_id: video_id,
+           timestamp: timestamp
+         ) do
       {:ok, _pid} ->
-        Logger.info("Started new AgentSession: #{session_id}")
+        Logger.info(
+          "Started new AgentSession: #{session_id} (video: #{video_id}, ts: #{timestamp})"
+        )
 
       {:error, {:already_started, _pid}} ->
         Logger.info("AgentSession already running: #{session_id}")
@@ -86,6 +95,7 @@ defmodule LossyWeb.AudioChannel do
       text: note.text,
       category: note.category,
       confidence: note.confidence,
+      timestamp_seconds: note.timestamp_seconds,
       raw_transcript: note.raw_transcript,
       timestamp: System.system_time(:second)
     })

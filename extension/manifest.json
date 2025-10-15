@@ -1,16 +1,13 @@
 {
   "manifest_version": 3,
-  "name": "Voice Video Companion",
-  "version": "0.1.0",
-  "description": "Voice-first video review",
+  "name": "Lossy - Voice Video Companion",
+  "version": "0.3.0",
+  "description": "Voice-first video companion with cloud transcription",
 
   "permissions": ["sidePanel", "storage", "tabs", "offscreen"],
 
   "host_permissions": [
-    "https://*.youtube.com/*",
-    "https://*.vimeo.com/*",
-    "https://*.air.inc/*",
-    "wss://localhost:4000/*"
+    "*://*/*"
   ],
 
   "content_security_policy": {
@@ -26,14 +23,23 @@
   },
 
   "background": {
-    "service_worker": "background/service-worker.js"
+    "service_worker": "background/service-worker.js",
+    "type": "module"
   },
 
   "content_scripts": [
     {
-      "matches": ["https://*.youtube.com/*", "https://*.vimeo.com/*", "https://*.air.inc/*"],
-      "js": ["content/content.js"],
-      "run_at": "document_idle"
+      "matches": ["*://*/*"],
+      "js": ["content/universal.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/*"],
+      "matches": ["<all_urls>"]
     }
   ]
 }

@@ -10,6 +10,7 @@ module.exports = (env, argv) => {
       'sidepanel/sidepanel': './src/sidepanel/sidepanel.js',
       'popup/popup': './src/popup/popup.js',
       'content/content': './src/content/content.js',
+      'content/universal': './src/content/universal.js',
       'offscreen/offscreen': './src/offscreen/offscreen.js',
     },
     output: {

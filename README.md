@@ -48,7 +48,8 @@ code/
 ├── lossy/               # Backend application (Elixir/Phoenix)
 │   ├── lib/lossy/       # Core business logic
 │   ├── lib/lossy_web/   # Web layer (LiveView, Channels, API)
-│   └── priv/repo/       # Database migrations
+│   ├── priv/repo/       # Database migrations
+│   └── priv/node/       # Node.js automation agents (Playwright)
 ├── extension/           # Chrome MV3 extension
 │   ├── src/             # Source files
 │   └── dist/            # Built extension (webpack output)
@@ -99,6 +100,26 @@ npm run dev
 
 # The built extension will be in dist/
 ```
+
+### Automation (Optional)
+
+For automated note posting to video platforms:
+
+```bash
+cd lossy/priv/node
+
+# Install Playwright dependencies
+npm install
+
+# Install Chromium browser
+npx playwright install chromium
+
+# Verify setup
+node playwright_server.js
+# (Should wait for input - press Ctrl+C to exit)
+```
+
+**Note:** Requires Browserbase API key set in `.env` (see Environment Variables section).
 
 ## 🎯 Development Workflow
 

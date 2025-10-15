@@ -52,6 +52,25 @@ defmodule Lossy.Videos do
     |> Repo.update()
   end
 
+  def list_notes_by_video(video_id) do
+    Note
+    |> where([n], n.video_id == ^video_id)
+    |> order_by([n], asc: n.timestamp_seconds)
+    |> Repo.all()
+    |> Enum.map(&note_to_map/1)
+  end
+
+  defp note_to_map(note) do
+    %{
+      id: note.id,
+      text: note.text,
+      category: note.category,
+      timestamp_seconds: note.timestamp_seconds,
+      confidence: note.confidence,
+      status: note.status
+    }
+  end
+
   defp apply_filters(query, filters) do
     Enum.reduce(filters, query, fn
       {:video_id, vid}, q -> where(q, [n], n.video_id == ^vid)

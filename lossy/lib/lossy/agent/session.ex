@@ -32,11 +32,16 @@ defmodule Lossy.Agent.Session do
     session_id = Keyword.fetch!(opts, :session_id)
     user_id = Keyword.get(opts, :user_id)
     video_id = Keyword.get(opts, :video_id)
+    timestamp = Keyword.get(opts, :timestamp)
+
+    # Default timestamp to 0.0 if nil (for notes created without video context)
+    timestamp_seconds = timestamp || 0.0
 
     state = %{
       session_id: session_id,
       user_id: user_id,
       video_id: video_id,
+      timestamp_seconds: timestamp_seconds,
       status: :idle,
       audio_buffer: <<>>,
       audio_duration: 0,
@@ -44,7 +49,10 @@ defmodule Lossy.Agent.Session do
       last_transition: DateTime.utc_now()
     }
 
-    Logger.info("AgentSession started: #{session_id}")
+    Logger.info(
+      "AgentSession started: #{session_id}, video_id: #{video_id}, timestamp: #{timestamp_seconds}"
+    )
+
     {:ok, state}
   end
 
@@ -160,8 +168,7 @@ defmodule Lossy.Agent.Session do
             category: structured_note.category,
             confidence: structured_note.confidence,
             status: "ghost",
-            # Will be updated in Sprint 03 with video integration
-            timestamp_seconds: 0.0,
+            timestamp_seconds: state.timestamp_seconds,
             video_id: state.video_id,
             session_id: state.session_id
           })

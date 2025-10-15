@@ -7,7 +7,7 @@
 
 ## Goal
 
-Automatically post high-confidence notes to video platforms (YouTube, Vimeo, Air) using Browserbase automation. Users connect their platforms once, then notes are posted automatically via Oban background jobs with Python/Playwright agents.
+Automatically post high-confidence notes to video platforms (YouTube, Vimeo, Air) using Browserbase automation. Users connect their platforms once, then notes are posted automatically via Oban background jobs with Playwright (Node.js) agents controlled from Elixir.
 
 ---
 
@@ -15,8 +15,8 @@ Automatically post high-confidence notes to video platforms (YouTube, Vimeo, Air
 
 - ✅ Sprint 03 complete (video integration working)
 - ⏳ Browserbase account & API key
-- ⏳ Python 3.10+ with Playwright installed
-- ⏳ Existing Python agents (from prior work)
+- ⏳ Node.js 18+ with npm installed
+- ⏳ Playwright npm package
 
 ---
 
@@ -25,7 +25,7 @@ Automatically post high-confidence notes to video platforms (YouTube, Vimeo, Air
 - [ ] Platform connection flow (user logs in via Browserbase)
 - [ ] Browserbase session persistence (30-day keep-alive)
 - [ ] Oban worker queues notes for posting
-- [ ] Python bridge calls Playwright agents
+- [ ] Elixir Playwright client (GenServer + Port) controls browser automation
 - [ ] Retry logic with exponential backoff
 - [ ] Note status tracking (ghost → posting → posted → failed)
 - [ ] Error taxonomy for platform-specific failures
@@ -349,8 +349,8 @@ defmodule LossyWeb.SettingsLive do
   end
 
   defp verify_login(session_id, platform) do
-    # Call Python script to verify login
-    Lossy.Automation.PythonBridge.check_login(session_id, platform)
+    # Call Playwright client to verify login
+    Lossy.Automation.PlaywrightClient.check_login(session_id, platform)
   end
 
   defp reload_connections(socket) do
@@ -406,350 +406,402 @@ end
 
 ---
 
-### Task 2: Python Bridge & Agents
+### Task 2: Playwright Client & Node.js Agents
 
-#### 2.1 Python Bridge Module
+#### 2.1 Playwright Client Module (Elixir)
 
-**File:** `lib/lossy/automation/python_bridge.ex` (new)
+**File:** `lib/lossy/automation/playwright_client.ex` (new)
 
 ```elixir
-defmodule Lossy.Automation.PythonBridge do
+defmodule Lossy.Automation.PlaywrightClient do
   @moduledoc """
-  Bridge to Python Playwright agents.
-  Uses System.cmd for MVP, can upgrade to Port in future.
+  Elixir client for Playwright browser automation via Node.js Port.
+  Manages communication with a Node.js Playwright server process.
   """
 
+  use GenServer
   require Logger
 
-  @python_path Application.app_dir(:lossy, "priv/python")
+  @node_script_path Application.app_dir(:lossy, "priv/node/playwright_server.js")
 
-  def check_login(session_id, platform) do
-    script = Path.join(@python_path, "automation/check_login.py")
+  # Client API
 
-    args = [
-      script,
-      "--session-id", session_id,
-      "--platform", platform
-    ]
-
-    case System.cmd("python3", args, stderr_to_stdout: true, cd: @python_path) do
-      {output, 0} ->
-        case Jason.decode(output) do
-          {:ok, %{"logged_in" => true}} ->
-            {:ok, :logged_in}
-
-          {:ok, %{"logged_in" => false}} ->
-            {:error, :not_logged_in}
-
-          {:error, _} ->
-            Logger.error("Failed to parse check_login output: #{output}")
-            {:error, :invalid_response}
-        end
-
-      {error, code} ->
-        Logger.error("check_login script failed (code #{code}): #{error}")
-
-        cond do
-          String.contains?(error, "session not found") ->
-            {:error, :session_expired}
-
-          true ->
-            {:error, :script_failed}
-        end
-    end
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def post_note(session_id, note) do
-    script = Path.join(@python_path, "automation/post_note.py")
+  def check_login(session_id, platform) do
+    GenServer.call(__MODULE__, {:check_login, session_id, platform}, 30_000)
+  end
 
-    args = [
-      script,
-      "--session-id", session_id,
-      "--platform", note.video.platform,
-      "--video-url", note.video.url,
-      "--timestamp", to_string(note.timestamp_seconds),
-      "--text", note.text
-    ]
-
-    case System.cmd("python3", args, stderr_to_stdout: true, cd: @python_path) do
-      {output, 0} ->
-        case Jason.decode(output) do
-          {:ok, %{"status" => "posted", "permalink" => permalink}} ->
-            {:ok, %{permalink: permalink}}
-
-          {:ok, %{"status" => "failed", "error" => error}} ->
-            {:error, error}
-
-          {:error, _} ->
-            Logger.error("Failed to parse post_note output: #{output}")
-            {:error, "Invalid response from Python agent"}
-        end
-
-      {error, code} ->
-        Logger.error("post_note script failed (code #{code}): #{error}")
-
-        cond do
-          String.contains?(error, "session expired") ->
-            {:error, :session_expired}
-
-          String.contains?(error, "rate limit") ->
-            {:error, :rate_limited}
-
-          String.contains?(error, "element not found") ->
-            {:error, :selector_failed}
-
-          true ->
-            {:error, "Script failed: #{String.slice(error, 0..200)}"}
-        end
-    end
+  def post_note(session_id, platform, video_url, timestamp, text) do
+    GenServer.call(__MODULE__, {:post_note, session_id, platform, video_url, timestamp, text}, 60_000)
   end
 
   def ping_session(session_id) do
-    script = Path.join(@python_path, "automation/ping_session.py")
+    GenServer.call(__MODULE__, {:ping_session, session_id}, 30_000)
+  end
 
-    args = [script, "--session-id", session_id]
+  # GenServer callbacks
 
-    case System.cmd("python3", args, stderr_to_stdout: true, cd: @python_path) do
-      {_output, 0} ->
-        {:ok, :pong}
+  @impl true
+  def init(_opts) do
+    port = Port.open(
+      {:spawn_executable, System.find_executable("node")},
+      [:binary, :exit_status, args: [@node_script_path], packet: 4]
+    )
 
-      {error, _code} ->
-        if String.contains?(error, "not found") do
-          {:error, :not_found}
-        else
-          {:error, :failed}
+    {:ok, %{port: port, pending: %{}}}
+  end
+
+  @impl true
+  def handle_call({:check_login, session_id, platform}, from, state) do
+    request = %{
+      id: make_ref() |> :erlang.ref_to_list() |> to_string(),
+      command: "check_login",
+      args: %{session_id: session_id, platform: platform}
+    }
+
+    send_request(state.port, request)
+    {:noreply, put_in(state.pending[request.id], from)}
+  end
+
+  @impl true
+  def handle_call({:post_note, session_id, platform, video_url, timestamp, text}, from, state) do
+    request = %{
+      id: make_ref() |> :erlang.ref_to_list() |> to_string(),
+      command: "post_note",
+      args: %{
+        session_id: session_id,
+        platform: platform,
+        video_url: video_url,
+        timestamp: timestamp,
+        text: text
+      }
+    }
+
+    send_request(state.port, request)
+    {:noreply, put_in(state.pending[request.id], from)}
+  end
+
+  @impl true
+  def handle_call({:ping_session, session_id}, from, state) do
+    request = %{
+      id: make_ref() |> :erlang.ref_to_list() |> to_string(),
+      command: "ping_session",
+      args: %{session_id: session_id}
+    }
+
+    send_request(state.port, request)
+    {:noreply, put_in(state.pending[request.id], from)}
+  end
+
+  @impl true
+  def handle_info({_port, {:data, data}}, state) do
+    case Jason.decode(data) do
+      {:ok, %{"id" => id, "result" => result}} ->
+        case Map.pop(state.pending, id) do
+          {nil, _pending} ->
+            Logger.warn("Received response for unknown request: #{id}")
+            {:noreply, state}
+
+          {from, pending} ->
+            GenServer.reply(from, parse_result(result))
+            {:noreply, %{state | pending: pending}}
         end
+
+      {:ok, %{"error" => error}} ->
+        Logger.error("Playwright server error: #{inspect(error)}")
+        {:noreply, state}
+
+      {:error, reason} ->
+        Logger.error("Failed to decode response: #{inspect(reason)}")
+        {:noreply, state}
     end
   end
+
+  @impl true
+  def handle_info({_port, {:exit_status, status}}, state) do
+    Logger.error("Playwright server exited with status: #{status}")
+    {:stop, :port_exit, state}
+  end
+
+  # Private helpers
+
+  defp send_request(port, request) do
+    data = Jason.encode!(request)
+    Port.command(port, data)
+  end
+
+  defp parse_result(%{"status" => "logged_in"}), do: {:ok, :logged_in}
+  defp parse_result(%{"status" => "not_logged_in"}), do: {:error, :not_logged_in}
+  defp parse_result(%{"status" => "posted", "permalink" => permalink}), do: {:ok, %{permalink: permalink}}
+  defp parse_result(%{"status" => "pong"}), do: {:ok, :pong}
+  defp parse_result(%{"status" => "error", "error" => "session_expired"}), do: {:error, :session_expired}
+  defp parse_result(%{"status" => "error", "error" => "rate_limited"}), do: {:error, :rate_limited}
+  defp parse_result(%{"status" => "error", "error" => "selector_failed"}), do: {:error, :selector_failed}
+  defp parse_result(%{"status" => "error", "error" => "not_found"}), do: {:error, :not_found}
+  defp parse_result(%{"status" => "error", "error" => error}), do: {:error, error}
+  defp parse_result(other), do: {:error, "Unknown response: #{inspect(other)}"}
 end
 ```
 
-#### 2.2 Python Agent: Check Login
+**Add to supervision tree:**
 
-**File:** `priv/python/automation/check_login.py` (new)
+```elixir
+# lib/lossy/application.ex
+def start(_type, _args) do
+  children = [
+    # ... existing children ...
+    Lossy.Automation.PlaywrightClient,
+    {Oban, Application.fetch_env!(:lossy, Oban)}
+  ]
 
-```python
-#!/usr/bin/env python3
-"""
-Check if user is logged in to a platform.
-Looks for profile element to verify login state.
-"""
+  opts = [strategy: :one_for_one, name: Lossy.Supervisor]
+  Supervisor.start_link(children, opts)
+end
+```
 
-import argparse
-import json
-import sys
-import os
-from playwright.sync_api import sync_playwright
+#### 2.2 Node.js Playwright Server
 
-BROWSERBASE_API_KEY = os.getenv("BROWSERBASE_API_KEY")
+**File:** `priv/node/playwright_server.js` (new)
 
-PLATFORM_CONFIG = {
-    "youtube": {
-        "url": "https://www.youtube.com",
-        "selector": "#avatar-btn",  # Profile button
-        "timeout": 10000
-    },
-    "vimeo": {
-        "url": "https://vimeo.com",
-        "selector": ".topnav_menu_user",
-        "timeout": 10000
-    },
-    "air": {
-        "url": "https://air.inc",
-        "selector": "[data-test='user-avatar']",
-        "timeout": 10000
+```javascript
+#!/usr/bin/env node
+/**
+ * Playwright automation server for Elixir Port communication.
+ * Handles browser automation commands via JSON-RPC over stdin/stdout.
+ */
+
+const { chromium } = require('playwright-core');
+const readline = require('readline');
+
+const BROWSERBASE_API_KEY = process.env.BROWSERBASE_API_KEY;
+
+// Platform-specific selectors
+const PLATFORM_CONFIG = {
+  youtube: {
+    url: 'https://www.youtube.com',
+    selector: '#avatar-btn',
+    timeout: 10000
+  },
+  vimeo: {
+    url: 'https://vimeo.com',
+    selector: '.topnav_menu_user',
+    timeout: 10000
+  },
+  air: {
+    url: 'https://air.inc',
+    selector: '[data-test="user-avatar"]',
+    timeout: 10000
+  }
+};
+
+// Command handlers
+
+async function checkLogin(sessionId, platform) {
+  const config = PLATFORM_CONFIG[platform];
+  if (!config) {
+    return { status: 'error', error: `Unknown platform: ${platform}` };
+  }
+
+  try {
+    const connectUrl = `wss://connect.browserbase.com?apiKey=${BROWSERBASE_API_KEY}&sessionId=${sessionId}`;
+    const browser = await chromium.connectOverCDP(connectUrl);
+
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] || await context.newPage();
+
+    await page.goto(config.url, { waitUntil: 'networkidle' });
+
+    try {
+      await page.waitForSelector(config.selector, { timeout: config.timeout });
+      await browser.close();
+      return { status: 'logged_in' };
+    } catch (e) {
+      await browser.close();
+      return { status: 'not_logged_in' };
     }
+  } catch (error) {
+    if (error.message.includes('session not found')) {
+      return { status: 'error', error: 'session_expired' };
+    }
+    return { status: 'error', error: error.message };
+  }
 }
 
-def check_login(session_id, platform):
-    config = PLATFORM_CONFIG.get(platform)
-    if not config:
-        return {"logged_in": False, "error": f"Unknown platform: {platform}"}
+async function postToYoutube(page, videoUrl, timestamp, text) {
+  await page.goto(videoUrl, { waitUntil: 'networkidle' });
 
-    try:
-        with sync_playwright() as p:
-            # Connect to Browserbase session
-            browser = p.chromium.connect_over_cdp(
-                f"wss://connect.browserbase.com?apiKey={BROWSERBASE_API_KEY}&sessionId={session_id}"
-            )
+  // Seek to timestamp
+  await page.evaluate((t) => {
+    document.querySelector('video').currentTime = t;
+  }, timestamp);
 
-            # Get existing context and page
-            context = browser.contexts[0]
-            page = context.pages[0] if context.pages else context.new_page()
+  // Scroll to comments
+  await page.evaluate(() => window.scrollTo(0, 800));
 
-            # Navigate to platform
-            page.goto(config["url"], wait_until="networkidle")
+  // Click comment box
+  try {
+    await page.waitForSelector('#placeholder-area', { timeout: 5000 });
+    await page.click('#placeholder-area');
+  } catch (e) {
+    return { status: 'error', error: 'selector_failed' };
+  }
 
-            # Check for profile element
-            try:
-                element = page.wait_for_selector(config["selector"], timeout=config["timeout"])
-                logged_in = element is not None
-            except:
-                logged_in = False
+  // Fill comment
+  try {
+    await page.waitForSelector('#contenteditable-root', { timeout: 5000 });
+    await page.fill('#contenteditable-root', text);
+  } catch (e) {
+    return { status: 'error', error: 'selector_failed' };
+  }
 
-            browser.close()
+  // Submit
+  try {
+    await page.waitForSelector('#submit-button', { timeout: 5000 });
+    await page.click('#submit-button');
+  } catch (e) {
+    return { status: 'error', error: 'selector_failed' };
+  }
 
-            return {"logged_in": logged_in}
+  await page.waitForTimeout(2000);
 
-    except Exception as e:
-        error_msg = str(e)
-        if "session not found" in error_msg.lower():
-            return {"logged_in": False, "error": "session not found"}
-        else:
-            return {"logged_in": False, "error": error_msg}
+  const permalink = `${videoUrl}&t=${Math.floor(timestamp)}s`;
+  return { status: 'posted', permalink };
+}
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--session-id", required=True)
-    parser.add_argument("--platform", required=True)
-    args = parser.parse_args()
+async function postToVimeo(page, videoUrl, timestamp, text) {
+  // TODO: Implement Vimeo posting
+  return { status: 'error', error: 'Vimeo posting not yet implemented' };
+}
 
-    result = check_login(args.session_id, args.platform)
-    print(json.dumps(result))
+async function postToAir(page, videoUrl, timestamp, text) {
+  // TODO: Implement Air posting
+  return { status: 'error', error: 'Air posting not yet implemented' };
+}
+
+async function postNote(sessionId, platform, videoUrl, timestamp, text) {
+  try {
+    const connectUrl = `wss://connect.browserbase.com?apiKey=${BROWSERBASE_API_KEY}&sessionId=${sessionId}`;
+    const browser = await chromium.connectOverCDP(connectUrl);
+
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] || await context.newPage();
+
+    let result;
+    if (platform === 'youtube') {
+      result = await postToYoutube(page, videoUrl, timestamp, text);
+    } else if (platform === 'vimeo') {
+      result = await postToVimeo(page, videoUrl, timestamp, text);
+    } else if (platform === 'air') {
+      result = await postToAir(page, videoUrl, timestamp, text);
+    } else {
+      result = { status: 'error', error: `Unknown platform: ${platform}` };
+    }
+
+    await browser.close();
+    return result;
+  } catch (error) {
+    if (error.message.includes('session expired') || error.message.includes('session not found')) {
+      return { status: 'error', error: 'session_expired' };
+    } else if (error.message.includes('rate limit')) {
+      return { status: 'error', error: 'rate_limited' };
+    }
+    return { status: 'error', error: error.message };
+  }
+}
+
+async function pingSession(sessionId) {
+  try {
+    const connectUrl = `wss://connect.browserbase.com?apiKey=${BROWSERBASE_API_KEY}&sessionId=${sessionId}`;
+    const browser = await chromium.connectOverCDP(connectUrl);
+
+    const context = browser.contexts()[0];
+    const page = context.pages()[0] || await context.newPage();
+
+    await page.goto('about:blank');
+    await browser.close();
+
+    return { status: 'pong' };
+  } catch (error) {
+    if (error.message.includes('not found')) {
+      return { status: 'error', error: 'not_found' };
+    }
+    return { status: 'error', error: 'failed' };
+  }
+}
+
+// Main message loop (Port packet:4 protocol)
+
+let buffer = Buffer.alloc(0);
+
+process.stdin.on('data', async (chunk) => {
+  buffer = Buffer.concat([buffer, chunk]);
+
+  while (buffer.length >= 4) {
+    const length = buffer.readUInt32BE(0);
+
+    if (buffer.length < 4 + length) {
+      break; // Wait for more data
+    }
+
+    const message = buffer.slice(4, 4 + length);
+    buffer = buffer.slice(4 + length);
+
+    try {
+      const request = JSON.parse(message.toString());
+      const { id, command, args } = request;
+
+      let result;
+
+      if (command === 'check_login') {
+        result = await checkLogin(args.session_id, args.platform);
+      } else if (command === 'post_note') {
+        result = await postNote(args.session_id, args.platform, args.video_url, args.timestamp, args.text);
+      } else if (command === 'ping_session') {
+        result = await pingSession(args.session_id);
+      } else {
+        result = { status: 'error', error: `Unknown command: ${command}` };
+      }
+
+      const response = JSON.stringify({ id, result });
+      const responseBuffer = Buffer.from(response);
+      const lengthBuffer = Buffer.alloc(4);
+      lengthBuffer.writeUInt32BE(responseBuffer.length, 0);
+
+      process.stdout.write(Buffer.concat([lengthBuffer, responseBuffer]));
+    } catch (error) {
+      console.error('Error processing message:', error);
+    }
+  }
+});
+
+process.stdin.on('end', () => {
+  process.exit(0);
+});
 ```
 
-#### 2.3 Python Agent: Post Note
+**File:** `priv/node/package.json`
 
-**File:** `priv/python/automation/post_note.py` (new)
-
-```python
-#!/usr/bin/env python3
-"""
-Post a note as a comment on a video platform.
-Uses Playwright with platform-specific selectors.
-"""
-
-import argparse
-import json
-import sys
-import os
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeout
-
-BROWSERBASE_API_KEY = os.getenv("BROWSERBASE_API_KEY")
-
-def post_to_youtube(page, video_url, timestamp, text):
-    """Post comment to YouTube at specific timestamp."""
-    # Navigate to video
-    page.goto(video_url, wait_until="networkidle")
-
-    # Seek to timestamp
-    page.evaluate(f"document.querySelector('video').currentTime = {timestamp}")
-
-    # Scroll to comments section
-    page.evaluate("window.scrollTo(0, 800)")
-
-    # Click comment box
-    try:
-        comment_box = page.wait_for_selector("#placeholder-area", timeout=5000)
-        comment_box.click()
-    except PlaywrightTimeout:
-        return {"status": "failed", "error": "Could not find comment box"}
-
-    # Wait for editable area
-    try:
-        editable = page.wait_for_selector("#contenteditable-root", timeout=5000)
-        editable.fill(text)
-    except PlaywrightTimeout:
-        return {"status": "failed", "error": "Could not find editable area"}
-
-    # Click submit button
-    try:
-        submit_btn = page.wait_for_selector("#submit-button", timeout=5000)
-        submit_btn.click()
-    except PlaywrightTimeout:
-        return {"status": "failed", "error": "Could not find submit button"}
-
-    # Wait for comment to appear
-    page.wait_for_timeout(2000)
-
-    # Get permalink (approximation - YouTube doesn't always provide immediate link)
-    permalink = f"{video_url}&t={int(timestamp)}s"
-
-    return {"status": "posted", "permalink": permalink}
-
-def post_to_vimeo(page, video_url, timestamp, text):
-    """Post comment to Vimeo at specific timestamp."""
-    page.goto(video_url, wait_until="networkidle")
-
-    # Vimeo implementation here (similar pattern)
-    # For now, return not implemented
-    return {"status": "failed", "error": "Vimeo posting not yet implemented"}
-
-def post_to_air(page, video_url, timestamp, text):
-    """Post comment to Air at specific timestamp."""
-    page.goto(video_url, wait_until="networkidle")
-
-    # Air implementation here (similar pattern)
-    return {"status": "failed", "error": "Air posting not yet implemented"}
-
-def post_note(session_id, platform, video_url, timestamp, text):
-    try:
-        with sync_playwright() as p:
-            # Connect to Browserbase session
-            browser = p.chromium.connect_over_cdp(
-                f"wss://connect.browserbase.com?apiKey={BROWSERBASE_API_KEY}&sessionId={session_id}"
-            )
-
-            context = browser.contexts[0]
-            page = context.pages[0] if context.pages else context.new_page()
-
-            # Route to platform-specific handler
-            if platform == "youtube":
-                result = post_to_youtube(page, video_url, timestamp, text)
-            elif platform == "vimeo":
-                result = post_to_vimeo(page, video_url, timestamp, text)
-            elif platform == "air":
-                result = post_to_air(page, video_url, timestamp, text)
-            else:
-                result = {"status": "failed", "error": f"Unknown platform: {platform}"}
-
-            browser.close()
-            return result
-
-    except Exception as e:
-        error_msg = str(e)
-
-        if "session expired" in error_msg.lower() or "session not found" in error_msg.lower():
-            return {"status": "failed", "error": "session expired"}
-        elif "rate limit" in error_msg.lower():
-            return {"status": "failed", "error": "rate limit"}
-        else:
-            return {"status": "failed", "error": error_msg}
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--session-id", required=True)
-    parser.add_argument("--platform", required=True)
-    parser.add_argument("--video-url", required=True)
-    parser.add_argument("--timestamp", type=float, required=True)
-    parser.add_argument("--text", required=True)
-    args = parser.parse_args()
-
-    result = post_note(
-        args.session_id,
-        args.platform,
-        args.video_url,
-        args.timestamp,
-        args.text
-    )
-
-    print(json.dumps(result))
+```json
+{
+  "name": "lossy-playwright",
+  "version": "1.0.0",
+  "description": "Playwright automation server for Lossy",
+  "main": "playwright_server.js",
+  "dependencies": {
+    "playwright-core": "^1.40.0"
+  }
+}
 ```
 
-**File:** `priv/python/requirements.txt`
-
-```
-playwright==1.40.0
-```
-
-**Setup Python environment:**
+**Setup Node.js environment:**
 
 ```bash
-cd lossy/priv/python
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
+cd lossy/priv/node
+npm install
+npx playwright install chromium
 ```
 
 ---
@@ -826,7 +878,7 @@ defmodule Lossy.Workers.PostNoteWorker do
 
   alias Lossy.Videos
   alias Lossy.Accounts
-  alias Lossy.Automation.PythonBridge
+  alias Lossy.Automation.PlaywrightClient
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"note_id" => note_id}, attempt: attempt}) do
@@ -843,8 +895,14 @@ defmodule Lossy.Workers.PostNoteWorker do
         # Update last used timestamp
         Accounts.update_connection(connection, %{last_used_at: DateTime.utc_now()})
 
-        # Call Python agent
-        case PythonBridge.post_note(connection.browserbase_session_id, note) do
+        # Call Playwright client
+        case PlaywrightClient.post_note(
+          connection.browserbase_session_id,
+          note.video.platform,
+          note.video.url,
+          note.timestamp_seconds,
+          note.text
+        ) do
           {:ok, %{permalink: permalink}} ->
             Logger.info("[PostNoteWorker] Note #{note_id} posted successfully")
 
@@ -1033,7 +1091,7 @@ defmodule Lossy.Workers.SessionKeepAliveWorker do
   require Logger
 
   alias Lossy.Accounts
-  alias Lossy.Automation.PythonBridge
+  alias Lossy.Automation.PlaywrightClient
 
   @impl Oban.Worker
   def perform(_job) do
@@ -1046,7 +1104,7 @@ defmodule Lossy.Workers.SessionKeepAliveWorker do
     Logger.info("[SessionKeepAlive] Checking #{length(connections)} connections")
 
     Enum.each(connections, fn conn ->
-      case PythonBridge.ping_session(conn.browserbase_session_id) do
+      case PlaywrightClient.ping_session(conn.browserbase_session_id) do
         {:ok, :pong} ->
           Accounts.update_connection(conn, %{last_used_at: DateTime.utc_now()})
           Logger.info("[SessionKeepAlive] Pinged #{conn.platform} session: #{conn.browserbase_session_id}")
@@ -1065,51 +1123,6 @@ defmodule Lossy.Workers.SessionKeepAliveWorker do
 end
 ```
 
-**File:** `priv/python/automation/ping_session.py` (new)
-
-```python
-#!/usr/bin/env python3
-"""Ping a Browserbase session to keep it alive."""
-
-import argparse
-import sys
-import os
-from playwright.sync_api import sync_playwright
-
-BROWSERBASE_API_KEY = os.getenv("BROWSERBASE_API_KEY")
-
-def ping_session(session_id):
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.connect_over_cdp(
-                f"wss://connect.browserbase.com?apiKey={BROWSERBASE_API_KEY}&sessionId={session_id}"
-            )
-
-            context = browser.contexts[0]
-            page = context.pages[0] if context.pages else context.new_page()
-
-            # Simple navigation to keep session alive
-            page.goto("about:blank")
-
-            browser.close()
-            return True
-
-    except Exception as e:
-        if "not found" in str(e).lower():
-            return False
-        raise
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--session-id", required=True)
-    args = parser.parse_args()
-
-    if ping_session(args.session_id):
-        sys.exit(0)
-    else:
-        sys.exit(1)
-```
-
 ---
 
 ## Error Taxonomy & Retry Strategy
@@ -1123,7 +1136,7 @@ if __name__ == "__main__":
 | **selector_failed** | Platform UI changed | ❌ No | Fail permanently, needs code update |
 | **not_logged_in** | User logged out manually | ❌ No | Mark connection as logged_out, notify user |
 | **network_error** | Timeout, connection issues | ✅ Yes | Retry with backoff |
-| **script_failed** | Python exception | ✅ Yes | Retry up to 3 attempts |
+| **script_failed** | Automation script exception | ✅ Yes | Retry up to 3 attempts |
 
 ### Retry Configuration
 
@@ -1157,7 +1170,7 @@ end
 
 - [ ] High-confidence note (>0.7) → auto-queued by AgentSession
 - [ ] Oban picks up job within seconds
-- [ ] Python agent successfully posts to YouTube
+- [ ] Playwright client successfully posts to YouTube
 - [ ] Note status updated: ghost → posting → posted
 - [ ] Permalink stored in `external_permalink` field
 
@@ -1182,8 +1195,8 @@ end
 See [04_BROWSERBASE_INTEGRATION.md](../04_BROWSERBASE_INTEGRATION.md) for:
 - Complete Browserbase API reference
 - Advanced session management
-- Port communication (Phase 2 optimization)
-- Pure Elixir CDP client (Phase 3, optional)
+- Pure Elixir CDP client (future optimization, optional)
+- Alternative Playwright integration approaches
 
 ---
 
