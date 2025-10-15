@@ -31,8 +31,7 @@ defmodule LossyWeb.NotesLive do
 
       <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
         <p class="text-sm text-blue-800">
-          <strong>Testing Instructions:</strong>
-          1. Load the extension
+          <strong>Testing Instructions:</strong> 1. Load the extension
           2. Click "Start Recording" in the side panel
           3. Speak a test phrase like "The pacing is too slow here"
           4. Click "Stop Recording"
@@ -53,20 +52,20 @@ defmodule LossyWeb.NotesLive do
                 <div class="flex-1">
                   <div class="flex items-center gap-2 mb-2">
                     <span class={"px-2 py-1 text-xs font-semibold rounded #{category_color(note.category)}"}>
-                      <%= note.category %>
+                      {note.category}
                     </span>
                     <span class="text-xs text-gray-500">
-                      Confidence: <%= Float.round(note.confidence * 100, 1) %>%
+                      Confidence: {Float.round(note.confidence * 100, 1)}%
                     </span>
                     <span class={"px-2 py-1 text-xs rounded #{status_color(note.status)}"}>
-                      <%= note.status %>
+                      {note.status}
                     </span>
                   </div>
-                  <p class="text-gray-900 font-medium mb-1"><%= note.text %></p>
-                  <p class="text-sm text-gray-600 italic">"<%= note.raw_transcript %>"</p>
+                  <p class="text-gray-900 font-medium mb-1">{note.text}</p>
+                  <p class="text-sm text-gray-600 italic">"{note.raw_transcript}"</p>
                 </div>
                 <div class="text-xs text-gray-400">
-                  <%= Calendar.strftime(note.inserted_at, "%H:%M:%S") %>
+                  {Calendar.strftime(note.inserted_at, "%H:%M:%S")}
                 </div>
               </div>
             </div>

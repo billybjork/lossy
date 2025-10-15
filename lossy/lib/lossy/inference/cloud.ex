@@ -19,12 +19,15 @@ defmodule Lossy.Inference.Cloud do
     boundary = "----WebKitFormBoundary#{:crypto.strong_rand_bytes(16) |> Base.encode16()}"
 
     body =
-      build_multipart([
-        {"model", "whisper-1"},
-        {"file", audio_binary, "audio.webm", "audio/webm"},
-        {"language", "en"},
-        {"response_format", "json"}
-      ], boundary)
+      build_multipart(
+        [
+          {"model", "whisper-1"},
+          {"file", audio_binary, "audio.webm", "audio/webm"},
+          {"language", "en"},
+          {"response_format", "json"}
+        ],
+        boundary
+      )
 
     headers = [
       {"Authorization", "Bearer #{get_api_key()}"},
@@ -135,7 +138,8 @@ defmodule Lossy.Inference.Cloud do
         messages: [
           %{
             role: "system",
-            content: "You structure voice transcripts into actionable video feedback. Always respond with valid JSON."
+            content:
+              "You structure voice transcripts into actionable video feedback. Always respond with valid JSON."
           },
           %{role: "user", content: prompt}
         ],

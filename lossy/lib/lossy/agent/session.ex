@@ -5,8 +5,10 @@ defmodule Lossy.Agent.Session do
   alias Lossy.Inference.Cloud
   alias Lossy.Videos
 
-  @max_audio_buffer_bytes 5_000_000  # 5MB max
-  @max_audio_duration_seconds 60     # 60s max
+  # 5MB max
+  @max_audio_buffer_bytes 5_000_000
+  # 60s max
+  @max_audio_duration_seconds 60
 
   # Client API
 
@@ -71,7 +73,8 @@ defmodule Lossy.Agent.Session do
 
       true ->
         # Continue accumulating
-        {:noreply, %{state | audio_buffer: new_buffer, audio_duration: new_duration, status: :listening}}
+        {:noreply,
+         %{state | audio_buffer: new_buffer, audio_duration: new_duration, status: :listening}}
     end
   end
 
@@ -121,7 +124,9 @@ defmodule Lossy.Agent.Session do
   defp transcribe_audio(state) do
     case Cloud.transcribe_audio(state.audio_buffer) do
       {:ok, transcript_text} ->
-        Logger.info("[#{state.session_id}] Transcription complete: #{String.slice(transcript_text, 0..50)}...")
+        Logger.info(
+          "[#{state.session_id}] Transcription complete: #{String.slice(transcript_text, 0..50)}..."
+        )
 
         # Broadcast transcript
         broadcast_event(state.session_id, %{
@@ -148,16 +153,18 @@ defmodule Lossy.Agent.Session do
         Logger.info("[#{state.session_id}] Note structured: #{inspect(structured_note)}")
 
         # Store in database
-        {:ok, note} = Videos.create_note(%{
-          raw_transcript: transcript_text,
-          text: structured_note.text,
-          category: structured_note.category,
-          confidence: structured_note.confidence,
-          status: "ghost",
-          timestamp_seconds: 0.0,  # Will be updated in Sprint 03 with video integration
-          video_id: state.video_id,
-          session_id: state.session_id
-        })
+        {:ok, note} =
+          Videos.create_note(%{
+            raw_transcript: transcript_text,
+            text: structured_note.text,
+            category: structured_note.category,
+            confidence: structured_note.confidence,
+            status: "ghost",
+            # Will be updated in Sprint 03 with video integration
+            timestamp_seconds: 0.0,
+            video_id: state.video_id,
+            session_id: state.session_id
+          })
 
         # Broadcast final result
         broadcast_event(state.session_id, %{

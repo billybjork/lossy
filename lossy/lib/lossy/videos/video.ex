@@ -22,7 +22,15 @@ defmodule Lossy.Videos.Video do
 
   def changeset(video, attrs) do
     video
-    |> cast(attrs, [:user_id, :platform, :external_id, :url, :title, :thumbnail_url, :duration_seconds])
+    |> cast(attrs, [
+      :user_id,
+      :platform,
+      :external_id,
+      :url,
+      :title,
+      :thumbnail_url,
+      :duration_seconds
+    ])
     |> validate_required([:platform, :external_id, :url])
     |> validate_inclusion(:platform, ~w(youtube vimeo air))
     |> unique_constraint([:platform, :external_id])

@@ -10,6 +10,7 @@ import Config
 # Load .env file in development/test (dotenv_parser is only available in dev/test)
 if config_env() in [:dev, :test] do
   env_path = Path.join(__DIR__, "../../.env")
+
   if File.exists?(env_path) do
     DotenvParser.load_file(env_path)
   end

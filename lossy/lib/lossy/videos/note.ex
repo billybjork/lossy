@@ -44,7 +44,10 @@ defmodule Lossy.Videos.Note do
       :session_id
     ])
     |> validate_required([:text, :timestamp_seconds])
-    |> validate_inclusion(:category, ~w(pacing audio visual editing general color graphics content other))
+    |> validate_inclusion(
+      :category,
+      ~w(pacing audio visual editing general color graphics content other)
+    )
     |> validate_inclusion(:status, ~w(ghost firmed pending_post posting posted failed cancelled))
     |> validate_number(:confidence, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
     |> foreign_key_constraint(:video_id)
