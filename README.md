@@ -187,9 +187,9 @@ See `docs/` directory for detailed guides:
 
 - `01_PROJECT_OVERVIEW.md` - Project goals and tech stack
 - `02_ARCHITECTURE.md` - System design and data flow
-- `03_IMPLEMENTATION_PHASES.md` - Phase-by-phase build plan
-- `04_LIVEVIEW_PATTERNS.md` - LiveView in extensions
-- `05_BROWSERBASE_INTEGRATION.md` - Automation setup
+- `sprints/` - Sprint-by-sprint implementation roadmap
+- `03_LIVEVIEW_PATTERNS.md` - LiveView in extensions
+- `04_BROWSERBASE_INTEGRATION.md` - Automation setup
 - `TECHNICAL_REFERENCES.md` - WASM, WebGPU, model caching
 
 ## 🐛 Troubleshooting

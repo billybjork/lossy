@@ -16,10 +16,10 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 |----------|---------|--------------|
 | **[01_PROJECT_OVERVIEW.md](./01_PROJECT_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
 | **[02_ARCHITECTURE.md](./02_ARCHITECTURE.md)** | System design, components, data flow diagrams | Understand how everything fits together |
-| **[03_IMPLEMENTATION_PHASES.md](./03_IMPLEMENTATION_PHASES.md)** | 6-8 week phased build plan with code examples | Ready to implement - follow this roadmap |
-| **[04_LIVEVIEW_PATTERNS.md](./04_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
-| **[05_BROWSERBASE_INTEGRATION.md](./05_BROWSERBASE_INTEGRATION.md)** | Automated note posting via Browserbase | Setting up automation system |
-| **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Phase 6-7 implementation (WASM Whisper, CLIP) |
+| **[sprints/](./sprints/)** | Sprint-based implementation roadmap (6 focused sprints) | Ready to implement - follow sprint-by-sprint |
+| **[03_LIVEVIEW_PATTERNS.md](./03_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
+| **[04_BROWSERBASE_INTEGRATION.md](./04_BROWSERBASE_INTEGRATION.md)** | Automated note posting via Browserbase | Setting up automation system |
+| **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Future implementation (WASM Whisper, CLIP) |
 
 ---
 
@@ -63,25 +63,28 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 
 ---
 
-### 03_IMPLEMENTATION_PHASES.md
+### sprints/
 **What it covers:**
-- 6-8 week phased implementation plan
-- Each phase has: goals, deliverables, code examples, testing
-- Working software at each phase (no "big bang" integration)
-- Dependencies and blockers per phase
-- Migration path from Python prototype
+- Sprint-based implementation roadmap (~2-3 weeks to MVP)
+- Each sprint file is self-contained with goals, tasks, and testing
+- Working software at end of each sprint
+- Current status tracking and progress visibility
+- Focused, actionable implementation steps
 
-**Key sections:**
-- **Phase 0 (Week 1)**: Project scaffolding
-- **Phase 1 (Week 2)**: Auth + LiveView basics
-- **Phase 2 (Week 3)**: Audio capture + streaming
-- **Phase 3 (Week 4)**: STT + LLM structuring
-- **Phase 4 (Week 5-6)**: Browserbase automation
-- **Phase 5 (Week 7-8)**: Polish + content scripts
+**Sprint files:**
+- **[Sprint 00](./sprints/SPRINT_00_scaffolding.md)**: ✅ Project scaffolding (Complete)
+- **[Sprint 01](./sprints/SPRINT_01_audio_streaming.md)**: 🚧 Audio capture + Phoenix Channels (In Progress)
+- **[Sprint 02](./sprints/SPRINT_02_transcription.md)**: ⏳ OpenAI Whisper + GPT-4o structuring
+- **[Sprint 03](./sprints/SPRINT_03_video_integration.md)**: ⏳ Video timestamp anchoring
+- **[Sprint 04](./sprints/SPRINT_04_auto_posting.md)**: ⏳ Browserbase automation
+- **[Sprint 05](./sprints/SPRINT_05_auth.md)**: ⏳ Authentication (Future)
+- **[Sprint 06](./sprints/SPRINT_06_polish.md)**: ⏳ UX polish (Future)
+
+**See:** [sprints/README.md](./sprints/README.md) for current status and sprint system overview
 
 ---
 
-### 04_LIVEVIEW_PATTERNS.md
+### 03_LIVEVIEW_PATTERNS.md
 **What it covers:**
 - How to use Phoenix LiveView in Chrome extensions
 - Complete setup requirements (CSP, check_origin, auth)
@@ -90,6 +93,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Context-aware rendering (current video)
 - Bidirectional actions (click note → seek video)
 - Service worker coordination
+- Offline handling & reconnection
 - Debugging tips
 
 **Key sections:**
@@ -97,11 +101,12 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Complete side panel implementation (Elixir + JavaScript)
 - Real-time streaming with `stream_insert/3`
 - Phoenix hooks for client-side interactivity
+- Connection state management
 - Common patterns and gotchas
 
 ---
 
-### 05_BROWSERBASE_INTEGRATION.md
+### 04_BROWSERBASE_INTEGRATION.md
 **What it covers:**
 - Three-phase integration strategy (Python bridge → Port → Pure Elixir)
 - Oban worker setup for reliable posting

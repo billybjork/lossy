@@ -194,9 +194,9 @@ lossy/
 ├── docs/                          # 📚 Documentation (this directory)
 │   ├── 01_PROJECT_OVERVIEW.md    # This file
 │   ├── 02_ARCHITECTURE.md        # System design
-│   ├── 03_IMPLEMENTATION_PHASES.md
-│   ├── 04_LIVEVIEW_PATTERNS.md
-│   └── 05_BROWSERBASE_INTEGRATION.md
+│   ├── sprints/                  # Sprint-based roadmap
+│   ├── 03_LIVEVIEW_PATTERNS.md
+│   └── 04_BROWSERBASE_INTEGRATION.md
 │
 ├── lossy/                         # 🔥 Elixir/Phoenix application (@lossy namespace)
 │   ├── lib/lossy/
@@ -287,4 +287,4 @@ npm run build
 # Load unpacked extension from extension/dist/
 ```
 
-See `03_IMPLEMENTATION_PHASES.md` for detailed build plan.
+See `sprints/` for sprint-by-sprint implementation plan.
