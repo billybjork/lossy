@@ -14,7 +14,7 @@
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://localhost:4000 wss://localhost:4000"
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:4000 wss://localhost:4000"
   },
 
   "side_panel": {

@@ -1,17 +1,97 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
+  <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy"
-        content="script-src 'self'; connect-src 'self' wss://localhost:4000">
   <title>Voice Notes</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      padding: 20px;
+      margin: 0;
+    }
+
+    .header {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    button {
+      padding: 12px 24px;
+      font-size: 16px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    button.record {
+      background: #dc2626;
+      color: white;
+    }
+
+    button.record:hover {
+      background: #b91c1c;
+    }
+
+    button.recording {
+      background: #059669;
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .status {
+      padding: 8px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      background: #f3f4f6;
+    }
+
+    .status.connected {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .transcripts {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .transcript {
+      padding: 12px;
+      background: #f9fafb;
+      border-left: 3px solid #3b82f6;
+      border-radius: 4px;
+    }
+
+    .transcript-text {
+      margin: 0;
+      font-size: 14px;
+    }
+
+    .transcript-time {
+      font-size: 12px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+  </style>
 </head>
 <body>
-  <div id="live-root" data-phx-main="true">
-    <h1>Voice Video Companion</h1>
-    <p>Side Panel - Ready for LiveView integration</p>
+  <div class="header">
+    <h1 style="margin: 0;">Voice Notes</h1>
+    <div class="status" id="status">Disconnected</div>
+    <button id="recordBtn" class="record">🎤 Start Recording</button>
   </div>
-  <script src="sidepanel.js"></script>
+
+  <div class="transcripts" id="transcripts"></div>
+
+  <script src="sidepanel/sidepanel.js"></script>
 </body>
 </html>

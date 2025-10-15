@@ -1,8 +1,9 @@
 # Sprint 01: Audio Streaming (No Auth)
 
-**Status:** 🚧 In Progress
+**Status:** ✅ Complete
 **Started:** 2025-10-14
-**Estimated Duration:** 2-3 days
+**Completed:** 2025-10-14
+**Duration:** 1 day
 
 ---
 
@@ -23,13 +24,13 @@ Establish the audio pipeline: extension captures voice → streams to Phoenix vi
 
 ## Deliverables
 
-- [ ] Offscreen document captures microphone audio
-- [ ] Audio chunks stream from offscreen → service worker
-- [ ] Service worker connects to Phoenix Channel
-- [ ] Backend receives binary audio data
-- [ ] Backend echoes back fake transcript
-- [ ] Side panel displays received messages
-- [ ] No authentication required (open channel)
+- [x] Offscreen document captures microphone audio
+- [x] Audio chunks stream from offscreen → service worker
+- [x] Service worker connects to Phoenix Channel
+- [x] Backend receives binary audio data
+- [x] Backend echoes back fake transcript
+- [x] Side panel displays received messages
+- [x] No authentication required (open channel)
 
 ---
 

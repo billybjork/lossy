@@ -7,23 +7,35 @@
 
 ## Current Status
 
-🚧 **Active Sprint:** [Sprint 01 - Audio Streaming (No Auth)](./SPRINT_01_audio_streaming.md)
+🚧 **Active Sprint:** [Sprint 02 - Transcription](./SPRINT_02_transcription.md)
 📅 **Started:** 2025-10-14
-🎯 **Goal:** Get audio flowing from extension → backend → extension without authentication
+🎯 **Goal:** Replace fake transcripts with real OpenAI Whisper API + GPT-4o note structuring
 
 ---
 
 ## Sprint Overview
 
+### Active Sprints
+
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
-| [00 - Scaffolding](./SPRINT_00_scaffolding.md) | ✅ Complete | Project foundations & build setup | 1 day |
-| [01 - Audio Streaming](./SPRINT_01_audio_streaming.md) | 🚧 In Progress | Audio capture + Phoenix Channels (no auth) | 2-3 days |
-| [02 - Transcription](./SPRINT_02_transcription.md) | ⏳ Planned | OpenAI Whisper + GPT-4o note structuring | 2-3 days |
+| [02 - Transcription](./SPRINT_02_transcription.md) | 🚧 In Progress | OpenAI Whisper + GPT-4o note structuring | 2-3 days |
+
+### Upcoming Sprints
+
+| Sprint | Status | Goal | Duration |
+|--------|--------|------|----------|
 | [03 - Video Integration](./SPRINT_03_video_integration.md) | ⏳ Planned | Content scripts + video timestamp anchoring | 2-3 days |
 | [04 - Auto Posting](./SPRINT_04_auto_posting.md) | ⏳ Planned | Browserbase automation + Oban workers | 3-5 days |
 | [05 - Auth](./SPRINT_05_auth.md) | ⏳ Future | User authentication & multi-user support | 2-3 days |
 | [06 - Polish](./SPRINT_06_polish.md) | ⏳ Future | On-video overlays + UX refinements | 3-4 days |
+
+### Completed Sprints
+
+| Sprint | Completed | Goal | Duration |
+|--------|-----------|------|----------|
+| [00 - Scaffolding](./archive/SPRINT_00_scaffolding.md) | ✅ 2025-10-14 | Project foundations & build setup | 1 day |
+| [01 - Audio Streaming](./archive/SPRINT_01_audio_streaming.md) | ✅ 2025-10-14 | Audio capture + Phoenix Channels (no auth) | 1 day |
 
 ---
 
