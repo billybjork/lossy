@@ -1,6 +1,7 @@
 # Sprint 03: Video Integration & Timeline Markers
 
-**Status:** ⏳ Planned
+**Status:** ✅ Complete
+**Completed:** 2025-10-15
 **Estimated Duration:** 3-4 days
 
 ---
@@ -59,20 +60,20 @@ Establish a robust, bidirectional connection between the Chrome extension and vi
 
 ## Deliverables
 
-- [ ] Universal video detector (finds `<video>` on any site)
-- [ ] Video scoring system (selects primary video from multiple candidates)
-- [ ] Universal video ID extractor (platform-specific + URL hash fallback)
-- [ ] Generic progress bar finder (heuristic-based)
-- [ ] Video playback controller (pause/play/seek API)
-- [ ] Timestamp capture with frame-accurate precision
-- [ ] Backend VideoChannel for video CRUD operations
-- [ ] Videos table integration (find_or_create_by platform + video_id)
-- [ ] Notes linked to videos via foreign key
-- [ ] Anchor chip overlay (red pulsing indicator at timestamp)
-- [ ] Timeline marker system (Shadow DOM overlays)
-- [ ] Bidirectional message passing (content script ↔ service worker ↔ side panel)
-- [ ] Fullscreen compatibility for overlays
-- [ ] Single universal content script (runs on all sites)
+- [x] Universal video detector (finds `<video>` on any site)
+- [x] Video scoring system (selects primary video from multiple candidates)
+- [x] Universal video ID extractor (platform-specific + URL hash fallback)
+- [x] Generic progress bar finder (heuristic-based with platform-specific fallbacks)
+- [x] Video playback controller (pause/play/seek API)
+- [x] Timestamp capture with frame-accurate precision
+- [x] Backend VideoChannel for video CRUD operations
+- [x] Videos table integration (find_or_create_by platform + video_id)
+- [x] Notes linked to videos via foreign key
+- [x] Anchor chip overlay (red pulsing indicator at timestamp)
+- [x] Timeline marker system (yellow circles with Shadow DOM overlays)
+- [x] Bidirectional message passing (content script ↔ service worker ↔ side panel)
+- [x] Fullscreen compatibility for overlays
+- [x] Single universal content script (runs on all sites)
 
 ---
 
