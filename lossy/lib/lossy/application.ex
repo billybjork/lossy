@@ -14,6 +14,9 @@ defmodule Lossy.Application do
       {Phoenix.PubSub, name: Lossy.PubSub},
       # Start Oban for background jobs
       {Oban, Application.fetch_env!(:lossy, Oban)},
+      # Start Agent session management
+      Lossy.Agent.SessionRegistry,
+      Lossy.Agent.SessionSupervisor,
       # Start a worker by calling: Lossy.Worker.start_link(arg)
       # {Lossy.Worker, arg},
       # Start to serve requests, typically the last entry

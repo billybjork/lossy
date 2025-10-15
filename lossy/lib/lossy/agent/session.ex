@@ -1,0 +1,212 @@
+defmodule Lossy.Agent.Session do
+  use GenServer
+  require Logger
+
+  alias Lossy.Inference.Cloud
+  alias Lossy.Videos
+
+  @max_audio_buffer_bytes 5_000_000  # 5MB max
+  @max_audio_duration_seconds 60     # 60s max
+
+  # Client API
+
+  def start_link(opts) do
+    session_id = Keyword.fetch!(opts, :session_id)
+    GenServer.start_link(__MODULE__, opts, name: via_tuple(session_id))
+  end
+
+  def cast_audio(session_id, audio_chunk) do
+    GenServer.cast(via_tuple(session_id), {:audio_chunk, audio_chunk})
+  end
+
+  def stop_recording(session_id) do
+    GenServer.cast(via_tuple(session_id), :stop_recording)
+  end
+
+  # Server Callbacks
+
+  @impl true
+  def init(opts) do
+    session_id = Keyword.fetch!(opts, :session_id)
+    user_id = Keyword.get(opts, :user_id)
+    video_id = Keyword.get(opts, :video_id)
+
+    state = %{
+      session_id: session_id,
+      user_id: user_id,
+      video_id: video_id,
+      status: :idle,
+      audio_buffer: <<>>,
+      audio_duration: 0,
+      started_at: nil,
+      last_transition: DateTime.utc_now()
+    }
+
+    Logger.info("AgentSession started: #{session_id}")
+    {:ok, state}
+  end
+
+  @impl true
+  def handle_cast({:audio_chunk, data}, state) do
+    new_buffer = state.audio_buffer <> data
+    new_duration = state.audio_duration + estimate_chunk_duration(data)
+
+    # Broadcast partial event
+    broadcast_event(state.session_id, %{
+      type: :audio_chunk_received,
+      buffer_size: byte_size(new_buffer),
+      duration: new_duration
+    })
+
+    cond do
+      byte_size(new_buffer) >= @max_audio_buffer_bytes ->
+        Logger.warning("Max buffer size reached, forcing transcription")
+        state = %{state | audio_buffer: new_buffer, audio_duration: new_duration}
+        {:noreply, transition_to(state, :transcribing)}
+
+      new_duration >= @max_audio_duration_seconds ->
+        Logger.warning("Max duration reached, forcing transcription")
+        state = %{state | audio_buffer: new_buffer, audio_duration: new_duration}
+        {:noreply, transition_to(state, :transcribing)}
+
+      true ->
+        # Continue accumulating
+        {:noreply, %{state | audio_buffer: new_buffer, audio_duration: new_duration, status: :listening}}
+    end
+  end
+
+  @impl true
+  def handle_cast(:stop_recording, state) do
+    Logger.info("Stopping recording, transcribing #{byte_size(state.audio_buffer)} bytes")
+    {:noreply, transition_to(state, :transcribing)}
+  end
+
+  # State Transitions
+
+  defp transition_to(%{status: :listening} = state, :transcribing) do
+    Logger.info("[#{state.session_id}] listening → transcribing")
+
+    # Kick off async transcription
+    Task.start(fn -> transcribe_audio(state) end)
+
+    broadcast_event(state.session_id, %{
+      type: :transcription_started,
+      buffer_size: byte_size(state.audio_buffer)
+    })
+
+    %{state | status: :transcribing}
+  end
+
+  defp transition_to(%{status: :idle} = state, :transcribing) do
+    Logger.info("[#{state.session_id}] idle → transcribing")
+
+    # Kick off async transcription
+    Task.start(fn -> transcribe_audio(state) end)
+
+    broadcast_event(state.session_id, %{
+      type: :transcription_started,
+      buffer_size: byte_size(state.audio_buffer)
+    })
+
+    %{state | status: :transcribing}
+  end
+
+  defp transition_to(state, _new_status) do
+    # No transition needed or invalid transition
+    state
+  end
+
+  # Async Work
+
+  defp transcribe_audio(state) do
+    case Cloud.transcribe_audio(state.audio_buffer) do
+      {:ok, transcript_text} ->
+        Logger.info("[#{state.session_id}] Transcription complete: #{String.slice(transcript_text, 0..50)}...")
+
+        # Broadcast transcript
+        broadcast_event(state.session_id, %{
+          type: :transcript_ready,
+          text: transcript_text
+        })
+
+        # Now structure the note
+        structure_note(state, transcript_text)
+
+      {:error, reason} ->
+        Logger.error("[#{state.session_id}] Transcription failed: #{inspect(reason)}")
+
+        broadcast_event(state.session_id, %{
+          type: :transcription_failed,
+          error: inspect(reason)
+        })
+    end
+  end
+
+  defp structure_note(state, transcript_text) do
+    case Cloud.structure_note(transcript_text) do
+      {:ok, structured_note} ->
+        Logger.info("[#{state.session_id}] Note structured: #{inspect(structured_note)}")
+
+        # Store in database
+        {:ok, note} = Videos.create_note(%{
+          raw_transcript: transcript_text,
+          text: structured_note.text,
+          category: structured_note.category,
+          confidence: structured_note.confidence,
+          status: "ghost",
+          timestamp_seconds: 0.0,  # Will be updated in Sprint 03 with video integration
+          video_id: state.video_id,
+          session_id: state.session_id
+        })
+
+        # Broadcast final result
+        broadcast_event(state.session_id, %{
+          type: :note_created,
+          note: note
+        })
+
+        # Also broadcast to video topic
+        if state.video_id do
+          Phoenix.PubSub.broadcast(
+            Lossy.PubSub,
+            "video:#{state.video_id}",
+            {:new_note, note}
+          )
+        end
+
+        # Broadcast to notes:all for LiveView testing
+        Phoenix.PubSub.broadcast(
+          Lossy.PubSub,
+          "notes:all",
+          {:agent_event, %{type: :note_created, note: note}}
+        )
+
+      {:error, reason} ->
+        Logger.error("[#{state.session_id}] Note structuring failed: #{inspect(reason)}")
+
+        broadcast_event(state.session_id, %{
+          type: :structuring_failed,
+          error: inspect(reason)
+        })
+    end
+  end
+
+  # Helpers
+
+  defp broadcast_event(session_id, event) do
+    Phoenix.PubSub.broadcast(
+      Lossy.PubSub,
+      "session:#{session_id}",
+      {:agent_event, event}
+    )
+  end
+
+  defp estimate_chunk_duration(audio_data) do
+    # WebM Opus at 16kbps ≈ 2KB/sec
+    byte_size(audio_data) / 2000
+  end
+
+  defp via_tuple(session_id) do
+    {:via, Registry, {Lossy.Agent.SessionRegistry, session_id}}
+  end
+end

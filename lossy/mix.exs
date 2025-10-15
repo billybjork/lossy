@@ -71,6 +71,7 @@ defmodule Lossy.MixProject do
       {:bcrypt_elixir, "~> 3.0"},
       {:oban, "~> 2.18"},
       {:cors_plug, "~> 3.0"},
+      {:httpoison, "~> 2.0"},
 
       # Dev/test tools
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false}

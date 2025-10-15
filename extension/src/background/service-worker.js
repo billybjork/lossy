@@ -135,19 +135,27 @@ async function stopRecording() {
     }).catch(err => console.error('Failed to stop offscreen recording:', err));
   }
 
-  // 2. Leave channel
+  // 2. Tell backend to finalize transcription
   if (audioChannel) {
-    audioChannel.leave();
-    audioChannel = null;
+    audioChannel.push('stop_recording', {})
+      .receive('ok', () => console.log('Backend notified to finalize'))
+      .receive('error', (err) => console.error('Failed to notify backend:', err));
   }
 
-  // 3. Disconnect socket
-  if (socket) {
-    socket.disconnect();
-    socket = null;
-  }
+  // 3. Leave channel (after stop_recording sent)
+  setTimeout(() => {
+    if (audioChannel) {
+      audioChannel.leave();
+      audioChannel = null;
+    }
 
-  isRecording = false;
+    if (socket) {
+      socket.disconnect();
+      socket = null;
+    }
+
+    isRecording = false;
+  }, 500);
 }
 
 async function createOffscreenDocument() {

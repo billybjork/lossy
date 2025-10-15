@@ -18,6 +18,7 @@ defmodule LossyWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    live "/notes", NotesLive, :index
   end
 
   # Other scopes may use custom stacks.
