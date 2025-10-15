@@ -10,15 +10,21 @@ export class TimelineMarkers {
     this.container = null;
     this.shadowRoot = null;
     this.markers = new Map(); // noteId → marker element
+    this.pendingMarkers = []; // Queue for markers that can't be added yet
     this.clickCallback = null;
+    this.videoReady = false;
+    this.cleanupFunctions = []; // Store cleanup functions for event listeners
     this.init();
+    this.setupVideoReadyListener();
   }
 
   init() {
     if (!this.progressBar) {
-      console.warn('[TimelineMarkers] No progress bar provided');
+      console.warn('[TimelineMarkers] ⚠️ No progress bar provided');
       return;
     }
+
+    console.log('[TimelineMarkers] 🎯 Initializing timeline markers on progress bar:', this.progressBar);
 
     // Create marker container
     this.container = document.createElement('div');
@@ -98,11 +104,110 @@ export class TimelineMarkers {
       this.progressBar.style.position = 'relative';
     }
     this.progressBar.appendChild(this.container);
+    console.log('[TimelineMarkers] 🎯 Shadow DOM container attached to progress bar');
+  }
+
+  /**
+   * Setup listener to detect when video metadata is ready.
+   * This is when video.duration becomes available.
+   */
+  setupVideoReadyListener() {
+    // Check if duration is already available
+    if (this.videoElement.duration && !isNaN(this.videoElement.duration) && this.videoElement.duration > 0) {
+      console.log('[TimelineMarkers] ✅ Video duration ready:', this.videoElement.duration);
+      this.videoReady = true;
+      this.processPendingMarkers();
+      return;
+    }
+
+    console.log('[TimelineMarkers] ⏳ Waiting for video metadata (duration not ready yet)...');
+
+    // Listen for loadedmetadata event
+    const onMetadataLoaded = () => {
+      console.log('[TimelineMarkers] ✅ Video metadata loaded, duration:', this.videoElement.duration);
+      this.videoReady = true;
+      this.processPendingMarkers();
+    };
+
+    this.videoElement.addEventListener('loadedmetadata', onMetadataLoaded);
+    this.cleanupFunctions.push(() => {
+      this.videoElement.removeEventListener('loadedmetadata', onMetadataLoaded);
+    });
+
+    // Also listen for durationchange as a fallback
+    const onDurationChange = () => {
+      if (this.videoElement.duration && !isNaN(this.videoElement.duration) && this.videoElement.duration > 0) {
+        console.log('[TimelineMarkers] ✅ Video duration changed to:', this.videoElement.duration);
+        this.videoReady = true;
+        this.processPendingMarkers();
+      }
+    };
+
+    this.videoElement.addEventListener('durationchange', onDurationChange);
+    this.cleanupFunctions.push(() => {
+      this.videoElement.removeEventListener('durationchange', onDurationChange);
+    });
+
+    // Timeout fallback - try to process pending markers after 5 seconds regardless
+    const timeoutId = setTimeout(() => {
+      if (!this.videoReady) {
+        console.log('[TimelineMarkers] ⏰ Timeout reached, attempting to process pending markers anyway');
+        this.videoReady = true;
+        this.processPendingMarkers();
+      }
+    }, 5000);
+
+    this.cleanupFunctions.push(() => {
+      clearTimeout(timeoutId);
+    });
+  }
+
+  /**
+   * Process any markers that were queued while waiting for video to be ready.
+   */
+  processPendingMarkers() {
+    if (this.pendingMarkers.length === 0) {
+      console.log('[TimelineMarkers] ℹ️ No pending markers to process');
+      return;
+    }
+
+    console.log('[TimelineMarkers] 🔄 Processing', this.pendingMarkers.length, 'pending markers');
+    const pending = [...this.pendingMarkers];
+    this.pendingMarkers = [];
+
+    pending.forEach(markerData => {
+      this.addMarker(markerData);
+    });
   }
 
   addMarker({ id, timestamp, category, text }) {
+    // Check if we already have this marker
+    if (this.markers.has(id)) {
+      console.log('[TimelineMarkers] ℹ️ Marker already exists:', id);
+      return;
+    }
+
     const duration = this.videoElement.duration;
-    if (!duration || timestamp > duration) return;
+
+    // If video isn't ready yet, queue this marker for later
+    if (!this.videoReady || !duration || isNaN(duration) || duration === 0) {
+      console.log('[TimelineMarkers] ⏳ Video not ready, queuing marker:', id, 'timestamp:', timestamp);
+      this.pendingMarkers.push({ id, timestamp, category, text });
+      return;
+    }
+
+    // Validate timestamp
+    if (timestamp > duration) {
+      console.warn('[TimelineMarkers] ⚠️ Marker timestamp exceeds video duration:', timestamp, '>', duration);
+      return;
+    }
+
+    if (timestamp < 0) {
+      console.warn('[TimelineMarkers] ⚠️ Invalid marker timestamp:', timestamp);
+      return;
+    }
+
+    console.log('[TimelineMarkers] ➕ Adding marker:', id, 'at', timestamp, 'seconds');
 
     // Calculate position (percentage)
     const position = (timestamp / duration) * 100;
@@ -133,10 +238,16 @@ export class TimelineMarkers {
 
     // Add to shadow DOM
     const markersContainer = this.shadowRoot.getElementById('markers-container');
+    if (!markersContainer) {
+      console.error('[TimelineMarkers] ❌ Markers container not found in shadow DOM');
+      return;
+    }
+
     markersContainer.appendChild(marker);
 
     // Store reference
     this.markers.set(id, marker);
+    console.log('[TimelineMarkers] ✅ Marker added successfully. Total markers:', this.markers.size);
   }
 
   removeMarker(noteId) {
@@ -174,15 +285,49 @@ export class TimelineMarkers {
     this.clickCallback = callback;
   }
 
+  clearAll() {
+    console.log('[TimelineMarkers] 🧹 Clearing all markers. Current count:', this.markers.size);
+
+    // Remove all marker elements from DOM
+    this.markers.forEach(marker => marker.remove());
+    // Clear the map
+    this.markers.clear();
+    // Clear pending markers too
+    this.pendingMarkers = [];
+
+    console.log('[TimelineMarkers] ✅ All markers cleared');
+  }
+
   truncate(text, maxLength) {
     if (!text) return '';
     return text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
   }
 
   destroy() {
+    console.log('[TimelineMarkers] 🧹 Destroying timeline markers');
+
+    // Run all cleanup functions (remove event listeners, clear timeouts)
+    this.cleanupFunctions.forEach(cleanup => {
+      try {
+        cleanup();
+      } catch (err) {
+        console.warn('[TimelineMarkers] Cleanup function error:', err);
+      }
+    });
+    this.cleanupFunctions = [];
+
+    // Remove DOM elements
     if (this.container) {
       this.container.remove();
+      this.container = null;
     }
+
+    // Clear all state
     this.markers.clear();
+    this.pendingMarkers = [];
+    this.shadowRoot = null;
+    this.clickCallback = null;
+
+    console.log('[TimelineMarkers] ✅ Destroyed');
   }
 }

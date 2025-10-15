@@ -15,6 +15,10 @@ console.log('Side panel loaded');
 
 let isRecording = false;
 let timestampUpdateInterval = null;
+let currentTabId = null;
+let currentVideoContext = null;
+let displayedVideoDbId = null; // Track which video's notes are currently displayed
+let loadingSessionId = 0; // Increment this to invalidate in-flight note requests
 
 const recordBtn = document.getElementById('recordBtn');
 const statusEl = document.getElementById('status');
@@ -46,17 +50,109 @@ recordBtn.addEventListener('click', async () => {
   }
 });
 
+// Initialize side panel
+async function init() {
+  console.log('[SidePanel] Initializing...');
+
+  // Get active tab context
+  try {
+    const response = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
+    currentVideoContext = response.context;
+
+    if (currentVideoContext) {
+      console.log('[SidePanel] Initial video context:', currentVideoContext);
+    }
+  } catch (err) {
+    console.error('[SidePanel] Failed to get active tab context:', err);
+  }
+}
+
 // Listen for transcripts from service worker
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'transcript') {
-    addTranscript(message.data);
+    // Only add transcript if it belongs to the currently displayed video
+    const noteVideoId = message.data.video_id;
+    if (noteVideoId === displayedVideoDbId) {
+      console.log('[SidePanel] 📝 Adding transcript for video', noteVideoId);
+      addTranscript(message.data);
+    } else {
+      console.log('[SidePanel] ⚠️ Ignoring transcript for video', noteVideoId, '(displaying:', displayedVideoDbId, ')');
+    }
   }
 
   // Listen for focus_note messages (from timeline marker clicks)
   if (message.action === 'focus_note') {
     highlightNote(message.noteId);
   }
+
+  // Listen for tab changes
+  if (message.action === 'tab_changed') {
+    handleTabChanged(message.tabId, message.videoContext);
+  }
+
+  // Clear UI when content script initializes (new video loading)
+  if (message.action === 'clear_ui') {
+    console.log('[SidePanel] 🧹 CLEAR_UI: Clearing for new video');
+    transcriptsEl.innerHTML = '';
+    currentVideoContext = null;
+    displayedVideoDbId = null;
+    loadingSessionId++; // Invalidate any in-flight requests
+    console.log('[SidePanel] 🧹 Loading session ID incremented to', loadingSessionId);
+  }
 });
+
+async function handleTabChanged(tabId, videoContext) {
+  console.log('[SidePanel] 🔄 TAB_CHANGED: Tab', tabId, 'with context:', videoContext);
+
+  const newVideoDbId = videoContext?.videoDbId;
+
+  // Update state
+  currentTabId = tabId;
+  currentVideoContext = videoContext;
+
+  // If switching to a tab with a video
+  if (newVideoDbId) {
+    // If we're not currently displaying this video's notes, load them
+    if (displayedVideoDbId !== newVideoDbId) {
+      console.log('[SidePanel] 🔄 Loading notes for video', newVideoDbId, '(was displaying:', displayedVideoDbId, ')');
+
+      // Clear existing notes and invalidate old requests
+      transcriptsEl.innerHTML = '';
+      displayedVideoDbId = newVideoDbId;
+      loadingSessionId++; // Invalidate any in-flight requests from previous video
+      const thisSessionId = loadingSessionId;
+      console.log('[SidePanel] 🔄 Started loading session', thisSessionId, 'for video', newVideoDbId);
+
+      // Request notes for this video
+      try {
+        console.log('[SidePanel] 🔄 Requesting notes for video', newVideoDbId);
+        await chrome.runtime.sendMessage({
+          action: 'request_notes_for_sidepanel',
+          videoDbId: newVideoDbId,
+          tabId: tabId,
+          sessionId: thisSessionId
+        });
+
+        // Check if we're still on the same session (user didn't navigate away)
+        if (loadingSessionId === thisSessionId) {
+          console.log('[SidePanel] ✅ Notes loaded successfully for session', thisSessionId);
+        } else {
+          console.log('[SidePanel] ⚠️ Session', thisSessionId, 'was invalidated (now on session', loadingSessionId, ')');
+        }
+      } catch (err) {
+        console.log('[SidePanel] ⚠️ Failed to request notes:', err);
+      }
+    } else {
+      console.log('[SidePanel] ℹ️ Already displaying notes for video', newVideoDbId);
+    }
+  } else {
+    // Switched to a tab without a video - clear notes
+    console.log('[SidePanel] 🧹 Tab has no video context, clearing notes');
+    transcriptsEl.innerHTML = '';
+    displayedVideoDbId = null;
+    loadingSessionId++;
+  }
+}
 
 function updateUI() {
   if (isRecording) {
@@ -184,6 +280,7 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// Initialize UI
+// Initialize
+init();
 updateUI();
 startTimestampUpdates();

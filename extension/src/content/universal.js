@@ -13,20 +13,39 @@ let currentVideoId = null;
 let currentVideoDbId = null;
 let anchorChip = null;
 let timelineMarkers = null;
+let currentUrl = window.location.href;
+let isInitializing = false; // Guard against simultaneous inits
+let historyIntercepted = false; // Track if we've already intercepted History API
 
 async function init() {
-  console.log('[Lossy] Initializing universal video detection...');
+  // Prevent multiple simultaneous initializations
+  if (isInitializing) {
+    console.log('[Lossy] ⚠️ INIT: Already initializing, skipping...');
+    return;
+  }
+
+  isInitializing = true;
+  console.log('[Lossy] 🔵 INIT: Starting initialization for URL:', window.location.href);
+
+  // Tell side panel to clear old notes (we're loading a fresh video)
+  console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
+  chrome.runtime.sendMessage({
+    action: 'clear_ui'
+  }).catch(() => {
+    // Side panel may not be open, that's OK
+    console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
+  });
 
   // Detect video
   videoDetector = new UniversalVideoDetector();
   const videoElement = await videoDetector.detect();
 
   if (!videoElement) {
-    console.warn('[Lossy] No video element found on this page');
+    console.warn('[Lossy] ⚠️ INIT: No video element found on this page');
     return;
   }
 
-  console.log('[Lossy] Video element found:', videoElement);
+  console.log('[Lossy] 🔵 INIT: Video element found:', videoElement);
 
   // Extract video metadata
   const url = window.location.href;
@@ -35,12 +54,13 @@ async function init() {
 
   currentVideoId = videoIdData.id;
 
-  console.log('[Lossy] Video ID:', videoIdData);
+  console.log('[Lossy] 🔵 INIT: Video ID:', videoIdData);
 
   // Create video controller
   videoController = new VideoController(videoElement);
 
   // Send video context to service worker
+  console.log('[Lossy] 🔵 INIT: Sending video_detected to service worker');
   const response = await chrome.runtime.sendMessage({
     action: 'video_detected',
     data: {
@@ -50,28 +70,93 @@ async function init() {
       title: document.title
     }
   }).catch(err => {
-    console.warn('[Lossy] Could not send video_detected message:', err);
+    console.warn('[Lossy] ⚠️ INIT: Could not send video_detected message:', err);
     return null;
   });
 
   if (response?.videoDbId) {
     currentVideoDbId = response.videoDbId;
-    console.log('[Lossy] Video database ID:', currentVideoDbId);
+    console.log('[Lossy] 🔵 INIT: Video database ID:', currentVideoDbId);
+  } else {
+    console.warn('[Lossy] ⚠️ INIT: No videoDbId in response');
   }
 
   // Set up overlays
   setupAnchorChip(videoElement);
+
+  // Listen for events (before setup so we can receive messages)
+  listenForEvents();
+
+  // Set up timeline markers (may retry if progress bar not found)
   setupTimelineMarkers(videoElement);
 
-  // Listen for events
-  listenForEvents();
+  // Note: Notes will be requested after timeline markers are confirmed ready
+  // See createTimelineMarkers() which requests notes once markers are initialized
 
   // Watch for video changes (SPA navigation)
   videoDetector.watchForChanges((newVideo) => {
-    console.log('[Lossy] Video changed, reinitializing...');
+    console.log('[Lossy] 🔄 Video element changed, reinitializing...');
+    debouncedReinit();
+  });
+
+  // Watch for URL changes (SPA navigation like YouTube)
+  // Intercept History API for efficient change detection (only once per page load)
+  if (!historyIntercepted) {
+    interceptHistoryApi();
+    historyIntercepted = true;
+  }
+
+  isInitializing = false;
+  console.log('[Lossy] 🔵 INIT: Initialization complete');
+}
+
+// Debounce reinitialization to prevent rapid sequential calls
+let reinitTimer = null;
+function debouncedReinit() {
+  if (reinitTimer) {
+    clearTimeout(reinitTimer);
+  }
+
+  reinitTimer = setTimeout(() => {
     cleanup();
     init();
-  });
+  }, 300); // 300ms debounce
+}
+
+/**
+ * Intercept History API to detect URL changes efficiently.
+ * This is better than polling and catches YouTube's pushState navigation.
+ */
+function interceptHistoryApi() {
+  currentUrl = window.location.href;
+
+  // Intercept pushState
+  const originalPushState = history.pushState;
+  history.pushState = function(...args) {
+    originalPushState.apply(this, args);
+    checkUrlChange();
+  };
+
+  // Intercept replaceState
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function(...args) {
+    originalReplaceState.apply(this, args);
+    checkUrlChange();
+  };
+
+  // Also listen for popstate (back/forward buttons)
+  window.addEventListener('popstate', checkUrlChange);
+
+  console.log('[Lossy] 🔵 INIT: History API intercepted for URL monitoring');
+}
+
+function checkUrlChange() {
+  const newUrl = window.location.href;
+  if (newUrl !== currentUrl) {
+    console.log('[Lossy] 🔄 URL CHANGED:', currentUrl, '→', newUrl);
+    currentUrl = newUrl;
+    debouncedReinit();
+  }
 }
 
 function setupAnchorChip(videoElement) {
@@ -79,25 +164,118 @@ function setupAnchorChip(videoElement) {
   anchorChip.hide();
 }
 
+/**
+ * Load markers from notes array.
+ * Extracted to a function so it can be called from retry logic.
+ */
+function loadMarkersFromNotes(notes) {
+  if (!timelineMarkers) {
+    console.error('[Lossy] ❌ Cannot load markers, timeline markers not initialized');
+    return;
+  }
+
+  let queued = 0;
+  let added = 0;
+  let skipped = 0;
+
+  notes.forEach(note => {
+    if (note.timestamp_seconds != null) {
+      const hadPending = timelineMarkers.pendingMarkers.length;
+      timelineMarkers.addMarker({
+        id: note.id,
+        timestamp: note.timestamp_seconds,
+        category: note.category,
+        text: note.text
+      });
+      const nowPending = timelineMarkers.pendingMarkers.length;
+
+      if (nowPending > hadPending) {
+        queued++;
+      } else if (timelineMarkers.markers.has(note.id)) {
+        added++;
+      } else {
+        skipped++;
+      }
+    } else {
+      console.warn('[Lossy] ⚠️ Note missing timestamp:', note.id);
+      skipped++;
+    }
+  });
+
+  console.log('[Lossy] 📍 LOAD_MARKERS: Results - Added:', added, 'Queued:', queued, 'Skipped:', skipped);
+}
+
 function setupTimelineMarkers(videoElement) {
-  // Find progress bar
+  console.log('[Lossy] 🎯 Setting up timeline markers...');
+
+  // Find progress bar with retry logic
   const progressBarFinder = new UniversalProgressBar(videoElement);
   const progressBar = progressBarFinder.find();
 
   if (!progressBar) {
-    console.warn('[Lossy] Could not find progress bar, timeline markers disabled');
+    console.warn('[Lossy] ⚠️ Could not find progress bar immediately, will retry...');
+    retryTimelineMarkersSetup(videoElement, 0);
     return;
   }
 
+  console.log('[Lossy] 🎯 Progress bar found, creating TimelineMarkers instance');
+  createTimelineMarkers(videoElement, progressBar);
+}
+
+/**
+ * Retry finding progress bar with exponential backoff.
+ * YouTube's controls can take time to render during SPA navigation.
+ */
+function retryTimelineMarkersSetup(videoElement, attempt) {
+  const maxAttempts = 5;
+  const delays = [500, 1000, 2000, 3000, 5000]; // Exponential backoff
+
+  if (attempt >= maxAttempts) {
+    console.error('[Lossy] ❌ Failed to find progress bar after', maxAttempts, 'attempts. Timeline markers disabled.');
+    return;
+  }
+
+  setTimeout(() => {
+    console.log('[Lossy] 🔄 Retry attempt', attempt + 1, 'to find progress bar...');
+
+    const progressBarFinder = new UniversalProgressBar(videoElement);
+    const progressBar = progressBarFinder.find();
+
+    if (progressBar) {
+      console.log('[Lossy] ✅ Progress bar found on retry', attempt + 1);
+      createTimelineMarkers(videoElement, progressBar);
+    } else {
+      retryTimelineMarkersSetup(videoElement, attempt + 1);
+    }
+  }, delays[attempt]);
+}
+
+/**
+ * Create and configure TimelineMarkers instance.
+ */
+function createTimelineMarkers(videoElement, progressBar) {
   timelineMarkers = new TimelineMarkers(videoElement, progressBar);
 
   timelineMarkers.onMarkerClick((noteId, timestamp) => {
-    console.log('[Lossy] Timeline marker clicked:', noteId, timestamp);
+    console.log('[Lossy] 📍 Timeline marker clicked:', noteId, timestamp);
     chrome.runtime.sendMessage({
       action: 'marker_clicked',
       data: { noteId, timestamp }
     });
   });
+
+  console.log('[Lossy] 🎯 Timeline markers setup complete');
+
+  // If we had pending notes waiting for timeline markers, request them now
+  if (currentVideoDbId && timelineMarkers) {
+    console.log('[Lossy] 🎯 Timeline markers ready, requesting notes for video:', currentVideoDbId);
+    chrome.runtime.sendMessage({
+      action: 'request_notes',
+      videoDbId: currentVideoDbId
+    }).catch(err => {
+      console.log('[Lossy] ⚠️ Failed to request notes after timeline setup:', err);
+    });
+  }
 }
 
 function listenForEvents() {
@@ -145,15 +323,23 @@ function listenForEvents() {
     }
 
     if (message.action === 'note_created') {
-      console.log('[Lossy] Note created, adding timeline marker:', message.data);
+      console.log('[Lossy] 📍 NOTE_CREATED: Adding new timeline marker:', message.data);
 
-      if (timelineMarkers && message.data.timestamp_seconds != null) {
+      if (!timelineMarkers) {
+        console.warn('[Lossy] ⚠️ NOTE_CREATED: Timeline markers not initialized');
+        sendResponse({ success: false, error: 'Timeline markers not initialized' });
+        return false;
+      }
+
+      if (message.data.timestamp_seconds != null) {
         timelineMarkers.addMarker({
           id: message.data.id,
           timestamp: message.data.timestamp_seconds,
           category: message.data.category,
           text: message.data.text
         });
+      } else {
+        console.warn('[Lossy] ⚠️ NOTE_CREATED: Missing timestamp for note:', message.data.id);
       }
 
       sendResponse({ success: true });
@@ -169,19 +355,40 @@ function listenForEvents() {
     }
 
     if (message.action === 'load_markers') {
-      console.log('[Lossy] Loading markers:', message.notes);
+      console.log('[Lossy] 📍 LOAD_MARKERS: Received', message.notes?.length || 0, 'notes');
 
-      if (timelineMarkers && message.notes) {
-        message.notes.forEach(note => {
-          if (note.timestamp_seconds != null) {
-            timelineMarkers.addMarker({
-              id: note.id,
-              timestamp: note.timestamp_seconds,
-              category: note.category,
-              text: note.text
-            });
+      if (!timelineMarkers) {
+        console.warn('[Lossy] ⚠️ LOAD_MARKERS: Timeline markers not initialized yet, will retry in 1 second...');
+
+        // Retry after a delay (timeline markers might still be initializing)
+        setTimeout(() => {
+          if (timelineMarkers) {
+            console.log('[Lossy] 📍 LOAD_MARKERS: Retrying after timeline markers initialized');
+            loadMarkersFromNotes(message.notes);
+          } else {
+            console.error('[Lossy] ❌ LOAD_MARKERS: Timeline markers still not available after retry');
           }
-        });
+        }, 1000);
+
+        sendResponse({ success: false, error: 'Timeline markers initializing, will retry' });
+        return false;
+      }
+
+      if (!message.notes || message.notes.length === 0) {
+        console.log('[Lossy] ℹ️ LOAD_MARKERS: No notes to display');
+        sendResponse({ success: true });
+        return false;
+      }
+
+      loadMarkersFromNotes(message.notes);
+      sendResponse({ success: true });
+    }
+
+    if (message.action === 'clear_markers') {
+      console.log('[Lossy] Clearing timeline markers');
+
+      if (timelineMarkers) {
+        timelineMarkers.clearAll();
       }
 
       sendResponse({ success: true });
@@ -209,10 +416,41 @@ function listenForEvents() {
 }
 
 function cleanup() {
-  if (anchorChip) anchorChip.destroy();
-  if (timelineMarkers) timelineMarkers.destroy();
-  if (videoDetector) videoDetector.destroy();
-  if (videoController) videoController.destroy();
+  console.log('[Lossy] 🧹 CLEANUP: Starting cleanup');
+
+  // Clear debounce timer
+  if (reinitTimer) {
+    clearTimeout(reinitTimer);
+    reinitTimer = null;
+  }
+
+  // Destroy UI components
+  if (anchorChip) {
+    anchorChip.destroy();
+    anchorChip = null;
+  }
+
+  if (timelineMarkers) {
+    timelineMarkers.destroy();
+    timelineMarkers = null;
+  }
+
+  if (videoDetector) {
+    videoDetector.destroy();
+    videoDetector = null;
+  }
+
+  if (videoController) {
+    videoController.destroy();
+    videoController = null;
+  }
+
+  // Reset state
+  currentVideoId = null;
+  currentVideoDbId = null;
+  isInitializing = false;
+
+  console.log('[Lossy] 🧹 CLEANUP: Complete');
 }
 
 // Initialize

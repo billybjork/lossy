@@ -123,23 +123,43 @@ export class UniversalVideoDetector {
 
   /**
    * Watch for video element changes (SPA navigation, etc).
+   * Watches both DOM changes and video element attribute changes.
    */
   watchForChanges(callback) {
-    this.observer = new MutationObserver(() => {
+    this.observer = new MutationObserver((mutations) => {
       const currentVideos = Array.from(document.querySelectorAll('video'));
 
+      // Check if primary video element was removed
       if (!currentVideos.includes(this.primaryVideo)) {
-        console.log('[UniversalVideoDetector] Primary video changed, re-detecting...');
+        console.log('[UniversalVideoDetector] Primary video removed, re-detecting...');
         this.videoElements = currentVideos;
         this.primaryVideo = this.selectPrimaryVideo(currentVideos);
         callback(this.primaryVideo);
+        return;
+      }
+
+      // Check if video src changed (YouTube sometimes changes src without changing element)
+      for (const mutation of mutations) {
+        if (mutation.type === 'attributes' && mutation.target === this.primaryVideo) {
+          if (mutation.attributeName === 'src' || mutation.attributeName === 'currentSrc') {
+            console.log('[UniversalVideoDetector] Video src changed, notifying...');
+            callback(this.primaryVideo);
+            return;
+          }
+        }
       }
     });
 
+    // Watch for both childList changes and attribute changes on video elements
     this.observer.observe(document.body, {
       childList: true,
-      subtree: true
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['src', 'currentSrc'],
+      attributeOldValue: true
     });
+
+    console.log('[UniversalVideoDetector] Watching for video changes (DOM + attributes)');
   }
 
   destroy() {

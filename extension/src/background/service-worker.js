@@ -1,7 +1,9 @@
 // Service Worker for Voice Video Companion
 // Sprint 01: Audio streaming to Phoenix
+// Sprint 03.5: Tab Management
 
 import { Socket } from "phoenix";
+import { TabManager } from "./tab-manager.js";
 
 console.log('Service worker loaded');
 
@@ -9,8 +11,15 @@ let socket = null;
 let audioChannel = null;
 let videoChannel = null;
 let isRecording = false;
-let currentVideo = null;
 let currentTimestamp = null;
+let tabManager = null;
+
+// Initialize TabManager
+(async () => {
+  tabManager = new TabManager();
+  await tabManager.init();
+  console.log('[ServiceWorker] TabManager initialized');
+})();
 
 // Extension installed
 chrome.runtime.onInstalled.addListener(() => {
@@ -49,11 +58,31 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Video detected from content script
   if (message.action === 'video_detected') {
-    currentVideo = message.data;
-    console.log('[Lossy] Video detected:', currentVideo);
+    const tabId = sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ error: 'No tab ID' });
+      return false;
+    }
+
+    const videoData = message.data;
+    console.log('[ServiceWorker] 📹 VIDEO_DETECTED in tab', tabId, ':', videoData);
 
     // Send to backend VideoChannel
-    handleVideoDetected(currentVideo).then(response => {
+    handleVideoDetected(videoData, tabId).then(response => {
+      console.log('[ServiceWorker] 📹 Backend returned videoDbId:', response.videoDbId);
+
+      // Store in TabManager
+      if (response.videoDbId && tabManager) {
+        console.log('[ServiceWorker] 📹 Storing video context in TabManager for tab', tabId);
+        tabManager.setVideoContext(tabId, {
+          videoDbId: response.videoDbId,
+          platform: videoData.platform,
+          videoId: videoData.videoId,
+          url: videoData.url,
+          title: videoData.title
+        });
+      }
+
       sendResponse(response);
     }).catch(err => {
       console.error('[Lossy] Failed to handle video detected:', err);
@@ -129,6 +158,66 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return false;
   }
+
+  // Get active tab context (from side panel)
+  if (message.action === 'get_active_tab_context') {
+    const context = tabManager ? tabManager.getActiveVideoContext() : null;
+    sendResponse({ context });
+    return false;
+  }
+
+  // Get all tabs with videos (for tab switcher UI)
+  if (message.action === 'get_all_tabs') {
+    const tabs = tabManager ? tabManager.getAllTabs() : [];
+    sendResponse({ tabs });
+    return false;
+  }
+
+  // Switch to specific tab (from side panel tab switcher)
+  if (message.action === 'switch_to_tab') {
+    chrome.tabs.update(message.tabId, { active: true });
+    sendResponse({ success: true });
+    return false;
+  }
+
+  // Request notes for a video (from content script after initialization)
+  if (message.action === 'request_notes') {
+    const tabId = sender.tab?.id;
+    if (!tabId || !message.videoDbId) {
+      sendResponse({ error: 'Missing tabId or videoDbId' });
+      return false;
+    }
+
+    console.log('[ServiceWorker] 📝 REQUEST_NOTES from content script for video:', message.videoDbId, 'tab:', tabId);
+
+    loadNotesForVideo(message.videoDbId, tabId).then(() => {
+      sendResponse({ success: true });
+    }).catch(err => {
+      console.error('[Lossy] Failed to load notes:', err);
+      sendResponse({ error: err.message });
+    });
+
+    return true; // Keep channel open for async response
+  }
+
+  // Request notes for side panel only (from side panel when switching tabs)
+  if (message.action === 'request_notes_for_sidepanel') {
+    if (!message.videoDbId) {
+      sendResponse({ error: 'Missing videoDbId' });
+      return false;
+    }
+
+    console.log('[ServiceWorker] 📝 REQUEST_NOTES_FOR_SIDEPANEL for video:', message.videoDbId);
+
+    loadNotesForSidePanel(message.videoDbId).then(() => {
+      sendResponse({ success: true });
+    }).catch(err => {
+      console.error('[Lossy] Failed to load notes:', err);
+      sendResponse({ error: err.message });
+    });
+
+    return true; // Keep channel open for async response
+  }
 });
 
 async function toggleRecording() {
@@ -151,8 +240,27 @@ async function toggleRecording() {
 async function startRecording() {
   console.log('Starting recording...');
 
-  // 1. Notify content script to pause video and capture timestamp
+  // 1. Get active tab and check recording state
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (!tab?.id) {
+    console.error('[Lossy] No active tab');
+    return;
+  }
+
+  // Check if another tab is recording
+  if (tabManager) {
+    const recordingTabId = tabManager.getRecordingTabId();
+    if (recordingTabId !== null && recordingTabId !== tab.id) {
+      console.error('[Lossy] Tab', recordingTabId, 'is already recording');
+      throw new Error(`Another tab is already recording`);
+    }
+
+    // Mark this tab as recording
+    tabManager.startRecording(tab.id);
+  }
+
+  // 2. Notify content script to pause video and capture timestamp
   let capturedTimestamp = null;
 
   if (tab?.id) {
@@ -190,8 +298,12 @@ async function startRecording() {
 
   // 4. Join audio channel with video context
   const sessionId = crypto.randomUUID();
+
+  // Get video context from TabManager
+  const videoContext = tabManager ? tabManager.getVideoContext(tab.id) : null;
+
   audioChannel = socket.channel(`audio:${sessionId}`, {
-    video_id: currentVideo?.dbId,
+    video_id: videoContext?.videoDbId,
     timestamp: capturedTimestamp
   });
 
@@ -199,7 +311,7 @@ async function startRecording() {
   audioChannel.on('note_created', (payload) => {
     console.log('Received structured note:', payload);
 
-    // Forward to sidepanel
+    // Forward to sidepanel with video context
     chrome.runtime.sendMessage({
       action: 'transcript',
       data: {
@@ -209,7 +321,8 @@ async function startRecording() {
         confidence: payload.confidence,
         timestamp_seconds: payload.timestamp_seconds,
         raw_transcript: payload.raw_transcript,
-        timestamp: payload.timestamp
+        timestamp: payload.timestamp,
+        video_id: videoContext?.videoDbId // Add video context
       }
     }).catch(err => console.log('No sidepanel listening:', err));
 
@@ -278,12 +391,22 @@ async function startRecording() {
 async function stopRecording() {
   console.log('Stopping recording...');
 
-  // 1. Notify content script to resume video
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (tab?.id) {
-    chrome.tabs.sendMessage(tab.id, { action: 'recording_stopped' })
-      .catch((err) => console.log('[Lossy] No content script on this page'));
+  // 1. Get the recording tab (not necessarily the active tab)
+  const recordingTabId = tabManager ? tabManager.getRecordingTabId() : null;
+
+  if (recordingTabId === null) {
+    console.warn('[Lossy] No recording in progress');
+    return;
   }
+
+  // Mark tab as idle
+  if (tabManager) {
+    tabManager.stopRecording(recordingTabId);
+  }
+
+  // 2. Notify content script to resume video
+  chrome.tabs.sendMessage(recordingTabId, { action: 'recording_stopped' })
+    .catch((err) => console.log('[Lossy] No content script on this page'));
 
   // 2. Stop audio capture
   if (await hasOffscreenDocument()) {
@@ -357,7 +480,7 @@ async function hasOffscreenDocument() {
   return contexts.length > 0;
 }
 
-async function handleVideoDetected(videoData) {
+async function handleVideoDetected(videoData, tabId) {
   console.log('[Lossy] Handling video detected:', videoData);
 
   // Connect to socket if not already connected
@@ -383,29 +506,8 @@ async function handleVideoDetected(videoData) {
         videoChannel.push('video_detected', videoData)
           .receive('ok', (response) => {
             console.log('[Lossy] Video record created:', response);
-            currentVideo.dbId = response.video_id;
-
-            // Request existing notes for this video
-            videoChannel.push('get_notes', { video_id: response.video_id })
-              .receive('ok', (notesResponse) => {
-                console.log('[Lossy] Received existing notes:', notesResponse);
-
-                // Send notes to content script for timeline markers
-                chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                  if (tabs[0]?.id) {
-                    chrome.tabs.sendMessage(tabs[0].id, {
-                      action: 'load_markers',
-                      notes: notesResponse.notes
-                    }).catch(err => console.log('[Lossy] No content script on this page'));
-                  }
-                });
-
-                resolve({ videoDbId: response.video_id });
-              })
-              .receive('error', (err) => {
-                console.error('[Lossy] Failed to get notes:', err);
-                resolve({ videoDbId: response.video_id }); // Still resolve with video ID
-              });
+            // Don't load notes here - content script will request them after initialization
+            resolve({ videoDbId: response.video_id });
           })
           .receive('error', (err) => {
             console.error('[Lossy] Failed to create video record:', err);
@@ -417,4 +519,111 @@ async function handleVideoDetected(videoData) {
         reject(new Error('Failed to join video channel'));
       });
   });
+}
+
+async function loadNotesForVideo(videoDbId, tabId) {
+  console.log('[ServiceWorker] 📝 Loading notes for video:', videoDbId, 'in tab:', tabId);
+
+  // Ensure we have a video channel connection
+  if (!socket || !socket.isConnected()) {
+    socket = new Socket("ws://localhost:4000/socket", {
+      params: {},
+      logger: (kind, msg, data) => {
+        console.log(`Phoenix ${kind}:`, msg, data);
+      }
+    });
+    socket.connect();
+  }
+
+  // Reuse or create video channel
+  if (!videoChannel) {
+    videoChannel = socket.channel('video:meta', {});
+    await new Promise((resolve, reject) => {
+      videoChannel.join()
+        .receive('ok', resolve)
+        .receive('error', reject);
+    });
+  }
+
+  // Request notes
+  return new Promise((resolve, reject) => {
+    videoChannel.push('get_notes', { video_id: videoDbId })
+      .receive('ok', (notesResponse) => {
+        console.log('[ServiceWorker] 📝 Received', notesResponse.notes?.length || 0, 'existing notes for content script');
+
+        // Send notes ONLY to content script for timeline markers (NOT to side panel)
+        chrome.tabs.sendMessage(tabId, {
+          action: 'load_markers',
+          notes: notesResponse.notes
+        }).catch(err => console.log('[ServiceWorker] ⚠️ No content script on this page'));
+
+        resolve();
+      })
+      .receive('error', (err) => {
+        console.error('[Lossy] Failed to get notes:', err);
+        reject(err);
+      });
+  });
+}
+
+async function loadNotesForSidePanel(videoDbId) {
+  console.log('[ServiceWorker] 📝 Loading notes for side panel only:', videoDbId);
+
+  // Ensure we have a video channel connection
+  if (!socket || !socket.isConnected()) {
+    socket = new Socket("ws://localhost:4000/socket", {
+      params: {},
+      logger: (kind, msg, data) => {
+        console.log(`Phoenix ${kind}:`, msg, data);
+      }
+    });
+    socket.connect();
+  }
+
+  // Reuse or create video channel
+  if (!videoChannel) {
+    videoChannel = socket.channel('video:meta', {});
+    await new Promise((resolve, reject) => {
+      videoChannel.join()
+        .receive('ok', resolve)
+        .receive('error', reject);
+    });
+  }
+
+  // Request notes
+  return new Promise((resolve, reject) => {
+    videoChannel.push('get_notes', { video_id: videoDbId })
+      .receive('ok', (notesResponse) => {
+        console.log('[ServiceWorker] 📝 Received', notesResponse.notes?.length || 0, 'existing notes for side panel');
+
+        // Send notes to side panel only
+        sendNotesToSidePanel(notesResponse.notes, videoDbId);
+
+        resolve();
+      })
+      .receive('error', (err) => {
+        console.error('[Lossy] Failed to get notes:', err);
+        reject(err);
+      });
+  });
+}
+
+function sendNotesToSidePanel(notes, videoDbId) {
+  if (notes && notes.length > 0) {
+    notes.forEach(note => {
+      chrome.runtime.sendMessage({
+        action: 'transcript',
+        data: {
+          id: note.id,
+          text: note.text,
+          category: note.category,
+          confidence: note.confidence,
+          timestamp_seconds: note.timestamp_seconds,
+          raw_transcript: note.raw_transcript,
+          timestamp: note.timestamp,
+          video_id: videoDbId // Add video context for filtering
+        }
+      }).catch(err => console.log('No sidepanel listening:', err));
+    });
+  }
 }
