@@ -16,6 +16,8 @@ let timelineMarkers = null;
 let currentUrl = window.location.href;
 let isInitializing = false; // Guard against simultaneous inits
 let historyIntercepted = false; // Track if we've already intercepted History API
+let pendingNotesForMarkers = null; // Store notes waiting for timeline markers
+let markerWatchdogTimer = null; // Periodic check to ensure markers are loaded
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -171,7 +173,12 @@ function setupAnchorChip(videoElement) {
 function loadMarkersFromNotes(notes) {
   if (!timelineMarkers) {
     console.error('[Lossy] ❌ Cannot load markers, timeline markers not initialized');
-    return;
+    return false;
+  }
+
+  if (!notes || notes.length === 0) {
+    console.log('[Lossy] ℹ️ No notes to load');
+    return true;
   }
 
   let queued = 0;
@@ -203,6 +210,43 @@ function loadMarkersFromNotes(notes) {
   });
 
   console.log('[Lossy] 📍 LOAD_MARKERS: Results - Added:', added, 'Queued:', queued, 'Skipped:', skipped);
+  return added > 0 || queued > 0;
+}
+
+/**
+ * Attempt to load markers with exponential backoff retry.
+ * This handles cases where notes arrive before timeline markers are ready.
+ */
+function attemptLoadMarkersWithRetry(notes, attempt) {
+  const maxAttempts = 6;
+  const delays = [500, 1000, 2000, 3000, 5000, 10000]; // Up to 10 seconds
+
+  if (attempt >= maxAttempts) {
+    console.error('[Lossy] ❌ Failed to load markers after', maxAttempts, 'retry attempts');
+    return;
+  }
+
+  setTimeout(() => {
+    if (timelineMarkers) {
+      console.log('[Lossy] 🔄 Retry attempt', attempt + 1, 'to load markers');
+      const success = loadMarkersFromNotes(notes);
+
+      if (success) {
+        console.log('[Lossy] ✅ Successfully loaded markers on retry', attempt + 1);
+        // Clear pending since we succeeded
+        if (pendingNotesForMarkers === notes) {
+          pendingNotesForMarkers = null;
+        }
+      } else {
+        // Try again
+        attemptLoadMarkersWithRetry(notes, attempt + 1);
+      }
+    } else {
+      // Timeline markers still not ready, try again
+      console.log('[Lossy] ⏳ Timeline markers still not ready on retry', attempt + 1);
+      attemptLoadMarkersWithRetry(notes, attempt + 1);
+    }
+  }, delays[attempt]);
 }
 
 function setupTimelineMarkers(videoElement) {
@@ -266,7 +310,14 @@ function createTimelineMarkers(videoElement, progressBar) {
 
   console.log('[Lossy] 🎯 Timeline markers setup complete');
 
-  // If we had pending notes waiting for timeline markers, request them now
+  // If we had pending notes waiting for timeline markers, load them now
+  if (pendingNotesForMarkers && pendingNotesForMarkers.length > 0) {
+    console.log('[Lossy] 🎯 Timeline markers ready, loading', pendingNotesForMarkers.length, 'pending notes');
+    loadMarkersFromNotes(pendingNotesForMarkers);
+    pendingNotesForMarkers = null;
+  }
+
+  // Always request notes when timeline markers become ready
   if (currentVideoDbId && timelineMarkers) {
     console.log('[Lossy] 🎯 Timeline markers ready, requesting notes for video:', currentVideoDbId);
     chrome.runtime.sendMessage({
@@ -275,7 +326,58 @@ function createTimelineMarkers(videoElement, progressBar) {
     }).catch(err => {
       console.log('[Lossy] ⚠️ Failed to request notes after timeline setup:', err);
     });
+
+    // Start watchdog to ensure markers are eventually loaded
+    startMarkerWatchdog();
   }
+}
+
+/**
+ * Watchdog timer to periodically check if we have a video with notes but no markers.
+ * This catches edge cases where notes loaded but markers failed to render.
+ */
+function startMarkerWatchdog() {
+  // Clear any existing watchdog
+  if (markerWatchdogTimer) {
+    clearInterval(markerWatchdogTimer);
+  }
+
+  console.log('[Lossy] 🐕 Starting marker watchdog...');
+
+  // Check every 3 seconds for 30 seconds
+  let attempts = 0;
+  const maxAttempts = 10;
+
+  markerWatchdogTimer = setInterval(() => {
+    attempts++;
+
+    if (attempts >= maxAttempts) {
+      console.log('[Lossy] 🐕 Watchdog stopping after', maxAttempts, 'attempts');
+      clearInterval(markerWatchdogTimer);
+      markerWatchdogTimer = null;
+      return;
+    }
+
+    // If timeline markers exist but no markers are displayed, request notes again
+    if (timelineMarkers && currentVideoDbId) {
+      const markerCount = timelineMarkers.markers.size;
+      const pendingCount = timelineMarkers.pendingMarkers.length;
+
+      if (markerCount === 0 && pendingCount === 0) {
+        console.log('[Lossy] 🐕 Watchdog detected no markers, re-requesting notes (attempt', attempts, ')');
+        chrome.runtime.sendMessage({
+          action: 'request_notes',
+          videoDbId: currentVideoDbId
+        }).catch(err => {
+          console.log('[Lossy] ⚠️ Watchdog note request failed:', err);
+        });
+      } else if (markerCount > 0) {
+        console.log('[Lossy] 🐕 Watchdog found', markerCount, 'markers, stopping');
+        clearInterval(markerWatchdogTimer);
+        markerWatchdogTimer = null;
+      }
+    }
+  }, 3000); // Check every 3 seconds
 }
 
 function listenForEvents() {
@@ -357,26 +459,22 @@ function listenForEvents() {
     if (message.action === 'load_markers') {
       console.log('[Lossy] 📍 LOAD_MARKERS: Received', message.notes?.length || 0, 'notes');
 
-      if (!timelineMarkers) {
-        console.warn('[Lossy] ⚠️ LOAD_MARKERS: Timeline markers not initialized yet, will retry in 1 second...');
-
-        // Retry after a delay (timeline markers might still be initializing)
-        setTimeout(() => {
-          if (timelineMarkers) {
-            console.log('[Lossy] 📍 LOAD_MARKERS: Retrying after timeline markers initialized');
-            loadMarkersFromNotes(message.notes);
-          } else {
-            console.error('[Lossy] ❌ LOAD_MARKERS: Timeline markers still not available after retry');
-          }
-        }, 1000);
-
-        sendResponse({ success: false, error: 'Timeline markers initializing, will retry' });
-        return false;
-      }
-
       if (!message.notes || message.notes.length === 0) {
         console.log('[Lossy] ℹ️ LOAD_MARKERS: No notes to display');
         sendResponse({ success: true });
+        return false;
+      }
+
+      if (!timelineMarkers) {
+        console.warn('[Lossy] ⚠️ LOAD_MARKERS: Timeline markers not initialized yet, storing notes for later...');
+
+        // Store notes for when timeline markers become ready
+        pendingNotesForMarkers = message.notes;
+
+        // Also try multiple retries with increasing delays
+        attemptLoadMarkersWithRetry(message.notes, 0);
+
+        sendResponse({ success: false, error: 'Timeline markers initializing, notes stored for retry' });
         return false;
       }
 
@@ -424,6 +522,12 @@ function cleanup() {
     reinitTimer = null;
   }
 
+  // Clear watchdog timer
+  if (markerWatchdogTimer) {
+    clearInterval(markerWatchdogTimer);
+    markerWatchdogTimer = null;
+  }
+
   // Destroy UI components
   if (anchorChip) {
     anchorChip.destroy();
@@ -449,6 +553,7 @@ function cleanup() {
   currentVideoId = null;
   currentVideoDbId = null;
   isInitializing = false;
+  pendingNotesForMarkers = null;
 
   console.log('[Lossy] 🧹 CLEANUP: Complete');
 }
