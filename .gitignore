@@ -1,0 +1,45 @@
+# Dependencies
+node_modules/
+deps/
+
+# Build artifacts
+_build/
+dist/
+*.beam
+*.ez
+
+# Elixir/Phoenix
+.elixir_ls/
+erl_crash.dump
+.fetch
+lossy/priv/static/assets/
+lossy/priv/static/cache_manifest.json
+lossy-*.tar
+doc/
+
+# Environment & secrets
+.env
+.env.local
+*.secret.exs
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE (keep .vscode/ for shared settings)
+.idea/
+*.swp
+*.swo
+*~
+
+# Test coverage
+cover/
+*.coverdata
+
+# Temporary files
+tmp/
+temp/

@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Voice Video Companion",
+  "version": "0.1.0",
+  "description": "Voice-first video review",
+
+  "permissions": ["sidePanel", "storage", "tabs", "offscreen"],
+
+  "host_permissions": [
+    "https://*.youtube.com/*",
+    "https://*.vimeo.com/*",
+    "https://*.air.inc/*",
+    "wss://localhost:4000/*"
+  ],
+
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' https://localhost:4000 wss://localhost:4000"
+  },
+
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+
+  "action": {
+    "default_popup": "popup.html"
+  },
+
+  "background": {
+    "service_worker": "background/service-worker.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://*.youtube.com/*", "https://*.vimeo.com/*", "https://*.air.inc/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
