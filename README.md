@@ -241,28 +241,38 @@ cd dist && zip -r ../extension.zip . && cd ..
 
 ## 🔐 Environment Variables
 
-Create `.env` files for sensitive config:
+Create a `.env` file in the `lossy/` directory for sensitive config (not committed to git):
 
-**`lossy/.env`** (not committed):
+**`lossy/.env`**:
 ```bash
+# OpenAI API Configuration
+# Get your API key from: https://platform.openai.com/api-keys
+export OPENAI_API_KEY="sk-proj-..."
+
+# Database Configuration
+# Development uses lossy_dev by default (configured in config/dev.exs)
+# For production:
 export DATABASE_URL="postgresql://user:pass@localhost/lossy_prod"
-export SECRET_KEY_BASE="generate-with-mix-phx-gen-secret"
-export OPENAI_API_KEY="sk-..."
-export BROWSERBASE_API_KEY="..."
-export BROWSERBASE_PROJECT_ID="..."
+
+# Phoenix Secret Key Base
+# Generate with: mix phx.gen.secret
+export SECRET_KEY_BASE="your-secret-key-base-here"
+
+# Phoenix Host (for production)
+export PHX_HOST="localhost"
+
+# Optional: Set to "true" to enable server mode
+# export PHX_SERVER="true"
+
+# Optional: Browserbase Integration (for automated posting)
+# export BROWSERBASE_API_KEY="..."
+# export BROWSERBASE_PROJECT_ID="..."
 ```
 
-Load with: `source .env && mix phx.server`
-
-## 🤝 Contributing
-
-1. Check current phase in `docs/03_IMPLEMENTATION_PHASES.md`
-2. Follow patterns in `docs/04_LIVEVIEW_PATTERNS.md`
-3. Format code before committing:
-   ```bash
-   cd lossy && mix format
-   cd extension && npm run format  # if prettier configured
-   ```
+**Load environment variables:**
+```bash
+source .env && mix phx.server
+```
 
 ## 📄 License
 

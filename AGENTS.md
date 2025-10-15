@@ -18,7 +18,17 @@ This is a **Phoenix + Chrome Extension** project that captures voice feedback wh
 
 ## Project Guidelines
 
-- Use `mix precommit` alias when you are done with all changes and fix any pending issues
+### Contribution Workflow
+
+1. Check current implementation phase in `docs/03_IMPLEMENTATION_PHASES.md`
+2. Follow LiveView patterns in `docs/04_LIVEVIEW_PATTERNS.md`
+3. Format code before committing:
+   - Backend: `cd lossy && mix format`
+   - Extension: `cd extension && npm run format` (if prettier configured)
+4. Use `mix precommit` alias when you are done with all changes and fix any pending issues
+
+### General Guidelines
+
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - When working on browser extension code, be mindful of MV3 restrictions (service workers, CSP, manifest v3 APIs)
 - For architecture questions, see `docs/02_ARCHITECTURE.md`

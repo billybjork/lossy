@@ -30,7 +30,8 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# IDE (keep .vscode/ for shared settings)
+# IDE
+.vscode/
 .idea/
 *.swp
 *.swo
