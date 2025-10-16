@@ -10,12 +10,16 @@ export class TimelineMarkers {
     this.container = null;
     this.shadowRoot = null;
     this.markers = new Map(); // noteId → marker element
+    this.markerData = new Map(); // noteId → marker data (for reflow)
     this.pendingMarkers = []; // Queue for markers that can't be added yet
     this.clickCallback = null;
     this.videoReady = false;
     this.cleanupFunctions = []; // Store cleanup functions for event listeners
+    this.progressBarObserver = null;
+    this.resizeObserver = null;
     this.init();
     this.setupVideoReadyListener();
+    this.setupProgressBarMonitoring();
   }
 
   init() {
@@ -209,6 +213,9 @@ export class TimelineMarkers {
 
     console.log('[TimelineMarkers] ➕ Adding marker:', id, 'at', timestamp, 'seconds');
 
+    // Store marker data for reflow
+    this.markerData.set(id, { id, timestamp, category, text });
+
     // Calculate position (percentage)
     const position = (timestamp / duration) * 100;
 
@@ -285,13 +292,108 @@ export class TimelineMarkers {
     this.clickCallback = callback;
   }
 
+  /**
+   * Monitor progress bar for resize/replacement.
+   */
+  setupProgressBarMonitoring() {
+    // ResizeObserver: Reflow markers on resize
+    this.resizeObserver = new ResizeObserver(() => {
+      console.log('[TimelineMarkers] Progress bar resized, reflowing markers');
+      this.reflowAllMarkers();
+    });
+    this.resizeObserver.observe(this.progressBar);
+
+    this.cleanupFunctions.push(() => {
+      if (this.resizeObserver) {
+        this.resizeObserver.disconnect();
+        this.resizeObserver = null;
+      }
+    });
+
+    // MutationObserver: Reattach if progress bar replaced
+    this.progressBarObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList') {
+          // Check if our container was removed
+          if (!document.contains(this.container)) {
+            console.log('[TimelineMarkers] Container removed, reattaching...');
+            this.reattach();
+          }
+        }
+      }
+    });
+
+    this.progressBarObserver.observe(this.progressBar.parentElement || document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    this.cleanupFunctions.push(() => {
+      if (this.progressBarObserver) {
+        this.progressBarObserver.disconnect();
+        this.progressBarObserver = null;
+      }
+    });
+  }
+
+  /**
+   * Reflow all markers (recalculate positions).
+   */
+  reflowAllMarkers() {
+    const duration = this.videoElement.duration;
+    if (!duration || isNaN(duration) || duration === 0) {
+      console.warn('[TimelineMarkers] Cannot reflow, duration not available');
+      return;
+    }
+
+    this.markerData.forEach((data, id) => {
+      const marker = this.markers.get(id);
+      if (marker) {
+        const position = (data.timestamp / duration) * 100;
+        marker.style.left = `${position}%`;
+      }
+    });
+
+    console.log('[TimelineMarkers] Reflowed', this.markers.size, 'markers');
+  }
+
+  /**
+   * Reattach shadow DOM after container removal.
+   */
+  reattach() {
+    if (!document.contains(this.progressBar)) {
+      console.error('[TimelineMarkers] Progress bar no longer in DOM, cannot reattach');
+      return;
+    }
+
+    // Remove old container
+    if (this.container && this.container.parentElement) {
+      this.container.remove();
+    }
+
+    // Recreate container and shadow DOM
+    this.init();
+
+    // Re-render all markers from data
+    const markerDataCopy = new Map(this.markerData);
+    this.markers.clear();
+    this.markerData.clear();
+
+    markerDataCopy.forEach(data => {
+      this.addMarker(data);
+    });
+
+    console.log('[TimelineMarkers] Reattached with', this.markers.size, 'markers');
+  }
+
   clearAll() {
     console.log('[TimelineMarkers] 🧹 Clearing all markers. Current count:', this.markers.size);
 
     // Remove all marker elements from DOM
     this.markers.forEach(marker => marker.remove());
-    // Clear the map
+    // Clear the maps
     this.markers.clear();
+    this.markerData.clear();
     // Clear pending markers too
     this.pendingMarkers = [];
 
@@ -324,6 +426,7 @@ export class TimelineMarkers {
 
     // Clear all state
     this.markers.clear();
+    this.markerData.clear();
     this.pendingMarkers = [];
     this.shadowRoot = null;
     this.clickCallback = null;
