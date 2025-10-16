@@ -20,9 +20,16 @@ let displayedVideoDbId = null; // Track which video's notes are currently displa
 let loadingSessionId = 0; // Increment this to invalidate in-flight note requests
 let tabChangedTimer = null; // Debounce timer for tab_changed messages
 let pendingTabChange = null; // Store pending tab change data
+const NOTES_STORAGE_KEY = 'lossy_sidepanel_notes_v1';
 const notesCache = new Map(); // Persist notes per video to avoid flicker on reloads
+let notesCacheLoadPromise = null;
+let notesCachePersistTimer = null;
+const notesCachePersistDelayMs = 150;
 const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
+
+// Start loading cached notes immediately; callers can await ensureNotesCacheLoaded()
+ensureNotesCacheLoaded();
 
 const recordBtn = document.getElementById('recordBtn');
 const statusEl = document.getElementById('status');
@@ -57,6 +64,8 @@ recordBtn.addEventListener('click', async () => {
 // Initialize side panel
 async function init() {
   console.log('[SidePanel] Initializing...');
+
+  await ensureNotesCacheLoaded();
 
   // Request initial timestamp immediately (in parallel with detection)
   // This ensures timecode appears as fast as notes
@@ -164,6 +173,8 @@ chrome.runtime.onMessage.addListener((message) => {
 
 async function handleTabChanged(tabId, videoContext) {
   console.log('[SidePanel] 🔄 TAB_CHANGED: Tab', tabId, 'with context:', videoContext);
+
+  await ensureNotesCacheLoaded();
 
   const newVideoDbId = videoContext?.videoDbId;
   const previousVideoDbId = displayedVideoDbId;
@@ -329,13 +340,16 @@ function storeNoteInCache(videoDbId, noteData) {
 
   if (existingIndex >= 0) {
     const updated = [...existing];
-    updated[existingIndex] = { ...updated[existingIndex], ...noteData };
+    updated[existingIndex] = { ...updated[existingIndex], ...sanitizeNoteForCache(noteData) };
     notesCache.set(videoDbId, updated);
+    schedulePersistNotesCache();
     return { added: false, count: updated.length };
   }
 
-  const updated = [noteData, ...existing];
+  const sanitized = sanitizeNoteForCache(noteData);
+  const updated = [sanitized, ...existing];
   notesCache.set(videoDbId, updated);
+  schedulePersistNotesCache();
   return { added: true, count: updated.length };
 }
 
@@ -575,4 +589,101 @@ function clearTranscriptsImmediately() {
 function updateTranscriptEmptyState() {
   const isEmpty = transcriptsEl.childElementCount === 0;
   transcriptsEl.classList.toggle('is-empty', isEmpty);
+}
+
+async function ensureNotesCacheLoaded() {
+  if (notesCacheLoadPromise) {
+    return notesCacheLoadPromise;
+  }
+
+  notesCacheLoadPromise = chrome.storage.local.get(NOTES_STORAGE_KEY)
+    .then(result => {
+      const stored = result[NOTES_STORAGE_KEY];
+
+      if (stored && typeof stored === 'object') {
+        Object.entries(stored).forEach(([videoId, notes]) => {
+          if (!Array.isArray(notes)) {
+            return;
+          }
+
+          const sanitizedNotes = notes
+            .filter(note => note && note.id)
+            .map(sanitizeNoteForCache);
+
+          if (sanitizedNotes.length === 0) {
+            return;
+          }
+
+          const existingNotes = notesCache.get(videoId) || [];
+          const mergedById = new Map();
+
+          sanitizedNotes.forEach(note => {
+            mergedById.set(note.id, note);
+          });
+
+          existingNotes.forEach(note => {
+            mergedById.set(note.id, note);
+          });
+
+          const mergedNotes = Array.from(mergedById.values());
+          notesCache.set(videoId, mergedNotes);
+        });
+      }
+
+      console.log('[SidePanel] 💾 Loaded notes cache for', notesCache.size, 'videos from storage');
+    })
+    .catch(err => {
+      console.warn('[SidePanel] ⚠️ Failed to load notes cache from storage:', err);
+    });
+
+  return notesCacheLoadPromise;
+}
+
+function sanitizeNoteForCache(noteData) {
+  if (!noteData || typeof noteData !== 'object') {
+    return {};
+  }
+
+  const {
+    id,
+    text,
+    category,
+    confidence,
+    timestamp_seconds,
+    raw_transcript,
+    timestamp,
+    video_id
+  } = noteData;
+
+  const sanitized = {
+    id,
+    text,
+    category,
+    confidence,
+    timestamp_seconds,
+    raw_transcript,
+    timestamp,
+    video_id
+  };
+
+  return sanitized;
+}
+
+function schedulePersistNotesCache() {
+  if (notesCachePersistTimer) {
+    clearTimeout(notesCachePersistTimer);
+  }
+
+  notesCachePersistTimer = setTimeout(() => {
+    const serialized = {};
+    notesCache.forEach((value, key) => {
+      serialized[key] = value.map(sanitizeNoteForCache);
+    });
+
+    chrome.storage.local.set({ [NOTES_STORAGE_KEY]: serialized }).catch(err => {
+      console.warn('[SidePanel] ⚠️ Failed to persist notes cache:', err);
+    });
+
+    notesCachePersistTimer = null;
+  }, notesCachePersistDelayMs);
 }
