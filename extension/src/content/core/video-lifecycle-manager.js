@@ -72,7 +72,7 @@ export class VideoLifecycleManager {
   startHealthChecks() {
     this.healthCheckInterval = setInterval(() => {
       if (!this.videoElement || !document.contains(this.videoElement)) {
-        console.warn('[VideoLifecycle] 🏥 Health check failed: video removed');
+        console.log('[VideoLifecycle] 🏥 Video element replaced, recovering...');
         this.setState('error');
         this.stop();
         this.start(); // Re-initialize
@@ -81,7 +81,7 @@ export class VideoLifecycleManager {
 
       // Check if video is playable
       if (this.videoElement.error) {
-        console.warn('[VideoLifecycle] 🏥 Health check failed: video error');
+        console.log('[VideoLifecycle] 🏥 Video error detected, recovering...');
         this.setState('error');
         this.stop();
         this.start();
@@ -90,15 +90,17 @@ export class VideoLifecycleManager {
 
       // Check adapter health
       if (this.adapter.isHealthy && !this.adapter.isHealthy()) {
-        console.warn('[VideoLifecycle] 🏥 Health check failed: adapter unhealthy');
+        console.log('[VideoLifecycle] 🏥 Adapter unhealthy, recovering...');
         this.setState('error');
         this.stop();
         this.start();
         return;
       }
 
-      // All checks passed
-      console.log('[VideoLifecycle] 🏥 Health check passed');
+      // All checks passed (only log occasionally to reduce noise)
+      if (Math.random() < 0.1) { // Log 10% of the time
+        console.log('[VideoLifecycle] 🏥 Health check passed');
+      }
     }, this.options.healthCheckInterval);
   }
 
