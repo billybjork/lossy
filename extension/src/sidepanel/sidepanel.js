@@ -186,15 +186,67 @@ async function handleTabChanged(tabId, videoContext) {
       console.log('[SidePanel] ℹ️ Already displaying notes for video', newVideoDbId);
     }
   } else {
-    // Switched to a tab without a video - clear notes and timestamp
-    console.log('[SidePanel] 🧹 Tab has no video context, clearing notes and timestamp');
+    // No cached video context - trigger fresh detection on this tab
+    console.log('[SidePanel] 🔍 No cached context for tab, triggering fresh detection...');
+
+    // Clear notes and timestamp while we detect
     transcriptsEl.innerHTML = '';
     displayedVideoDbId = null;
     loadingSessionId++;
-
-    // Clear timestamp display
-    videoTimestampEl.textContent = 'Video: No video detected';
+    videoTimestampEl.textContent = 'Video: Detecting...';
     videoTimestampEl.classList.remove('active');
+
+    try {
+      // Trigger detection on the newly active tab
+      const result = await chrome.runtime.sendMessage({ action: 'trigger_video_detection' });
+
+      if (result?.success) {
+        console.log('[SidePanel] ✅ Video detection completed on new tab');
+
+        // Wait a moment, then get context and timestamp
+        setTimeout(async () => {
+          try {
+            // Request timestamp immediately
+            chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
+              .catch(() => console.log('[SidePanel] Could not get timestamp'));
+
+            // Get video context
+            const response = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
+            if (response.context) {
+              currentVideoContext = response.context;
+              const videoDbId = response.context.videoDbId;
+              console.log('[SidePanel] ✅ Video context now available for switched tab:', videoDbId);
+
+              // Load notes for this video
+              if (videoDbId) {
+                displayedVideoDbId = videoDbId;
+                loadingSessionId++;
+                const thisSessionId = loadingSessionId;
+
+                chrome.runtime.sendMessage({
+                  action: 'request_notes_for_sidepanel',
+                  videoDbId: videoDbId,
+                  tabId: tabId,
+                  sessionId: thisSessionId
+                }).catch(err => console.log('[SidePanel] Failed to load notes:', err));
+              }
+            } else {
+              console.log('[SidePanel] No video detected on this tab');
+              videoTimestampEl.textContent = 'Video: No video detected';
+            }
+          } catch (err) {
+            console.log('[SidePanel] Could not get context after detection:', err);
+            videoTimestampEl.textContent = 'Video: No video detected';
+          }
+        }, 2000);
+      } else {
+        console.log('[SidePanel] Video detection not available on this tab');
+        videoTimestampEl.textContent = 'Video: No video detected';
+      }
+    } catch (err) {
+      console.log('[SidePanel] Could not trigger detection:', err.message);
+      videoTimestampEl.textContent = 'Video: No video detected';
+    }
   }
 }
 
