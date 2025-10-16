@@ -19,6 +19,8 @@ let pendingNotesForMarkers = null;
 let markerWatchdogTimer = null;
 let spaCleanup = null; // Platform-specific SPA navigation cleanup
 let lifecycleManager = null;
+let messageListenerRegistered = false;
+let messageListenerHandler = null;
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -409,7 +411,15 @@ function startMarkerWatchdog() {
 }
 
 function listenForEvents() {
-  chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // SINGLETON GUARD: Only register once
+  if (messageListenerRegistered) {
+    console.log('[Lossy] Message listener already registered, skipping');
+    return;
+  }
+
+  console.log('[Lossy] Registering message listener');
+
+  messageListenerHandler = (message, sender, sendResponse) => {
     if (message.action === 'recording_started') {
       // Handle async operation properly
       videoController.getCurrentTime().then(timestamp => {
@@ -538,7 +548,10 @@ function listenForEvents() {
     }
 
     return true;
-  });
+  };
+
+  chrome.runtime.onMessage.addListener(messageListenerHandler);
+  messageListenerRegistered = true;
 }
 
 function cleanup() {
@@ -554,6 +567,14 @@ function cleanup() {
   if (markerWatchdogTimer) {
     clearInterval(markerWatchdogTimer);
     markerWatchdogTimer = null;
+  }
+
+  // Remove message listener (CRITICAL FIX)
+  if (messageListenerRegistered && messageListenerHandler) {
+    console.log('[Lossy] 🧹 CLEANUP: Removing message listener');
+    chrome.runtime.onMessage.removeListener(messageListenerHandler);
+    messageListenerRegistered = false;
+    messageListenerHandler = null;
   }
 
   // Cleanup platform-specific SPA hooks
