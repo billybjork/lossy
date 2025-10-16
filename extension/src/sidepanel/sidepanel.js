@@ -147,6 +147,11 @@ async function handleTabChanged(tabId, videoContext) {
 
   // If switching to a tab with a video
   if (newVideoDbId) {
+    // Request current timestamp for the newly active tab
+    console.log('[SidePanel] 🔄 Requesting timestamp for new active tab');
+    chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
+      .catch(() => console.log('[SidePanel] Could not get timestamp for new tab'));
+
     // If we're not currently displaying this video's notes, load them
     if (displayedVideoDbId !== newVideoDbId) {
       console.log('[SidePanel] 🔄 Loading notes for video', newVideoDbId, '(was displaying:', displayedVideoDbId, ')');
@@ -181,11 +186,15 @@ async function handleTabChanged(tabId, videoContext) {
       console.log('[SidePanel] ℹ️ Already displaying notes for video', newVideoDbId);
     }
   } else {
-    // Switched to a tab without a video - clear notes
-    console.log('[SidePanel] 🧹 Tab has no video context, clearing notes');
+    // Switched to a tab without a video - clear notes and timestamp
+    console.log('[SidePanel] 🧹 Tab has no video context, clearing notes and timestamp');
     transcriptsEl.innerHTML = '';
     displayedVideoDbId = null;
     loadingSessionId++;
+
+    // Clear timestamp display
+    videoTimestampEl.textContent = 'Video: No video detected';
+    videoTimestampEl.classList.remove('active');
   }
 }
 
