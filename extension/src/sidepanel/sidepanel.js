@@ -53,6 +53,12 @@ recordBtn.addEventListener('click', async () => {
 async function init() {
   console.log('[SidePanel] Initializing...');
 
+  // Request initial timestamp immediately (in parallel with detection)
+  // This ensures timecode appears as fast as notes
+  console.log('[SidePanel] Requesting initial timestamp...');
+  chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
+    .catch(() => console.log('[SidePanel] Could not get initial timestamp'));
+
   // Always trigger fresh detection to ensure content script is alive
   // This handles the case where cached context exists but content script is orphaned
   console.log('[SidePanel] Triggering fresh video detection...');
@@ -63,18 +69,13 @@ async function init() {
     if (result?.success) {
       console.log('[SidePanel] ✅ Video detection completed successfully');
 
-      // Wait a moment for detection to complete, then get context and initial timestamp
+      // Wait a moment for detection to complete, then get context
       setTimeout(async () => {
         try {
           const response = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
           if (response.context) {
             currentVideoContext = response.context;
             console.log('[SidePanel] ✅ Video context available:', currentVideoContext);
-
-            // Request initial timestamp now that video is detected
-            console.log('[SidePanel] Requesting initial timestamp...');
-            chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
-              .catch(() => console.log('[SidePanel] Could not get initial timestamp'));
           } else {
             console.log('[SidePanel] No video detected on this page');
           }
@@ -94,11 +95,6 @@ async function init() {
       if (response.context) {
         currentVideoContext = response.context;
         console.log('[SidePanel] Using cached video context:', currentVideoContext);
-
-        // Request initial timestamp
-        console.log('[SidePanel] Requesting initial timestamp...');
-        chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
-          .catch(() => console.log('[SidePanel] Could not get initial timestamp'));
       }
     } catch (err2) {
       console.error('[SidePanel] Failed to get any video context:', err2);
