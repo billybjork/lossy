@@ -12,7 +12,7 @@ export class TabManager {
   async init() {
     console.log('[TabManager] Initializing...');
 
-    // Load persisted state
+    // Load persisted state from local storage
     try {
       const { tab_video_contexts } = await chrome.storage.local.get('tab_video_contexts');
       if (tab_video_contexts) {
@@ -32,6 +32,17 @@ export class TabManager {
     } catch (err) {
       console.error('[TabManager] Failed to load persisted state:', err);
       // Continue with empty state
+    }
+
+    // Load recording state from session storage (survives service worker restart)
+    try {
+      const { recording_tab_id } = await chrome.storage.session.get('recording_tab_id');
+      if (recording_tab_id) {
+        this.recordingTabId = recording_tab_id;
+        console.log('[TabManager] Restored recording state for tab', recording_tab_id);
+      }
+    } catch (err) {
+      console.error('[TabManager] Failed to restore session state:', err);
     }
 
     // Set initial active tab
@@ -94,7 +105,8 @@ export class TabManager {
     const existing = this.tabVideoMap.get(tabId);
     this.tabVideoMap.set(tabId, {
       ...videoContext,
-      recordingState: existing?.recordingState || 'idle'
+      recordingState: existing?.recordingState || 'idle',
+      lastUpdated: Date.now() // Track when context was set
     });
     this.persist();
     console.log('[TabManager] Video context set for tab', tabId);
@@ -114,12 +126,23 @@ export class TabManager {
   }
 
   clearVideoContext(tabId) {
-    // Keep the tab in the map but clear video-specific data
     const existing = this.tabVideoMap.get(tabId);
+
+    // DON'T delete immediately - mark as "stale" and wait for replacement
     if (existing) {
-      this.tabVideoMap.delete(tabId);
-      this.persist();
-      console.log('[TabManager] Video context cleared for tab', tabId);
+      existing.stale = true;
+      existing.staleTimestamp = Date.now();
+      console.log('[TabManager] Marked video context as stale for tab', tabId);
+
+      // Delete after timeout if no replacement
+      setTimeout(() => {
+        const current = this.tabVideoMap.get(tabId);
+        if (current && current.stale && current.staleTimestamp === existing.staleTimestamp) {
+          console.log('[TabManager] Deleting stale context for tab', tabId);
+          this.tabVideoMap.delete(tabId);
+          this.persist();
+        }
+      }, 10000); // 10s grace period
 
       // Tell content script to clear timeline markers
       chrome.tabs.sendMessage(tabId, {
@@ -164,6 +187,10 @@ export class TabManager {
       this.persist();
     }
 
+    // Persist to session storage
+    chrome.storage.session.set({ recording_tab_id: tabId })
+      .catch(err => console.error('[TabManager] Failed to persist recording state:', err));
+
     console.log('[TabManager] Recording started on tab', tabId);
   }
 
@@ -179,6 +206,10 @@ export class TabManager {
       context.recordingState = 'idle';
       this.persist();
     }
+
+    // Clear from session storage
+    chrome.storage.session.remove('recording_tab_id')
+      .catch(err => console.error('[TabManager] Failed to clear recording state:', err));
 
     console.log('[TabManager] Recording stopped on tab', tabId);
   }

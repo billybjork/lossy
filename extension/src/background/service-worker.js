@@ -4,6 +4,7 @@
 
 import { Socket } from "phoenix";
 import { TabManager } from "./tab-manager.js";
+import { MessageRouter } from "./message-router.js";
 
 console.log('Service worker loaded');
 
@@ -13,13 +14,37 @@ let videoChannel = null;
 let isRecording = false;
 let currentTimestamp = null;
 let tabManager = null;
+let messageRouter = null;
 
-// Initialize TabManager
+// Initialize TabManager and MessageRouter
 (async () => {
   tabManager = new TabManager();
   await tabManager.init();
   console.log('[ServiceWorker] TabManager initialized');
+
+  messageRouter = new MessageRouter();
+  console.log('[ServiceWorker] MessageRouter initialized');
+
+  // Subscribe panel to the current active tab
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (tabs[0]?.id) {
+    messageRouter.subscribePanelToTab(tabs[0].id);
+  }
 })();
+
+// Track tab activation to subscribe panel to active tab
+chrome.tabs.onActivated.addListener((activeInfo) => {
+  if (messageRouter) {
+    messageRouter.subscribePanelToTab(activeInfo.tabId);
+  }
+});
+
+// Clean up when tabs are removed
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (messageRouter) {
+    messageRouter.unsubscribeFromTab(tabId);
+  }
+});
 
 // Extension installed
 chrome.runtime.onInstalled.addListener(() => {
@@ -102,11 +127,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Video time update from content script (push-based)
   if (message.action === 'video_time_update') {
-    // Forward to side panel
-    chrome.runtime.sendMessage({
-      action: 'video_timestamp_update',
-      timestamp: message.timestamp
-    }).catch(() => {});
+    const sourceTabId = sender.tab?.id;
+    if (sourceTabId && messageRouter) {
+      // Only forward to side panel if it's viewing this tab
+      messageRouter.routeToSidePanel({
+        action: 'video_timestamp_update',
+        timestamp: message.timestamp
+      }, sourceTabId);
+    }
     return false;
   }
 
@@ -114,12 +142,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'marker_clicked') {
     console.log('[Lossy] Marker clicked:', message.data);
 
-    // Forward to side panel
-    chrome.runtime.sendMessage({
-      action: 'focus_note',
-      noteId: message.data.noteId,
-      timestamp: message.data.timestamp
-    }).catch(err => console.log('No sidepanel listening:', err));
+    const sourceTabId = sender.tab?.id;
+    if (sourceTabId && messageRouter) {
+      // Only forward to side panel if it's viewing this tab
+      messageRouter.routeToSidePanel({
+        action: 'focus_note',
+        noteId: message.data.noteId,
+        timestamp: message.data.timestamp
+      }, sourceTabId);
+    }
 
     sendResponse({ success: true });
     return false;
@@ -212,14 +243,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Request notes for side panel only (from side panel when switching tabs)
   if (message.action === 'request_notes_for_sidepanel') {
-    if (!message.videoDbId) {
-      sendResponse({ error: 'Missing videoDbId' });
+    if (!message.videoDbId || !message.tabId) {
+      sendResponse({ error: 'Missing videoDbId or tabId' });
       return false;
     }
 
-    console.log('[ServiceWorker] 📝 REQUEST_NOTES_FOR_SIDEPANEL for video:', message.videoDbId);
+    console.log('[ServiceWorker] 📝 REQUEST_NOTES_FOR_SIDEPANEL for video:', message.videoDbId, 'tab:', message.tabId);
 
-    loadNotesForSidePanel(message.videoDbId).then(() => {
+    loadNotesForSidePanel(message.videoDbId, message.tabId).then(() => {
       sendResponse({ success: true });
     }).catch(err => {
       console.error('[Lossy] Failed to load notes:', err);
@@ -321,20 +352,22 @@ async function startRecording() {
   audioChannel.on('note_created', (payload) => {
     console.log('Received structured note:', payload);
 
-    // Forward to sidepanel with video context
-    chrome.runtime.sendMessage({
-      action: 'transcript',
-      data: {
-        id: payload.id,
-        text: payload.text,
-        category: payload.category,
-        confidence: payload.confidence,
-        timestamp_seconds: payload.timestamp_seconds,
-        raw_transcript: payload.raw_transcript,
-        timestamp: payload.timestamp,
-        video_id: videoContext?.videoDbId // Add video context
-      }
-    }).catch(err => console.log('No sidepanel listening:', err));
+    // Forward to sidepanel with video context (only if panel is viewing this tab)
+    if (tab?.id && messageRouter) {
+      messageRouter.routeToSidePanel({
+        action: 'transcript',
+        data: {
+          id: payload.id,
+          text: payload.text,
+          category: payload.category,
+          confidence: payload.confidence,
+          timestamp_seconds: payload.timestamp_seconds,
+          raw_transcript: payload.raw_transcript,
+          timestamp: payload.timestamp,
+          video_id: videoContext?.videoDbId // Add video context
+        }
+      }, tab.id);
+    }
 
     // Forward to content script for timeline marker
     if (tab?.id) {
@@ -576,8 +609,8 @@ async function loadNotesForVideo(videoDbId, tabId) {
   });
 }
 
-async function loadNotesForSidePanel(videoDbId) {
-  console.log('[ServiceWorker] 📝 Loading notes for side panel only:', videoDbId);
+async function loadNotesForSidePanel(videoDbId, tabId) {
+  console.log('[ServiceWorker] 📝 Loading notes for side panel only:', videoDbId, 'tab:', tabId);
 
   // Ensure we have a video channel connection
   if (!socket || !socket.isConnected()) {
@@ -606,8 +639,8 @@ async function loadNotesForSidePanel(videoDbId) {
       .receive('ok', (notesResponse) => {
         console.log('[ServiceWorker] 📝 Received', notesResponse.notes?.length || 0, 'existing notes for side panel');
 
-        // Send notes to side panel only
-        sendNotesToSidePanel(notesResponse.notes, videoDbId);
+        // Send notes to side panel only (filtered by tab)
+        sendNotesToSidePanel(notesResponse.notes, videoDbId, tabId);
 
         resolve();
       })
@@ -618,10 +651,11 @@ async function loadNotesForSidePanel(videoDbId) {
   });
 }
 
-function sendNotesToSidePanel(notes, videoDbId) {
-  if (notes && notes.length > 0) {
+function sendNotesToSidePanel(notes, videoDbId, tabId) {
+  if (notes && notes.length > 0 && messageRouter) {
     notes.forEach(note => {
-      chrome.runtime.sendMessage({
+      // Only send to side panel if it's viewing this tab
+      messageRouter.routeToSidePanel({
         action: 'transcript',
         data: {
           id: note.id,
@@ -633,7 +667,7 @@ function sendNotesToSidePanel(notes, videoDbId) {
           timestamp: note.timestamp,
           video_id: videoDbId // Add video context for filtering
         }
-      }).catch(err => console.log('No sidepanel listening:', err));
+      }, tabId);
     });
   }
 }
