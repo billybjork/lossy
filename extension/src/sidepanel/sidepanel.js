@@ -20,6 +20,7 @@ let displayedVideoDbId = null; // Track which video's notes are currently displa
 let loadingSessionId = 0; // Increment this to invalidate in-flight note requests
 let tabChangedTimer = null; // Debounce timer for tab_changed messages
 let pendingTabChange = null; // Store pending tab change data
+const notesCache = new Map(); // Persist notes per video to avoid flicker on reloads
 
 const recordBtn = document.getElementById('recordBtn');
 const statusEl = document.getElementById('status');
@@ -107,13 +108,19 @@ async function init() {
 // Listen for transcripts from service worker
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'transcript') {
-    // Only add transcript if it belongs to the currently displayed video
     const noteVideoId = message.data.video_id;
-    if (noteVideoId === displayedVideoDbId) {
-      console.log('[SidePanel] 📝 Adding transcript for video', noteVideoId);
-      addTranscript(message.data);
+
+    if (noteVideoId) {
+      const cacheResult = storeNoteInCache(noteVideoId, message.data);
+
+      if (noteVideoId === displayedVideoDbId) {
+        console.log('[SidePanel] 📝 Adding transcript for video', noteVideoId);
+        addTranscript(message.data, { skipCache: true });
+      } else if (cacheResult.added) {
+        console.log('[SidePanel] 💾 Cached transcript for inactive video', noteVideoId);
+      }
     } else {
-      console.log('[SidePanel] ⚠️ Ignoring transcript for video', noteVideoId, '(displaying:', displayedVideoDbId, ')');
+      console.log('[SidePanel] ⚠️ Transcript missing video ID, skipping cache');
     }
   }
 
@@ -156,6 +163,8 @@ async function handleTabChanged(tabId, videoContext) {
   console.log('[SidePanel] 🔄 TAB_CHANGED: Tab', tabId, 'with context:', videoContext);
 
   const newVideoDbId = videoContext?.videoDbId;
+  const previousVideoDbId = displayedVideoDbId;
+  const isSameVideo = previousVideoDbId === newVideoDbId;
 
   // Update state
   currentTabId = tabId;
@@ -163,6 +172,24 @@ async function handleTabChanged(tabId, videoContext) {
 
   // If switching to a tab with a video
   if (newVideoDbId) {
+    let hadCachedNotes = false;
+    let hasCacheEntry = false;
+
+    if (!isSameVideo) {
+      hasCacheEntry = notesCache.has(newVideoDbId);
+      hadCachedNotes = renderNotesFromCache(newVideoDbId);
+      if (hadCachedNotes) {
+        console.log('[SidePanel] ♻️ Restored cached notes for video', newVideoDbId);
+      }
+
+      displayedVideoDbId = newVideoDbId;
+    } else {
+      displayedVideoDbId = newVideoDbId;
+      hasCacheEntry = notesCache.has(newVideoDbId);
+      const cachedNotes = notesCache.get(newVideoDbId);
+      hadCachedNotes = !!(cachedNotes && cachedNotes.length > 0);
+    }
+
     // Request current timestamp for the newly active tab
     // This also serves as a liveness check for the content script
     console.log('[SidePanel] 🔄 Requesting timestamp for new active tab');
@@ -194,12 +221,11 @@ async function handleTabChanged(tabId, videoContext) {
     }
 
     // If we're not currently displaying this video's notes, load them
-    if (displayedVideoDbId !== newVideoDbId) {
-      console.log('[SidePanel] 🔄 Loading notes for video', newVideoDbId, '(was displaying:', displayedVideoDbId, ')');
+    if (!hadCachedNotes && (!isSameVideo || !hasCacheEntry)) {
+      console.log('[SidePanel] 🔄 Loading notes for video', newVideoDbId, '(was displaying:', previousVideoDbId, ')');
 
-      // Clear existing notes and invalidate old requests
+      // Clear existing notes (already empty) and invalidate old requests
       transcriptsEl.innerHTML = '';
-      displayedVideoDbId = newVideoDbId;
       loadingSessionId++; // Invalidate any in-flight requests from previous video
       const thisSessionId = loadingSessionId;
       console.log('[SidePanel] 🔄 Started loading session', thisSessionId, 'for video', newVideoDbId);
@@ -223,8 +249,6 @@ async function handleTabChanged(tabId, videoContext) {
       } catch (err) {
         console.log('[SidePanel] ⚠️ Failed to request notes:', err);
       }
-    } else {
-      console.log('[SidePanel] ℹ️ Already displaying notes for video', newVideoDbId);
     }
   } else {
     // No cached video context - trigger fresh detection on this tab
@@ -291,6 +315,40 @@ async function handleTabChanged(tabId, videoContext) {
   }
 }
 
+function storeNoteInCache(videoDbId, noteData) {
+  const existing = notesCache.get(videoDbId) || [];
+  const existingIndex = existing.findIndex(note => note.id === noteData.id);
+
+  if (existingIndex >= 0) {
+    const updated = [...existing];
+    updated[existingIndex] = { ...updated[existingIndex], ...noteData };
+    notesCache.set(videoDbId, updated);
+    return { added: false, count: updated.length };
+  }
+
+  const updated = [noteData, ...existing];
+  notesCache.set(videoDbId, updated);
+  return { added: true, count: updated.length };
+}
+
+function renderNotesFromCache(videoDbId) {
+  const cachedNotes = notesCache.get(videoDbId);
+
+  transcriptsEl.innerHTML = '';
+
+  if (!cachedNotes || cachedNotes.length === 0) {
+    return false;
+  }
+
+  const fragment = document.createDocumentFragment();
+  cachedNotes.forEach(note => {
+    fragment.appendChild(buildNoteElement(note));
+  });
+
+  transcriptsEl.appendChild(fragment);
+  return true;
+}
+
 function updateUI() {
   if (isRecording) {
     recordBtn.textContent = '⏹️ Stop Recording';
@@ -305,14 +363,30 @@ function updateUI() {
   }
 }
 
-function addTranscript(data) {
-  // Check for existing note with this ID (prevent duplicates)
+function addTranscript(data, options = {}) {
+  const { skipCache = false, prepend = true } = options;
+
+  if (!skipCache && data.video_id) {
+    storeNoteInCache(data.video_id, data);
+  }
+
   const existing = transcriptsEl.querySelector(`[data-note-id="${data.id}"]`);
   if (existing) {
-    console.log('[SidePanel] ℹ️ Note', data.id, 'already displayed, skipping duplicate');
+    console.log('[SidePanel] ℹ️ Note', data.id, 'already displayed, updating content');
+    updateNoteElement(existing, data);
     return;
   }
 
+  const noteDiv = buildNoteElement(data);
+
+  if (prepend && transcriptsEl.firstChild) {
+    transcriptsEl.insertBefore(noteDiv, transcriptsEl.firstChild);
+  } else {
+    transcriptsEl.appendChild(noteDiv);
+  }
+}
+
+function buildNoteElement(data) {
   const noteDiv = document.createElement('div');
   noteDiv.className = 'note-item';
   noteDiv.dataset.noteId = data.id;
@@ -321,12 +395,10 @@ function addTranscript(data) {
     noteDiv.dataset.timestamp = data.timestamp_seconds;
   }
 
-  // Category badge
   const categoryDiv = document.createElement('div');
   categoryDiv.className = 'note-category';
   categoryDiv.textContent = data.category || 'note';
 
-  // Timestamp (if available)
   let timestampDiv = null;
   if (data.timestamp_seconds != null) {
     timestampDiv = document.createElement('div');
@@ -334,12 +406,10 @@ function addTranscript(data) {
     timestampDiv.textContent = formatTimestamp(data.timestamp_seconds);
   }
 
-  // Text content
   const textP = document.createElement('div');
   textP.className = 'note-text';
   textP.textContent = data.text;
 
-  // Confidence (optional, for debugging)
   if (data.confidence != null) {
     const confidenceDiv = document.createElement('div');
     confidenceDiv.className = 'note-confidence';
@@ -353,7 +423,6 @@ function addTranscript(data) {
   }
   noteDiv.appendChild(textP);
 
-  // Click to seek video (if timestamp available)
   if (data.timestamp_seconds != null) {
     noteDiv.style.cursor = 'pointer';
     noteDiv.addEventListener('click', () => {
@@ -362,12 +431,48 @@ function addTranscript(data) {
         timestamp: data.timestamp_seconds
       });
 
-      // Visual feedback
       highlightNote(data.id);
     });
   }
 
-  transcriptsEl.insertBefore(noteDiv, transcriptsEl.firstChild);
+  return noteDiv;
+}
+
+function updateNoteElement(element, data) {
+  if (data.timestamp_seconds != null) {
+    element.dataset.timestamp = data.timestamp_seconds;
+  } else if (element.dataset.timestamp) {
+    delete element.dataset.timestamp;
+  }
+
+  const categoryEl = element.querySelector('.note-category');
+  if (categoryEl) {
+    categoryEl.textContent = data.category || 'note';
+  }
+
+  const textEl = element.querySelector('.note-text');
+  if (textEl) {
+    textEl.textContent = data.text;
+
+    if (data.confidence != null) {
+      let confidenceEl = textEl.querySelector('.note-confidence');
+      if (!confidenceEl) {
+        confidenceEl = document.createElement('div');
+        confidenceEl.className = 'note-confidence';
+        textEl.appendChild(confidenceEl);
+      }
+      confidenceEl.textContent = `Confidence: ${Math.round(data.confidence * 100)}%`;
+    }
+  }
+
+  const timestampEl = element.querySelector('.note-timestamp');
+  if (timestampEl) {
+    if (data.timestamp_seconds != null) {
+      timestampEl.textContent = formatTimestamp(data.timestamp_seconds);
+    } else {
+      timestampEl.remove();
+    }
+  }
 }
 
 function formatTimestamp(seconds) {
