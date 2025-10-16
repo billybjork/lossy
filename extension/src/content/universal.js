@@ -59,6 +59,7 @@ let messageListenerRegistered = false;
 let messageListenerHandler = null;
 let noteLoader = null;
 let abortController = null; // AbortController for cleanup
+let lastClearedVideoId = null; // Track last video ID we cleared UI for
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -79,14 +80,6 @@ async function init() {
     console.log('[Lossy] 🧹 AbortController triggered cleanup');
   });
 
-  // Tell side panel to clear old notes (we're loading a fresh video)
-  console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
-  safeRuntimeSendMessage({
-    action: 'clear_ui'
-  }).catch(() => {
-    console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
-  });
-
   // Get appropriate adapter for current page
   try {
     adapter = await PlatformRegistry.getAdapter();
@@ -95,6 +88,36 @@ async function init() {
     console.error('[Lossy] ❌ INIT: Failed to get adapter:', error);
     isInitializing = false;
     return;
+  }
+
+  // Extract video ID to determine if we need to clear the UI
+  // Only clear if we're switching to a different video
+  let shouldClearUI = false;
+  try {
+    const videoIdData = adapter.extractVideoId(window.location.href);
+    const detectedVideoId = videoIdData.id;
+
+    if (lastClearedVideoId !== detectedVideoId) {
+      shouldClearUI = true;
+      lastClearedVideoId = detectedVideoId;
+      console.log('[Lossy] 🔵 INIT: Video changed to', detectedVideoId, '- will clear UI');
+    } else {
+      console.log('[Lossy] 🔵 INIT: Same video', detectedVideoId, '- skipping clear UI');
+    }
+  } catch (error) {
+    // If we can't extract video ID, clear to be safe
+    console.warn('[Lossy] ⚠️ INIT: Could not extract video ID, will clear UI to be safe');
+    shouldClearUI = true;
+  }
+
+  // Tell side panel to clear old notes only if switching to different video
+  if (shouldClearUI) {
+    console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
+    safeRuntimeSendMessage({
+      action: 'clear_ui'
+    }).catch(() => {
+      console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
+    });
   }
 
   // Create lifecycle manager with adapter

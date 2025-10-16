@@ -91,11 +91,20 @@ export class TabManager {
   }
 
   async onTabChanged(tabId) {
+    const context = this.getVideoContext(tabId);
+
+    // Don't send tab_changed if context is stale (waiting for replacement)
+    // This prevents the side panel from reloading notes for the old video during navigation
+    if (context && context.stale) {
+      console.log('[TabManager] Skipping tab_changed for stale context (tab:', tabId, ')');
+      return;
+    }
+
     // Notify side panel to sync to this tab
     chrome.runtime.sendMessage({
       action: 'tab_changed',
       tabId: tabId,
-      videoContext: this.getVideoContext(tabId)
+      videoContext: context
     }).catch(() => {
       // Side panel may not be open, that's OK
     });
@@ -112,6 +121,8 @@ export class TabManager {
     console.log('[TabManager] Video context set for tab', tabId);
 
     // If this is the active tab, notify side panel
+    // Note: This may send a second tab_changed after onActivated(), but the debouncing
+    // in the side panel (100ms) will coalesce these into a single update with the latest context.
     if (tabId === this.activeTabId) {
       this.onTabChanged(tabId);
     }

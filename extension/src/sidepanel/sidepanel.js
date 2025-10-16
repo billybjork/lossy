@@ -18,6 +18,8 @@ let currentTabId = null;
 let currentVideoContext = null;
 let displayedVideoDbId = null; // Track which video's notes are currently displayed
 let loadingSessionId = 0; // Increment this to invalidate in-flight note requests
+let tabChangedTimer = null; // Debounce timer for tab_changed messages
+let pendingTabChange = null; // Store pending tab change data
 
 const recordBtn = document.getElementById('recordBtn');
 const statusEl = document.getElementById('status');
@@ -120,9 +122,23 @@ chrome.runtime.onMessage.addListener((message) => {
     highlightNote(message.noteId);
   }
 
-  // Listen for tab changes
+  // Listen for tab changes (debounced to handle rapid messages)
   if (message.action === 'tab_changed') {
-    handleTabChanged(message.tabId, message.videoContext);
+    // Store the latest tab change
+    pendingTabChange = { tabId: message.tabId, videoContext: message.videoContext };
+
+    // Clear existing timer
+    if (tabChangedTimer) {
+      clearTimeout(tabChangedTimer);
+    }
+
+    // Debounce: only handle after 100ms of no new tab_changed messages
+    tabChangedTimer = setTimeout(() => {
+      console.log('[SidePanel] 🔄 TAB_CHANGED (debounced): Processing tab', pendingTabChange.tabId);
+      handleTabChanged(pendingTabChange.tabId, pendingTabChange.videoContext);
+      pendingTabChange = null;
+      tabChangedTimer = null;
+    }, 100);
   }
 
   // Clear UI when content script initializes (new video loading)
@@ -290,6 +306,13 @@ function updateUI() {
 }
 
 function addTranscript(data) {
+  // Check for existing note with this ID (prevent duplicates)
+  const existing = transcriptsEl.querySelector(`[data-note-id="${data.id}"]`);
+  if (existing) {
+    console.log('[SidePanel] ℹ️ Note', data.id, 'already displayed, skipping duplicate');
+    return;
+  }
+
   const noteDiv = document.createElement('div');
   noteDiv.className = 'note-item';
   noteDiv.dataset.noteId = data.id;
