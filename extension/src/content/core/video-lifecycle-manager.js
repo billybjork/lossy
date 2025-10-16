@@ -51,6 +51,9 @@ export class VideoLifecycleManager {
         console.log('[VideoLifecycle] Video detected, starting health checks');
         this.setState('ready');
         this.startHealthChecks();
+
+        // CRITICAL FIX: Notify listeners when video is found immediately
+        this.notifyStateChange('video_detected', { videoElement: this.videoElement });
       } else {
         console.warn('[VideoLifecycle] No video found, starting persistent detection');
         this.setState('error');
