@@ -14,7 +14,6 @@
 console.log('Side panel loaded');
 
 let isRecording = false;
-let timestampUpdateInterval = null;
 let currentTabId = null;
 let currentVideoContext = null;
 let displayedVideoDbId = null; // Track which video's notes are currently displayed
@@ -251,23 +250,7 @@ function highlightNote(noteId) {
   }
 }
 
-// Request video timestamp updates
-function startTimestampUpdates() {
-  // Request timestamp every 500ms
-  timestampUpdateInterval = setInterval(() => {
-    chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
-      .catch(() => {}); // Ignore errors if no response
-  }, 500);
-}
-
-function stopTimestampUpdates() {
-  if (timestampUpdateInterval) {
-    clearInterval(timestampUpdateInterval);
-    timestampUpdateInterval = null;
-  }
-}
-
-// Listen for timestamp updates
+// Listen for timestamp updates (push-based, no polling)
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'video_timestamp_update') {
     if (message.timestamp != null) {
@@ -283,4 +266,3 @@ chrome.runtime.onMessage.addListener((message) => {
 // Initialize
 init();
 updateUI();
-startTimestampUpdates();

@@ -100,6 +100,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // Video time update from content script (push-based)
+  if (message.action === 'video_time_update') {
+    // Forward to side panel
+    chrome.runtime.sendMessage({
+      action: 'video_timestamp_update',
+      timestamp: message.timestamp
+    }).catch(() => {});
+    return false;
+  }
+
   // Marker clicked in timeline → focus note in side panel
   if (message.action === 'marker_clicked') {
     console.log('[Lossy] Marker clicked:', message.data);
