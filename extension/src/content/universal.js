@@ -2,6 +2,7 @@ import './platforms/bootstrap.js'; // Register all adapters
 import { PlatformRegistry } from './platforms/index.js';
 import { AnchorChip } from './shared/anchor-chip.js';
 import { TimelineMarkers } from './shared/timeline-markers.js';
+import { VideoLifecycleManager } from './core/video-lifecycle-manager.js';
 
 console.log('[Lossy] Universal content script loaded');
 
@@ -17,6 +18,7 @@ let historyIntercepted = false;
 let pendingNotesForMarkers = null;
 let markerWatchdogTimer = null;
 let spaCleanup = null; // Platform-specific SPA navigation cleanup
+let lifecycleManager = null;
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -46,28 +48,54 @@ async function init() {
     return;
   }
 
-  // Detect video using adapter
-  const videoElement = await adapter.detectVideo();
-
-  if (!videoElement) {
-    console.warn('[Lossy] ⚠️ INIT: No video element found on this page');
-    isInitializing = false;
-    return;
+  // Create lifecycle manager with adapter
+  if (lifecycleManager) {
+    lifecycleManager.destroy();
   }
 
-  console.log('[Lossy] 🔵 INIT: Video element found:', videoElement);
+  lifecycleManager = new VideoLifecycleManager(adapter);
+
+  // Set up callback for when video is detected
+  lifecycleManager.onStateChange((event, data) => {
+    if (event === 'video_detected') {
+      console.log('[Lossy] 🔵 Video detected via lifecycle manager');
+      onVideoReady(data.videoElement);
+    } else if (event === 'state_changed' && data.newState === 'error') {
+      console.warn('[Lossy] ⚠️ Lifecycle manager in error state');
+    }
+  });
+
+  // Watch for URL changes (generic History API interception)
+  if (!historyIntercepted) {
+    interceptHistoryApi();
+    historyIntercepted = true;
+  }
+
+  // Start lifecycle manager (handles video detection with health checks)
+  await lifecycleManager.start();
+
+  isInitializing = false;
+  console.log('[Lossy] 🔵 INIT: Initialization complete');
+}
+
+/**
+ * Called when video is detected and ready.
+ * Continues with initialization logic.
+ */
+async function onVideoReady(videoElement) {
+  console.log('[Lossy] 🔵 Video element ready:', videoElement);
 
   // Extract video ID using adapter
   const videoIdData = adapter.extractVideoId(window.location.href);
   currentVideoId = videoIdData.id;
 
-  console.log('[Lossy] 🔵 INIT: Video ID:', videoIdData);
+  console.log('[Lossy] 🔵 Video ID:', videoIdData);
 
   // Create video controller using adapter
   videoController = adapter.createVideoController(videoElement);
 
   // Send video context to service worker
-  console.log('[Lossy] 🔵 INIT: Sending video_detected to service worker');
+  console.log('[Lossy] 🔵 Sending video_detected to service worker');
   const response = await chrome.runtime.sendMessage({
     action: 'video_detected',
     data: {
@@ -77,15 +105,15 @@ async function init() {
       title: document.title
     }
   }).catch(err => {
-    console.warn('[Lossy] ⚠️ INIT: Could not send video_detected message:', err);
+    console.warn('[Lossy] ⚠️ Could not send video_detected message:', err);
     return null;
   });
 
   if (response?.videoDbId) {
     currentVideoDbId = response.videoDbId;
-    console.log('[Lossy] 🔵 INIT: Video database ID:', currentVideoDbId);
+    console.log('[Lossy] 🔵 Video database ID:', currentVideoDbId);
   } else {
-    console.warn('[Lossy] ⚠️ INIT: No videoDbId in response');
+    console.warn('[Lossy] ⚠️ No videoDbId in response');
   }
 
   // Set up overlays
@@ -109,14 +137,7 @@ async function init() {
     debouncedReinit();
   });
 
-  // Watch for URL changes (generic History API interception)
-  if (!historyIntercepted) {
-    interceptHistoryApi();
-    historyIntercepted = true;
-  }
-
-  isInitializing = false;
-  console.log('[Lossy] 🔵 INIT: Initialization complete');
+  console.log('[Lossy] 🔵 Video ready setup complete');
 }
 
 // Debounce reinitialization to prevent rapid sequential calls
@@ -539,6 +560,12 @@ function cleanup() {
   if (spaCleanup) {
     spaCleanup();
     spaCleanup = null;
+  }
+
+  // Destroy lifecycle manager
+  if (lifecycleManager) {
+    lifecycleManager.destroy();
+    lifecycleManager = null;
   }
 
   // Destroy UI components
