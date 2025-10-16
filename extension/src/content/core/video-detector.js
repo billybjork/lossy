@@ -20,8 +20,17 @@ export class VideoDetector {
       pollInterval: options.pollInterval || 2000,
       enableIntersectionObserver: options.enableIntersectionObserver !== false,
       enablePollingWatchdog: options.enablePollingWatchdog !== false,
+      signal: options.signal, // AbortSignal for cleanup
       ...options
     };
+
+    // Setup AbortSignal listener if provided
+    if (this.options.signal) {
+      this.options.signal.addEventListener('abort', () => {
+        console.log('[VideoDetector] AbortSignal received, destroying...');
+        this.destroy();
+      });
+    }
   }
 
   /**

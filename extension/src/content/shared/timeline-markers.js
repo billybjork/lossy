@@ -4,7 +4,7 @@
  * Uses Shadow DOM for style isolation.
  */
 export class TimelineMarkers {
-  constructor(videoElement, progressBarElement) {
+  constructor(videoElement, progressBarElement, options = {}) {
     this.videoElement = videoElement;
     this.progressBar = progressBarElement;
     this.container = null;
@@ -17,6 +17,16 @@ export class TimelineMarkers {
     this.cleanupFunctions = []; // Store cleanup functions for event listeners
     this.progressBarObserver = null;
     this.resizeObserver = null;
+    this.options = options;
+
+    // Setup AbortSignal listener if provided
+    if (this.options.signal) {
+      this.options.signal.addEventListener('abort', () => {
+        console.log('[TimelineMarkers] AbortSignal received, destroying...');
+        this.destroy();
+      });
+    }
+
     this.init();
     this.setupVideoReadyListener();
     this.setupProgressBarMonitoring();

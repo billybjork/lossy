@@ -22,6 +22,7 @@ let lifecycleManager = null;
 let messageListenerRegistered = false;
 let messageListenerHandler = null;
 let noteLoader = null;
+let abortController = null; // AbortController for cleanup
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -32,6 +33,15 @@ async function init() {
 
   isInitializing = true;
   console.log('[Lossy] 🔵 INIT: Starting initialization for URL:', window.location.href);
+
+  // Create new AbortController for this initialization
+  abortController = new AbortController();
+  const signal = abortController.signal;
+
+  // Setup abort listener for logging
+  signal.addEventListener('abort', () => {
+    console.log('[Lossy] 🧹 AbortController triggered cleanup');
+  });
 
   // Tell side panel to clear old notes (we're loading a fresh video)
   console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
@@ -56,7 +66,7 @@ async function init() {
     lifecycleManager.destroy();
   }
 
-  lifecycleManager = new VideoLifecycleManager(adapter);
+  lifecycleManager = new VideoLifecycleManager(adapter, { signal });
 
   // Set up callback for when video is detected
   lifecycleManager.onStateChange((event, data) => {
@@ -295,7 +305,9 @@ function retryTimelineMarkersSetup(videoElement, attempt) {
  * Create and configure TimelineMarkers instance.
  */
 function createTimelineMarkers(videoElement, progressBar) {
-  timelineMarkers = new TimelineMarkers(videoElement, progressBar);
+  // Pass the AbortSignal if available
+  const options = abortController ? { signal: abortController.signal } : {};
+  timelineMarkers = new TimelineMarkers(videoElement, progressBar, options);
 
   timelineMarkers.onMarkerClick((noteId, timestamp) => {
     console.log('[Lossy] 📍 Timeline marker clicked:', noteId, timestamp);
@@ -476,6 +488,12 @@ function listenForEvents() {
 
 function cleanup() {
   console.log('[Lossy] 🧹 CLEANUP: Starting cleanup');
+
+  // Abort all operations from current initialization
+  if (abortController) {
+    abortController.abort();
+    abortController = null;
+  }
 
   // Clear debounce timer
   if (reinitTimer) {

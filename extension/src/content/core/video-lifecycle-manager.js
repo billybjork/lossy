@@ -20,8 +20,17 @@ export class VideoLifecycleManager {
       healthCheckInterval: options.healthCheckInterval || 5000,
       persistentDetectionInterval: options.persistentDetectionInterval || 5000,
       persistentDetectionMaxAttempts: options.persistentDetectionMaxAttempts || 20,
+      signal: options.signal, // AbortSignal for cleanup
       ...options
     };
+
+    // Setup AbortSignal listener if provided
+    if (this.options.signal) {
+      this.options.signal.addEventListener('abort', () => {
+        console.log('[VideoLifecycle] AbortSignal received, stopping...');
+        this.stop();
+      });
+    }
   }
 
   /**
