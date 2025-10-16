@@ -21,6 +21,8 @@ let loadingSessionId = 0; // Increment this to invalidate in-flight note request
 let tabChangedTimer = null; // Debounce timer for tab_changed messages
 let pendingTabChange = null; // Store pending tab change data
 const notesCache = new Map(); // Persist notes per video to avoid flicker on reloads
+const transcriptsClearDelayMs = 250;
+let scheduledTranscriptClear = null;
 
 const recordBtn = document.getElementById('recordBtn');
 const statusEl = document.getElementById('status');
@@ -151,7 +153,8 @@ chrome.runtime.onMessage.addListener((message) => {
   // Clear UI when content script initializes (new video loading)
   if (message.action === 'clear_ui') {
     console.log('[SidePanel] 🧹 CLEAR_UI: Clearing for new video');
-    transcriptsEl.innerHTML = '';
+    markTranscriptsLoading({ preserveContent: true });
+    scheduleTranscriptClear();
     currentVideoContext = null;
     displayedVideoDbId = null;
     loadingSessionId++; // Invalidate any in-flight requests
@@ -169,6 +172,7 @@ async function handleTabChanged(tabId, videoContext) {
   // Update state
   currentTabId = tabId;
   currentVideoContext = videoContext;
+  cancelScheduledTranscriptClear();
 
   // If switching to a tab with a video
   if (newVideoDbId) {
@@ -224,8 +228,8 @@ async function handleTabChanged(tabId, videoContext) {
     if (!hadCachedNotes && (!isSameVideo || !hasCacheEntry)) {
       console.log('[SidePanel] 🔄 Loading notes for video', newVideoDbId, '(was displaying:', previousVideoDbId, ')');
 
-      // Clear existing notes (already empty) and invalidate old requests
-      transcriptsEl.innerHTML = '';
+      // Show loading state while we fetch notes
+      markTranscriptsLoading();
       loadingSessionId++; // Invalidate any in-flight requests from previous video
       const thisSessionId = loadingSessionId;
       console.log('[SidePanel] 🔄 Started loading session', thisSessionId, 'for video', newVideoDbId);
@@ -243,6 +247,9 @@ async function handleTabChanged(tabId, videoContext) {
         // Check if we're still on the same session (user didn't navigate away)
         if (loadingSessionId === thisSessionId) {
           console.log('[SidePanel] ✅ Notes loaded successfully for session', thisSessionId);
+          if (transcriptsEl.classList.contains('is-loading')) {
+            finalizeTranscriptRender();
+          }
         } else {
           console.log('[SidePanel] ⚠️ Session', thisSessionId, 'was invalidated (now on session', loadingSessionId, ')');
         }
@@ -255,7 +262,8 @@ async function handleTabChanged(tabId, videoContext) {
     console.log('[SidePanel] 🔍 No cached context for tab, triggering fresh detection...');
 
     // Clear notes and timestamp while we detect
-    transcriptsEl.innerHTML = '';
+    clearTranscriptsImmediately();
+    finalizeTranscriptRender();
     displayedVideoDbId = null;
     loadingSessionId++;
     videoTimestampEl.textContent = 'Video: Detecting...';
@@ -332,11 +340,12 @@ function storeNoteInCache(videoDbId, noteData) {
 }
 
 function renderNotesFromCache(videoDbId) {
+  cancelScheduledTranscriptClear();
   const cachedNotes = notesCache.get(videoDbId);
 
-  transcriptsEl.innerHTML = '';
-
   if (!cachedNotes || cachedNotes.length === 0) {
+    clearTranscriptsImmediately();
+    finalizeTranscriptRender();
     return false;
   }
 
@@ -345,7 +354,8 @@ function renderNotesFromCache(videoDbId) {
     fragment.appendChild(buildNoteElement(note));
   });
 
-  transcriptsEl.appendChild(fragment);
+  transcriptsEl.replaceChildren(fragment);
+  finalizeTranscriptRender();
   return true;
 }
 
@@ -384,6 +394,8 @@ function addTranscript(data, options = {}) {
   } else {
     transcriptsEl.appendChild(noteDiv);
   }
+
+  finalizeTranscriptRender();
 }
 
 function buildNoteElement(data) {
@@ -473,6 +485,8 @@ function updateNoteElement(element, data) {
       timestampEl.remove();
     }
   }
+
+  finalizeTranscriptRender();
 }
 
 function formatTimestamp(seconds) {
@@ -516,3 +530,49 @@ chrome.runtime.onMessage.addListener((message) => {
 // Initialize
 init();
 updateUI();
+updateTranscriptEmptyState();
+
+function markTranscriptsLoading(options = {}) {
+  const { preserveContent = false } = options;
+  transcriptsEl.classList.add('is-loading');
+  transcriptsEl.classList.remove('is-empty');
+
+  if (!preserveContent) {
+    transcriptsEl.replaceChildren();
+    updateTranscriptEmptyState();
+  }
+}
+
+function finalizeTranscriptRender() {
+  transcriptsEl.classList.remove('is-loading');
+  cancelScheduledTranscriptClear();
+  updateTranscriptEmptyState();
+}
+
+function scheduleTranscriptClear(delay = transcriptsClearDelayMs) {
+  cancelScheduledTranscriptClear();
+  scheduledTranscriptClear = setTimeout(() => {
+    transcriptsEl.replaceChildren();
+    transcriptsEl.classList.remove('is-loading');
+    updateTranscriptEmptyState();
+    scheduledTranscriptClear = null;
+  }, delay);
+}
+
+function cancelScheduledTranscriptClear() {
+  if (scheduledTranscriptClear) {
+    clearTimeout(scheduledTranscriptClear);
+    scheduledTranscriptClear = null;
+  }
+}
+
+function clearTranscriptsImmediately() {
+  cancelScheduledTranscriptClear();
+  transcriptsEl.replaceChildren();
+  updateTranscriptEmptyState();
+}
+
+function updateTranscriptEmptyState() {
+  const isEmpty = transcriptsEl.childElementCount === 0;
+  transcriptsEl.classList.toggle('is-empty', isEmpty);
+}
