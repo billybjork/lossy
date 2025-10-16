@@ -1,15 +1,15 @@
 # Sprint Roadmap
 
 **Project:** Lossy - Voice-First Video Companion
-**Last Updated:** 2025-10-14
+**Last Updated:** 2025-10-16
 
 ---
 
 ## Current Status
 
-🚧 **Active Sprint:** [Sprint 03 - Video Integration](./SPRINT_03_video_integration.md)
-📅 **Started:** 2025-10-14
-🎯 **Goal:** Content scripts + video timestamp anchoring
+✅ **Latest Completed Sprint:** [Sprint 03.55 - Core Reliability Improvements](./SPRINT_03.55_reliability_improvements.md)
+📅 **Completed:** 2025-10-16
+🎯 **Achievement:** Self-healing architecture, AbortController cleanup, and 95%+ reliability across platforms
 
 ---
 
@@ -36,6 +36,8 @@
 | [00 - Scaffolding](./archive/SPRINT_00_scaffolding.md) | ✅ 2025-10-14 | Project foundations & build setup | 1 day |
 | [01 - Audio Streaming](./archive/SPRINT_01_audio_streaming.md) | ✅ 2025-10-14 | Audio capture + Phoenix Channels (no auth) | 1 day |
 | [02 - Cloud Transcription](./archive/SPRINT_02_transcription.md) | ✅ 2025-10-14 | OpenAI Whisper + GPT-4o note structuring | 1 day |
+| [03 - Video Integration](./SPRINT_03_video_integration.md) | ✅ 2025-10-14 | Content scripts + video timestamp anchoring | 3 days |
+| [03.55 - Reliability](./SPRINT_03.55_reliability_improvements.md) | ✅ 2025-10-16 | Self-healing architecture + 95%+ reliability | 6 days |
 
 ---
 

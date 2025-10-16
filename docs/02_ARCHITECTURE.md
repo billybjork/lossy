@@ -1,6 +1,6 @@
 # System Architecture
 
-**Last Updated:** 2025-10-14
+**Last Updated:** 2025-10-16
 
 ---
 
@@ -185,19 +185,88 @@
 
 #### Content Script
 
-**Purpose:** Inject UI overlays into video pages
+**Purpose:** Inject UI overlays into video pages with self-healing capabilities
 
 **Responsibilities:**
-- Find and monitor video element
+- Find and monitor video element with platform-specific adapters
 - Inject Shadow DOM overlays (isolation from page CSS)
 - Capture video frames via `requestVideoFrameCallback`
-- Display anchor chip, ghost comments, emoji tokens
+- Display anchor chip, ghost comments, emoji tokens, timeline markers
 - Re-parent overlays into fullscreen element
+- Self-heal when video elements are replaced (SPA navigation, lazy loading)
+- Load and sync notes from backend with retry logic
 
 **Does NOT:**
 - ❌ Access microphone (done in offscreen)
 - ❌ Maintain WebSocket (done in service worker)
 - ❌ Use LiveView (uses Shadow DOM + vanilla JS)
+
+**Architecture (Sprint 03.55 - Reliability Improvements):**
+
+The content script uses a modular, self-healing architecture with these core components:
+
+**1. VideoLifecycleManager**
+- State machine managing video detection lifecycle: `idle → detecting → ready → error`
+- Periodic health checks (video validity, adapter health) every 5 seconds
+- Persistent detection with retry logic (up to 20 attempts)
+- Automatic recovery when video elements are replaced by platforms
+- State change callbacks for event notification
+- Integrated with AbortController for cleanup
+
+**2. MessageRouter** (Per-Tab Message Routing)
+- Prevents race conditions and message crosstalk between tabs
+- Tab-aware message routing (only processes messages for own tabId)
+- Prevents stale notes from appearing on wrong videos
+- Clean separation of concerns for multi-tab scenarios
+
+**3. NoteLoader** (Consolidated Retry Logic)
+- Centralized note loading with exponential backoff retry
+- Prevents duplicate notes during rapid reloads
+- Graceful degradation on persistent failures
+- Clear logging for debugging note loading issues
+- Integrated with video context lifecycle
+
+**4. Platform Adapters** (Extensible Detection)
+- **VimeoAdapter**: Vimeo-specific video detection and progress bar handling
+- **YouTubeAdapter**: YouTube-specific selectors and player integration
+- **UniversalAdapter**: Fallback for generic video platforms
+- Each adapter provides: `detectVideo()`, `getProgressBar()`, `isHealthy()`
+- Adapters selected based on URL pattern matching
+
+**5. TimelineMarkers** (Resilient UI Overlay)
+- Shadow DOM for style isolation
+- Monitors video metadata loading (duration availability)
+- Queues markers until video is ready (prevents race conditions)
+- Reflows markers on progress bar resize
+- Reattaches after DOM manipulation (fullscreen, SPA navigation)
+- Click handlers for seeking to note timestamps
+
+**6. AbortController Cleanup Pattern**
+- Single `abort()` call cascades cleanup through all components
+- Prevents memory leaks during SPA navigation and reinitialization
+- Clean event listener removal via AbortSignal
+- Consistent pattern across VideoLifecycleManager, VideoDetector, TimelineMarkers
+
+**State Management:**
+```javascript
+// Initialization with cleanup signal
+const abortController = new AbortController();
+const signal = abortController.signal;
+
+// Components receive signal and self-cleanup on abort
+lifecycleManager = new VideoLifecycleManager(adapter, { signal });
+timelineMarkers = new TimelineMarkers(videoElement, progressBar, { signal });
+
+// Cleanup cascades through all components
+abortController.abort(); // Triggers destroy() on all components
+```
+
+**Self-Healing Behaviors:**
+- Video element replacement detection (Vimeo swaps `<video>` elements during lazy loading)
+- Progress bar DOM monitoring (reattach timeline markers if removed)
+- Adapter health validation (fallback to universal adapter if platform-specific fails)
+- Persistent note loading with retry (handles backend unavailability)
+- Graceful degradation with clear console logging (reduced noise, no false alerts)
 
 #### Side Panel (LiveView Client)
 

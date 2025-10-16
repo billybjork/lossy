@@ -207,6 +207,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // Trigger video detection on current tab (from side panel when no context)
+  if (message.action === 'trigger_video_detection') {
+    handleTriggerVideoDetection().then(sendResponse).catch(err => {
+      console.error('[ServiceWorker] Failed to trigger video detection:', err);
+      sendResponse({ success: false, error: err.message });
+    });
+    return true; // Keep channel open for async response
+  }
+
   // Get all tabs with videos (for tab switcher UI)
   if (message.action === 'get_all_tabs') {
     const tabs = tabManager ? tabManager.getAllTabs() : [];
@@ -669,5 +678,91 @@ function sendNotesToSidePanel(notes, videoDbId, tabId) {
         }
       }, tabId);
     });
+  }
+}
+
+/**
+ * Ensure content script is injected and trigger video detection.
+ * Called when side panel opens on a tab without cached video context.
+ */
+async function handleTriggerVideoDetection() {
+  console.log('[ServiceWorker] 🔍 TRIGGER_VIDEO_DETECTION: Handling request');
+
+  // Get current active tab
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+  if (!tab?.id) {
+    throw new Error('No active tab found');
+  }
+
+  console.log('[ServiceWorker] 🔍 Triggering detection on tab:', tab.id, tab.url);
+
+  // Check if URL is supported
+  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+    throw new Error('Cannot inject content script on this page');
+  }
+
+  // Ensure content script is injected
+  try {
+    await ensureContentScriptInjected(tab.id);
+  } catch (err) {
+    console.error('[ServiceWorker] Failed to inject content script:', err);
+    throw new Error('Failed to inject content script');
+  }
+
+  // Trigger detection in content script
+  try {
+    console.log('[ServiceWorker] 🔍 Sending re_initialize message to content script');
+    const response = await chrome.tabs.sendMessage(tab.id, {
+      action: 're_initialize'
+    });
+
+    if (response?.success) {
+      console.log('[ServiceWorker] ✅ Content script re-initialized successfully');
+      return { success: true, tabId: tab.id };
+    } else {
+      throw new Error('Content script re-initialization failed');
+    }
+  } catch (err) {
+    console.error('[ServiceWorker] Failed to trigger detection:', err);
+    throw new Error('Failed to communicate with content script');
+  }
+}
+
+/**
+ * Ensure content script is injected in the given tab.
+ * Uses programmatic injection if not already present.
+ */
+async function ensureContentScriptInjected(tabId) {
+  console.log('[ServiceWorker] 🔍 Ensuring content script is injected in tab:', tabId);
+
+  // Try to ping the content script first
+  try {
+    const response = await Promise.race([
+      chrome.tabs.sendMessage(tabId, { action: 'ping' }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Ping timeout')), 500))
+    ]);
+
+    if (response?.pong) {
+      console.log('[ServiceWorker] ✅ Content script already present');
+      return; // Already injected
+    }
+  } catch (err) {
+    console.log('[ServiceWorker] Content script not present, injecting...');
+  }
+
+  // Content script not present - inject it programmatically
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tabId },
+      files: ['content/universal.js']
+    });
+    console.log('[ServiceWorker] ✅ Content script injected successfully');
+
+    // Wait a bit for the script to initialize
+    await new Promise(resolve => setTimeout(resolve, 500));
+  } catch (err) {
+    console.error('[ServiceWorker] ❌ Failed to inject content script:', err);
+    throw err;
   }
 }

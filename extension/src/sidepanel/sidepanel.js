@@ -60,6 +60,29 @@ async function init() {
 
     if (currentVideoContext) {
       console.log('[SidePanel] Initial video context:', currentVideoContext);
+    } else {
+      console.log('[SidePanel] No cached video context, triggering fresh detection...');
+
+      // No cached context - trigger video detection on current tab
+      try {
+        await chrome.runtime.sendMessage({ action: 'trigger_video_detection' });
+        console.log('[SidePanel] ✅ Video detection triggered successfully');
+
+        // Wait a moment then check for context again
+        setTimeout(async () => {
+          try {
+            const retryResponse = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
+            if (retryResponse.context) {
+              currentVideoContext = retryResponse.context;
+              console.log('[SidePanel] ✅ Video context now available:', currentVideoContext);
+            }
+          } catch (err) {
+            console.log('[SidePanel] No video context after detection attempt');
+          }
+        }, 1500);
+      } catch (err) {
+        console.log('[SidePanel] Could not trigger video detection (page may not support videos):', err.message);
+      }
     }
   } catch (err) {
     console.error('[SidePanel] Failed to get active tab context:', err);

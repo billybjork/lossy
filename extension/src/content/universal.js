@@ -479,6 +479,31 @@ function listenForEvents() {
       return true; // Will respond asynchronously
     }
 
+    // Ping check for content script presence (used by programmatic injection)
+    if (message.action === 'ping') {
+      sendResponse({ pong: true });
+      return false;
+    }
+
+    // Re-initialize video detection (triggered when side panel opens on existing tab)
+    if (message.action === 're_initialize') {
+      console.log('[Lossy] 🔄 RE_INITIALIZE: Received request to re-detect video');
+
+      // Clean up existing state
+      cleanup();
+
+      // Re-run initialization
+      init().then(() => {
+        console.log('[Lossy] ✅ RE_INITIALIZE: Re-initialization complete');
+        sendResponse({ success: true });
+      }).catch(err => {
+        console.error('[Lossy] ❌ RE_INITIALIZE: Failed to re-initialize:', err);
+        sendResponse({ success: false, error: err.message });
+      });
+
+      return true; // Will respond asynchronously
+    }
+
     return true;
   };
 
