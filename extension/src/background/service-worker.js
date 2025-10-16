@@ -176,28 +176,37 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Get current video timestamp (for side panel display)
   if (message.action === 'get_video_timestamp') {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+    chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'get_current_timestamp'
-        }).then(response => {
+        try {
+          const response = await chrome.tabs.sendMessage(tabs[0].id, {
+            action: 'get_current_timestamp'
+          });
           console.log('[Lossy] Got timestamp from content script:', response);
           // Forward timestamp to side panel
           chrome.runtime.sendMessage({
             action: 'video_timestamp_update',
             timestamp: response?.timestamp
           }).catch(() => {});
-        }).catch((err) => {
+
+          // Also send response back to caller for liveness check
+          sendResponse({ success: true, timestamp: response?.timestamp });
+        } catch (err) {
           console.log('[Lossy] No response from content script:', err);
-          // No video detected
+          // No video detected - content script not responding
           chrome.runtime.sendMessage({
             action: 'video_timestamp_update',
             timestamp: null
           }).catch(() => {});
-        });
+
+          // Send response indicating content script is not alive
+          sendResponse({ success: false, timestamp: null, error: 'Content script not responding' });
+        }
+      } else {
+        sendResponse({ success: false, timestamp: null, error: 'No active tab' });
       }
     });
-    return false;
+    return true; // Will respond asynchronously
   }
 
   // Get active tab context (from side panel)

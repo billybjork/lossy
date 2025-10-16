@@ -148,9 +148,34 @@ async function handleTabChanged(tabId, videoContext) {
   // If switching to a tab with a video
   if (newVideoDbId) {
     // Request current timestamp for the newly active tab
+    // This also serves as a liveness check for the content script
     console.log('[SidePanel] 🔄 Requesting timestamp for new active tab');
-    chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
-      .catch(() => console.log('[SidePanel] Could not get timestamp for new tab'));
+    try {
+      const timestampResult = await chrome.runtime.sendMessage({ action: 'get_video_timestamp' });
+
+      // If content script isn't responding (success: false), we have stale cached context
+      // but no live content script - need to trigger fresh detection
+      if (timestampResult && timestampResult.success === false) {
+        console.log('[SidePanel] ⚠️ Content script not responding despite cached context - triggering detection');
+
+        // Show detecting status
+        videoTimestampEl.textContent = 'Video: Detecting...';
+
+        // Trigger fresh detection to initialize content script
+        const detectionResult = await chrome.runtime.sendMessage({ action: 'trigger_video_detection' });
+
+        if (detectionResult?.success) {
+          console.log('[SidePanel] ✅ Detection complete after finding stale context');
+          // Wait for detection, then request timestamp again
+          setTimeout(() => {
+            chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
+              .catch(() => console.log('[SidePanel] Still could not get timestamp after detection'));
+          }, 2000);
+        }
+      }
+    } catch (err) {
+      console.log('[SidePanel] Could not get timestamp for new tab:', err);
+    }
 
     // If we're not currently displaying this video's notes, load them
     if (displayedVideoDbId !== newVideoDbId) {
