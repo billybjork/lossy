@@ -1,23 +1,22 @@
-import { UniversalVideoDetector } from './universal-video-detector.js';
-import { UniversalProgressBar } from './universal-progress-bar.js';
-import { UniversalVideoId } from './universal-video-id.js';
-import { VideoController } from './video-controller.js';
+import './platforms/bootstrap.js'; // Register all adapters
+import { PlatformRegistry } from './platforms/index.js';
 import { AnchorChip } from './shared/anchor-chip.js';
 import { TimelineMarkers } from './shared/timeline-markers.js';
 
 console.log('[Lossy] Universal content script loaded');
 
-let videoDetector = null;
+let adapter = null;
 let videoController = null;
 let currentVideoId = null;
 let currentVideoDbId = null;
 let anchorChip = null;
 let timelineMarkers = null;
 let currentUrl = window.location.href;
-let isInitializing = false; // Guard against simultaneous inits
-let historyIntercepted = false; // Track if we've already intercepted History API
-let pendingNotesForMarkers = null; // Store notes waiting for timeline markers
-let markerWatchdogTimer = null; // Periodic check to ensure markers are loaded
+let isInitializing = false;
+let historyIntercepted = false;
+let pendingNotesForMarkers = null;
+let markerWatchdogTimer = null;
+let spaCleanup = null; // Platform-specific SPA navigation cleanup
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -34,32 +33,38 @@ async function init() {
   chrome.runtime.sendMessage({
     action: 'clear_ui'
   }).catch(() => {
-    // Side panel may not be open, that's OK
     console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
   });
 
-  // Detect video
-  videoDetector = new UniversalVideoDetector();
-  const videoElement = await videoDetector.detect();
+  // Get appropriate adapter for current page
+  try {
+    adapter = await PlatformRegistry.getAdapter();
+    console.log('[Lossy] 🔵 INIT: Using adapter:', adapter.constructor.platformId);
+  } catch (error) {
+    console.error('[Lossy] ❌ INIT: Failed to get adapter:', error);
+    isInitializing = false;
+    return;
+  }
+
+  // Detect video using adapter
+  const videoElement = await adapter.detectVideo();
 
   if (!videoElement) {
     console.warn('[Lossy] ⚠️ INIT: No video element found on this page');
+    isInitializing = false;
     return;
   }
 
   console.log('[Lossy] 🔵 INIT: Video element found:', videoElement);
 
-  // Extract video metadata
-  const url = window.location.href;
-  const platform = UniversalVideoId.detectPlatform(url);
-  const videoIdData = UniversalVideoId.extract(url, platform);
-
+  // Extract video ID using adapter
+  const videoIdData = adapter.extractVideoId(window.location.href);
   currentVideoId = videoIdData.id;
 
   console.log('[Lossy] 🔵 INIT: Video ID:', videoIdData);
 
-  // Create video controller
-  videoController = new VideoController(videoElement);
+  // Create video controller using adapter
+  videoController = adapter.createVideoController(videoElement);
 
   // Send video context to service worker
   console.log('[Lossy] 🔵 INIT: Sending video_detected to service worker');
@@ -68,7 +73,7 @@ async function init() {
     data: {
       platform: videoIdData.platform,
       videoId: videoIdData.id,
-      url: url,
+      url: window.location.href,
       title: document.title
     }
   }).catch(err => {
@@ -92,17 +97,19 @@ async function init() {
   // Set up timeline markers (may retry if progress bar not found)
   setupTimelineMarkers(videoElement);
 
-  // Note: Notes will be requested after timeline markers are confirmed ready
-  // See createTimelineMarkers() which requests notes once markers are initialized
-
-  // Watch for video changes (SPA navigation)
-  videoDetector.watchForChanges((newVideo) => {
+  // Watch for video changes using adapter
+  adapter.watchForChanges((newVideo) => {
     console.log('[Lossy] 🔄 Video element changed, reinitializing...');
     debouncedReinit();
   });
 
-  // Watch for URL changes (SPA navigation like YouTube)
-  // Intercept History API for efficient change detection (only once per page load)
+  // Set up platform-specific SPA navigation hooks
+  spaCleanup = adapter.setupNavigationHooks(() => {
+    console.log('[Lossy] 🔄 Platform SPA navigation detected, reinitializing...');
+    debouncedReinit();
+  });
+
+  // Watch for URL changes (generic History API interception)
   if (!historyIntercepted) {
     interceptHistoryApi();
     historyIntercepted = true;
@@ -162,7 +169,9 @@ function checkUrlChange() {
 }
 
 function setupAnchorChip(videoElement) {
-  anchorChip = new AnchorChip(videoElement);
+  // Get platform-specific anchor container from adapter
+  const anchorContainer = adapter.getAnchorChipContainer(videoElement);
+  anchorChip = new AnchorChip(videoElement, anchorContainer);
   anchorChip.hide();
 }
 
@@ -252,9 +261,8 @@ function attemptLoadMarkersWithRetry(notes, attempt) {
 function setupTimelineMarkers(videoElement) {
   console.log('[Lossy] 🎯 Setting up timeline markers...');
 
-  // Find progress bar with retry logic
-  const progressBarFinder = new UniversalProgressBar(videoElement);
-  const progressBar = progressBarFinder.find();
+  // Find progress bar using adapter
+  const progressBar = adapter.findProgressBar(videoElement);
 
   if (!progressBar) {
     console.warn('[Lossy] ⚠️ Could not find progress bar immediately, will retry...');
@@ -282,8 +290,7 @@ function retryTimelineMarkersSetup(videoElement, attempt) {
   setTimeout(() => {
     console.log('[Lossy] 🔄 Retry attempt', attempt + 1, 'to find progress bar...');
 
-    const progressBarFinder = new UniversalProgressBar(videoElement);
-    const progressBar = progressBarFinder.find();
+    const progressBar = adapter.findProgressBar(videoElement);
 
     if (progressBar) {
       console.log('[Lossy] ✅ Progress bar found on retry', attempt + 1);
@@ -528,6 +535,12 @@ function cleanup() {
     markerWatchdogTimer = null;
   }
 
+  // Cleanup platform-specific SPA hooks
+  if (spaCleanup) {
+    spaCleanup();
+    spaCleanup = null;
+  }
+
   // Destroy UI components
   if (anchorChip) {
     anchorChip.destroy();
@@ -539,9 +552,9 @@ function cleanup() {
     timelineMarkers = null;
   }
 
-  if (videoDetector) {
-    videoDetector.destroy();
-    videoDetector = null;
+  if (adapter) {
+    adapter.destroy();
+    adapter = null;
   }
 
   if (videoController) {

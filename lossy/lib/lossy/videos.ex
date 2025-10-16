@@ -28,10 +28,6 @@ defmodule Lossy.Videos do
   # Notes
 
   def create_note(attrs \\ %{}) do
-    # For Sprint 02 MVP, we'll default timestamp_seconds to 0.0 if not provided
-    # and we won't require user_id since we're not handling authentication yet
-    attrs = Map.put_new(attrs, :timestamp_seconds, 0.0)
-
     %Note{}
     |> Note.changeset(attrs)
     |> Repo.insert()

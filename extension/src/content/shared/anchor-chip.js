@@ -4,8 +4,9 @@
  * Uses Shadow DOM for style isolation.
  */
 export class AnchorChip {
-  constructor(videoElement) {
+  constructor(videoElement, anchorContainer = null) {
     this.videoElement = videoElement;
+    this.anchorContainer = anchorContainer || videoElement.parentElement;
     this.container = null;
     this.shadowRoot = null;
     this.init();
@@ -70,11 +71,10 @@ export class AnchorChip {
       </div>
     `;
 
-    // Append to video container
-    const videoContainer = this.videoElement.parentElement;
-    if (videoContainer) {
-      videoContainer.style.position = 'relative';
-      videoContainer.appendChild(this.container);
+    // Append to anchor container
+    if (this.anchorContainer) {
+      this.anchorContainer.style.position = 'relative';
+      this.anchorContainer.appendChild(this.container);
     }
 
     // Handle fullscreen
@@ -110,10 +110,9 @@ export class AnchorChip {
         fullscreenEl.appendChild(this.container);
         this.container.style.position = 'absolute';
       } else {
-        // Move back to video container
-        const videoContainer = this.videoElement.parentElement;
-        if (videoContainer) {
-          videoContainer.appendChild(this.container);
+        // Move back to anchor container
+        if (this.anchorContainer) {
+          this.anchorContainer.appendChild(this.container);
         }
       }
     });

@@ -32,7 +32,8 @@ defmodule Lossy.Videos.Video do
       :duration_seconds
     ])
     |> validate_required([:platform, :external_id, :url])
-    |> validate_inclusion(:platform, ~w(youtube vimeo air generic))
+    # Platform can be any string - extension handles unknown platforms via GenericAdapter
+    |> validate_format(:platform, ~r/^[a-z0-9_]+$/, message: "must be lowercase alphanumeric")
     |> unique_constraint([:platform, :external_id])
   end
 end
