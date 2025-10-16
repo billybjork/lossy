@@ -7,6 +7,37 @@ import { NoteLoader } from './core/note-loader.js';
 
 console.log('[Lossy] Universal content script loaded');
 
+// Detect if extension context is invalidated (happens after extension reload)
+let extensionContextInvalidated = false;
+
+// Test extension context on load
+try {
+  chrome.runtime.id; // This will throw if context is invalidated
+} catch (err) {
+  console.log('[Lossy] 🔴 Extension context is already invalidated on load - this content script is orphaned');
+  extensionContextInvalidated = true;
+}
+
+// Wrap all chrome.runtime calls to detect invalidation
+const safeRuntimeSendMessage = async (message) => {
+  if (extensionContextInvalidated) {
+    console.log('[Lossy] ⚠️ Extension context invalidated, skipping message');
+    return null;
+  }
+
+  try {
+    return await chrome.runtime.sendMessage(message);
+  } catch (err) {
+    if (err.message?.includes('Extension context invalidated')) {
+      console.log('[Lossy] 🔴 Extension context invalidated - content script is orphaned. Please reload the page.');
+      extensionContextInvalidated = true;
+      // Cleanup to stop all activity
+      cleanup();
+    }
+    throw err;
+  }
+};
+
 let adapter = null;
 let videoController = null;
 let currentVideoId = null;
@@ -45,7 +76,7 @@ async function init() {
 
   // Tell side panel to clear old notes (we're loading a fresh video)
   console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
-  chrome.runtime.sendMessage({
+  safeRuntimeSendMessage({
     action: 'clear_ui'
   }).catch(() => {
     console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
@@ -109,7 +140,7 @@ async function onVideoReady(videoElement) {
 
   // Send video context to service worker
   console.log('[Lossy] 🔵 Sending video_detected to service worker');
-  const response = await chrome.runtime.sendMessage({
+  const response = await safeRuntimeSendMessage({
     action: 'video_detected',
     data: {
       platform: videoIdData.platform,
@@ -311,10 +342,10 @@ function createTimelineMarkers(videoElement, progressBar) {
 
   timelineMarkers.onMarkerClick((noteId, timestamp) => {
     console.log('[Lossy] 📍 Timeline marker clicked:', noteId, timestamp);
-    chrome.runtime.sendMessage({
+    safeRuntimeSendMessage({
       action: 'marker_clicked',
       data: { noteId, timestamp }
-    });
+    }).catch(() => {});
   });
 
   console.log('[Lossy] 🎯 Timeline markers setup complete');
@@ -367,14 +398,14 @@ function listenForEvents() {
         }
 
         // Store timestamp globally for later use
-        chrome.runtime.sendMessage({
+        safeRuntimeSendMessage({
           action: 'timestamp_captured',
           data: {
             videoId: currentVideoId,
             videoDbId: currentVideoDbId,
             timestamp: timestamp
           }
-        });
+        }).catch(() => {});
 
         // Return timestamp directly in response
         sendResponse({ success: true, timestamp: timestamp });
@@ -581,9 +612,13 @@ function cleanup() {
   console.log('[Lossy] 🧹 CLEANUP: Complete');
 }
 
-// Initialize
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', init);
+// Initialize (only if extension context is valid)
+if (!extensionContextInvalidated) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 } else {
-  init();
+  console.log('[Lossy] 🔴 Skipping initialization - extension context invalidated');
 }

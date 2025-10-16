@@ -762,7 +762,13 @@ async function ensureContentScriptInjected(tabId) {
     // Wait a bit for the script to initialize
     await new Promise(resolve => setTimeout(resolve, 500));
   } catch (err) {
-    console.error('[ServiceWorker] ❌ Failed to inject content script:', err);
-    throw err;
+    // Ignore "Cannot access" errors (means a script is already running, likely orphaned)
+    if (err.message?.includes('Cannot access')) {
+      console.log('[ServiceWorker] ⚠️ Content script injection blocked (likely orphaned script exists)');
+      // Continue anyway - we'll try to communicate with whatever is there
+    } else {
+      console.error('[ServiceWorker] ❌ Failed to inject content script:', err);
+      throw err;
+    }
   }
 }

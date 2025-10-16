@@ -53,39 +53,46 @@ recordBtn.addEventListener('click', async () => {
 async function init() {
   console.log('[SidePanel] Initializing...');
 
-  // Get active tab context
+  // Always trigger fresh detection to ensure content script is alive
+  // This handles the case where cached context exists but content script is orphaned
+  console.log('[SidePanel] Triggering fresh video detection...');
+
   try {
-    const response = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
-    currentVideoContext = response.context;
+    const result = await chrome.runtime.sendMessage({ action: 'trigger_video_detection' });
 
-    if (currentVideoContext) {
-      console.log('[SidePanel] Initial video context:', currentVideoContext);
-    } else {
-      console.log('[SidePanel] No cached video context, triggering fresh detection...');
+    if (result?.success) {
+      console.log('[SidePanel] ✅ Video detection completed successfully');
 
-      // No cached context - trigger video detection on current tab
-      try {
-        await chrome.runtime.sendMessage({ action: 'trigger_video_detection' });
-        console.log('[SidePanel] ✅ Video detection triggered successfully');
-
-        // Wait a moment then check for context again
-        setTimeout(async () => {
-          try {
-            const retryResponse = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
-            if (retryResponse.context) {
-              currentVideoContext = retryResponse.context;
-              console.log('[SidePanel] ✅ Video context now available:', currentVideoContext);
-            }
-          } catch (err) {
-            console.log('[SidePanel] No video context after detection attempt');
+      // Wait a moment for detection to complete, then get context
+      setTimeout(async () => {
+        try {
+          const response = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
+          if (response.context) {
+            currentVideoContext = response.context;
+            console.log('[SidePanel] ✅ Video context available:', currentVideoContext);
+          } else {
+            console.log('[SidePanel] No video detected on this page');
           }
-        }, 1500);
-      } catch (err) {
-        console.log('[SidePanel] Could not trigger video detection (page may not support videos):', err.message);
-      }
+        } catch (err) {
+          console.log('[SidePanel] Could not get video context:', err);
+        }
+      }, 2000); // Increased to 2s to allow detection to complete
+    } else {
+      console.log('[SidePanel] Video detection not available on this page');
     }
   } catch (err) {
-    console.error('[SidePanel] Failed to get active tab context:', err);
+    console.log('[SidePanel] Could not trigger video detection:', err.message);
+
+    // Fallback: try to get cached context anyway (might work if content script is alive)
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'get_active_tab_context' });
+      if (response.context) {
+        currentVideoContext = response.context;
+        console.log('[SidePanel] Using cached video context:', currentVideoContext);
+      }
+    } catch (err2) {
+      console.error('[SidePanel] Failed to get any video context:', err2);
+    }
   }
 }
 
