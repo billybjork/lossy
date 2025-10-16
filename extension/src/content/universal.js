@@ -3,6 +3,7 @@ import { PlatformRegistry } from './platforms/index.js';
 import { AnchorChip } from './shared/anchor-chip.js';
 import { TimelineMarkers } from './shared/timeline-markers.js';
 import { VideoLifecycleManager } from './core/video-lifecycle-manager.js';
+import { NoteLoader } from './core/note-loader.js';
 
 console.log('[Lossy] Universal content script loaded');
 
@@ -16,11 +17,11 @@ let currentUrl = window.location.href;
 let isInitializing = false;
 let historyIntercepted = false;
 let pendingNotesForMarkers = null;
-let markerWatchdogTimer = null;
 let spaCleanup = null; // Platform-specific SPA navigation cleanup
 let lifecycleManager = null;
 let messageListenerRegistered = false;
 let messageListenerHandler = null;
+let noteLoader = null;
 
 async function init() {
   // Prevent multiple simultaneous initializations
@@ -245,41 +246,7 @@ function loadMarkersFromNotes(notes) {
   return added > 0 || queued > 0;
 }
 
-/**
- * Attempt to load markers with exponential backoff retry.
- * This handles cases where notes arrive before timeline markers are ready.
- */
-function attemptLoadMarkersWithRetry(notes, attempt) {
-  const maxAttempts = 6;
-  const delays = [500, 1000, 2000, 3000, 5000, 10000]; // Up to 10 seconds
-
-  if (attempt >= maxAttempts) {
-    console.error('[Lossy] ❌ Failed to load markers after', maxAttempts, 'retry attempts');
-    return;
-  }
-
-  setTimeout(() => {
-    if (timelineMarkers) {
-      console.log('[Lossy] 🔄 Retry attempt', attempt + 1, 'to load markers');
-      const success = loadMarkersFromNotes(notes);
-
-      if (success) {
-        console.log('[Lossy] ✅ Successfully loaded markers on retry', attempt + 1);
-        // Clear pending since we succeeded
-        if (pendingNotesForMarkers === notes) {
-          pendingNotesForMarkers = null;
-        }
-      } else {
-        // Try again
-        attemptLoadMarkersWithRetry(notes, attempt + 1);
-      }
-    } else {
-      // Timeline markers still not ready, try again
-      console.log('[Lossy] ⏳ Timeline markers still not ready on retry', attempt + 1);
-      attemptLoadMarkersWithRetry(notes, attempt + 1);
-    }
-  }, delays[attempt]);
-}
+// attemptLoadMarkersWithRetry removed - consolidated into NoteLoader
 
 function setupTimelineMarkers(videoElement) {
   console.log('[Lossy] 🎯 Setting up timeline markers...');
@@ -347,68 +314,24 @@ function createTimelineMarkers(videoElement, progressBar) {
     pendingNotesForMarkers = null;
   }
 
-  // Always request notes when timeline markers become ready
-  if (currentVideoDbId && timelineMarkers) {
-    console.log('[Lossy] 🎯 Timeline markers ready, requesting notes for video:', currentVideoDbId);
-    chrome.runtime.sendMessage({
-      action: 'request_notes',
-      videoDbId: currentVideoDbId
-    }).catch(err => {
-      console.log('[Lossy] ⚠️ Failed to request notes after timeline setup:', err);
-    });
+  // Initialize note loader
+  if (!noteLoader) {
+    noteLoader = new NoteLoader();
+  }
 
-    // Start watchdog to ensure markers are eventually loaded
-    startMarkerWatchdog();
+  // Request notes ONCE with automatic deduplication and retry
+  if (currentVideoDbId) {
+    noteLoader.loadNotes(currentVideoDbId)
+      .then(() => {
+        console.log('[Lossy] Notes loaded successfully via NoteLoader');
+      })
+      .catch(err => {
+        console.error('[Lossy] Failed to load notes after all retries:', err);
+      });
   }
 }
 
-/**
- * Watchdog timer to periodically check if we have a video with notes but no markers.
- * This catches edge cases where notes loaded but markers failed to render.
- */
-function startMarkerWatchdog() {
-  // Clear any existing watchdog
-  if (markerWatchdogTimer) {
-    clearInterval(markerWatchdogTimer);
-  }
-
-  console.log('[Lossy] 🐕 Starting marker watchdog...');
-
-  // Check every 3 seconds for 30 seconds
-  let attempts = 0;
-  const maxAttempts = 10;
-
-  markerWatchdogTimer = setInterval(() => {
-    attempts++;
-
-    if (attempts >= maxAttempts) {
-      console.log('[Lossy] 🐕 Watchdog stopping after', maxAttempts, 'attempts');
-      clearInterval(markerWatchdogTimer);
-      markerWatchdogTimer = null;
-      return;
-    }
-
-    // If timeline markers exist but no markers are displayed, request notes again
-    if (timelineMarkers && currentVideoDbId) {
-      const markerCount = timelineMarkers.markers.size;
-      const pendingCount = timelineMarkers.pendingMarkers.length;
-
-      if (markerCount === 0 && pendingCount === 0) {
-        console.log('[Lossy] 🐕 Watchdog detected no markers, re-requesting notes (attempt', attempts, ')');
-        chrome.runtime.sendMessage({
-          action: 'request_notes',
-          videoDbId: currentVideoDbId
-        }).catch(err => {
-          console.log('[Lossy] ⚠️ Watchdog note request failed:', err);
-        });
-      } else if (markerCount > 0) {
-        console.log('[Lossy] 🐕 Watchdog found', markerCount, 'markers, stopping');
-        clearInterval(markerWatchdogTimer);
-        markerWatchdogTimer = null;
-      }
-    }
-  }, 3000); // Check every 3 seconds
-}
+// startMarkerWatchdog removed - retry logic consolidated into NoteLoader
 
 function listenForEvents() {
   // SINGLETON GUARD: Only register once
@@ -509,9 +432,6 @@ function listenForEvents() {
         // Store notes for when timeline markers become ready
         pendingNotesForMarkers = message.notes;
 
-        // Also try multiple retries with increasing delays
-        attemptLoadMarkersWithRetry(message.notes, 0);
-
         sendResponse({ success: false, error: 'Timeline markers initializing, notes stored for retry' });
         return false;
       }
@@ -563,10 +483,9 @@ function cleanup() {
     reinitTimer = null;
   }
 
-  // Clear watchdog timer
-  if (markerWatchdogTimer) {
-    clearInterval(markerWatchdogTimer);
-    markerWatchdogTimer = null;
+  // Invalidate note loader session (cancels in-flight requests)
+  if (noteLoader) {
+    noteLoader.invalidateSession();
   }
 
   // Remove message listener (CRITICAL FIX)
