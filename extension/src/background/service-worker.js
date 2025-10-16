@@ -218,10 +218,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Trigger video detection on current tab (from side panel when no context)
   if (message.action === 'trigger_video_detection') {
-    handleTriggerVideoDetection().then(sendResponse).catch(err => {
-      console.error('[ServiceWorker] Failed to trigger video detection:', err);
-      sendResponse({ success: false, error: err.message });
-    });
+    handleTriggerVideoDetection()
+      .then(sendResponse)
+      .catch(err => {
+        // Don't log as error - handle gracefully for restricted pages
+        console.log('[ServiceWorker] Could not trigger video detection:', err.message);
+        sendResponse({ success: false, error: err.message });
+      });
     return true; // Keep channel open for async response
   }
 
@@ -693,6 +696,7 @@ function sendNotesToSidePanel(notes, videoDbId, tabId) {
 /**
  * Ensure content script is injected and trigger video detection.
  * Called when side panel opens on a tab without cached video context.
+ * Returns success/failure gracefully without throwing.
  */
 async function handleTriggerVideoDetection() {
   console.log('[ServiceWorker] 🔍 TRIGGER_VIDEO_DETECTION: Handling request');
@@ -701,22 +705,24 @@ async function handleTriggerVideoDetection() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
   if (!tab?.id) {
-    throw new Error('No active tab found');
+    console.log('[ServiceWorker] No active tab found');
+    return { success: false, error: 'No active tab found' };
   }
 
   console.log('[ServiceWorker] 🔍 Triggering detection on tab:', tab.id, tab.url);
 
-  // Check if URL is supported
-  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
-    throw new Error('Cannot inject content script on this page');
+  // Check if URL is supported - return gracefully for restricted pages
+  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('edge://')) {
+    console.log('[ServiceWorker] Cannot inject content script on restricted page:', tab.url);
+    return { success: false, error: 'Cannot inject content script on this page', restricted: true };
   }
 
   // Ensure content script is injected
   try {
     await ensureContentScriptInjected(tab.id);
   } catch (err) {
-    console.error('[ServiceWorker] Failed to inject content script:', err);
-    throw new Error('Failed to inject content script');
+    console.log('[ServiceWorker] Failed to inject content script:', err.message);
+    return { success: false, error: 'Failed to inject content script' };
   }
 
   // Trigger detection in content script
@@ -730,11 +736,12 @@ async function handleTriggerVideoDetection() {
       console.log('[ServiceWorker] ✅ Content script re-initialized successfully');
       return { success: true, tabId: tab.id };
     } else {
-      throw new Error('Content script re-initialization failed');
+      console.log('[ServiceWorker] Content script re-initialization failed');
+      return { success: false, error: 'Content script re-initialization failed' };
     }
   } catch (err) {
-    console.error('[ServiceWorker] Failed to trigger detection:', err);
-    throw new Error('Failed to communicate with content script');
+    console.log('[ServiceWorker] Failed to communicate with content script:', err.message);
+    return { success: false, error: 'Failed to communicate with content script' };
   }
 }
 

@@ -8,14 +8,19 @@ import { NoteLoader } from './core/note-loader.js';
 console.log('[Lossy] Universal content script loaded');
 
 // Detect if extension context is invalidated (happens after extension reload)
-let extensionContextInvalidated = false;
+// Use a non-throwing check to avoid errors in Extension Manager console
+let extensionContextInvalidated = (() => {
+  try {
+    // Access chrome.runtime.id - if this throws OR returns undefined, context is invalid
+    return !chrome?.runtime?.id;
+  } catch {
+    // Context is invalidated
+    return true;
+  }
+})();
 
-// Test extension context on load
-try {
-  chrome.runtime.id; // This will throw if context is invalidated
-} catch (err) {
+if (extensionContextInvalidated) {
   console.log('[Lossy] 🔴 Extension context is already invalidated on load - this content script is orphaned');
-  extensionContextInvalidated = true;
 }
 
 // Wrap all chrome.runtime calls to detect invalidation
