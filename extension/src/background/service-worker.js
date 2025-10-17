@@ -51,6 +51,12 @@ chrome.runtime.onInstalled.addListener(() => {
   console.log('Voice Video Companion installed');
 });
 
+// Extension button clicked - open side panel
+chrome.action.onClicked.addListener(async (tab) => {
+  console.log('Extension button clicked, opening side panel');
+  await chrome.sidePanel.open({ windowId: tab.windowId });
+});
+
 // Handle messages from extension pages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Service worker received:', message, 'from', sender);
