@@ -80,9 +80,9 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - **[Sprint 01](./sprints/SPRINT_01_audio_streaming.md)**: 🚧 Audio capture + Phoenix Channels (In Progress)
 - **[Sprint 02](./sprints/SPRINT_02_transcription.md)**: ⏳ OpenAI Whisper + GPT-4o structuring
 - **[Sprint 03](./sprints/SPRINT_03_video_integration.md)**: ⏳ Video timestamp anchoring
-- **[Sprint 04](./sprints/SPRINT_04_auto_posting.md)**: ⏳ Browserbase automation
-- **[Sprint 05](./sprints/SPRINT_05_auth.md)**: ⏳ Authentication (Future)
-- **[Sprint 06](./sprints/SPRINT_06_polish.md)**: ⏳ UX polish (Future)
+- **[Sprint 07](./sprints/SPRINT_07_auto_posting.md)**: ⏳ Browserbase automation
+- **[Sprint 08](./sprints/SPRINT_08_auth.md)**: ⏳ Authentication (Future)
+- **[Sprint 09](./sprints/SPRINT_09_polish.md)**: ⏳ UX polish (Future)
 
 **See:** [sprints/README.md](./sprints/README.md) for current status and sprint system overview
 

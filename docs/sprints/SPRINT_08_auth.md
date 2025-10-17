@@ -1,4 +1,4 @@
-# Sprint 05: Authentication
+# Sprint 08: Authentication
 
 **Status:** ⏳ Future
 **Estimated Duration:** 2-3 days
@@ -819,4 +819,4 @@ Phoenix.PubSub.broadcast(
 
 ## Next Sprint
 
-👉 [Sprint 06 - Polish & UX](./SPRINT_06_polish.md)
+👉 [Sprint 09 - Polish & UX](./SPRINT_09_polish.md)

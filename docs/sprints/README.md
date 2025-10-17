@@ -7,7 +7,7 @@
 
 ## Current Status
 
-✅ **Latest Completed Sprint:** [Sprint 03.55 - Core Reliability Improvements](./SPRINT_03.55_reliability_improvements.md)
+✅ **Latest Completed Sprint:** [Sprint 05 - Core Reliability Improvements](./archive/SPRINT_05_reliability_improvements.md)
 📅 **Completed:** 2025-10-16
 🎯 **Achievement:** Self-healing architecture, AbortController cleanup, and 95%+ reliability across platforms
 
@@ -25,9 +25,9 @@
 
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
-| [04 - Auto Posting](./SPRINT_04_auto_posting.md) | ⏳ Planned | Browserbase automation + Oban workers | 3-5 days |
-| [05 - Auth](./SPRINT_05_auth.md) | ⏳ Future | User authentication & multi-user support | 2-3 days |
-| [06 - Polish](./SPRINT_06_polish.md) | ⏳ Future | On-video overlays + UX refinements | 3-4 days |
+| [07 - Auto Posting](./SPRINT_07_auto_posting.md) | ⏳ Planned | Browserbase automation + Oban workers | 3-5 days |
+| [08 - Auth](./SPRINT_08_auth.md) | ⏳ Future | User authentication & multi-user support | 2-3 days |
+| [09 - Polish](./SPRINT_09_polish.md) | ⏳ Future | On-video overlays + UX refinements | 3-4 days |
 
 ### Completed Sprints
 
@@ -37,7 +37,7 @@
 | [01 - Audio Streaming](./archive/SPRINT_01_audio_streaming.md) | ✅ 2025-10-14 | Audio capture + Phoenix Channels (no auth) | 1 day |
 | [02 - Cloud Transcription](./archive/SPRINT_02_transcription.md) | ✅ 2025-10-14 | OpenAI Whisper + GPT-4o note structuring | 1 day |
 | [03 - Video Integration](./SPRINT_03_video_integration.md) | ✅ 2025-10-14 | Content scripts + video timestamp anchoring | 3 days |
-| [03.55 - Reliability](./SPRINT_03.55_reliability_improvements.md) | ✅ 2025-10-16 | Self-healing architecture + 95%+ reliability | 6 days |
+| [05 - Reliability](./archive/SPRINT_05_reliability_improvements.md) | ✅ 2025-10-16 | Self-healing architecture + 95%+ reliability | 6 days |
 
 ---
 

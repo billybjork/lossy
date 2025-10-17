@@ -1,4 +1,4 @@
-# Sprint 04: Automated Note Posting with Browserbase
+# Sprint 07: Automated Note Posting with Browserbase
 
 **Status:** ⏳ Planned
 **Estimated Duration:** 3-5 days
@@ -1219,6 +1219,6 @@ See [04_BROWSERBASE_INTEGRATION.md](../04_BROWSERBASE_INTEGRATION.md) for:
 
 ## Next Sprint
 
-👉 [Sprint 05 - Authentication](./SPRINT_05_auth.md)
+👉 [Sprint 08 - Authentication](./SPRINT_08_auth.md)
 
 **Focus:** Add user authentication, multi-user support, token-based auth for LiveView

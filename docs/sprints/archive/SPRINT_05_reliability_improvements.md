@@ -1,9 +1,9 @@
-# Sprint 03.55: Core Reliability Improvements
+# Sprint 05: Core Reliability Improvements
 
 **Status:** ✅ Complete
 **Actual Duration:** 6 days (2025-10-10 to 2025-10-16)
 **Priority:** Critical
-**Dependencies:** Sprint 03.6 (Platform Adapters) must be complete
+**Dependencies:** Sprint 06 (Platform Adapters) must be complete
 
 ---
 
@@ -40,9 +40,9 @@
 - `extension/src/content/universal.js` - Added AbortController coordination
 
 **Architecture Updates:**
-- `docs/02_ARCHITECTURE.md` - Added detailed Content Script architecture section documenting Sprint 03.55 improvements
-- `docs/sprints/README.md` - Marked Sprint 03.55 as complete
-- `docs/sprints/SPRINT_03.55_reliability_improvements.md` - Updated status to complete
+- `docs/02_ARCHITECTURE.md` - Added detailed Content Script architecture section documenting Sprint 05 improvements
+- `docs/sprints/README.md` - Marked Sprint 05 as complete
+- `docs/sprints/SPRINT_05_reliability_improvements.md` - Updated status to complete
 
 **Git Commits:**
 - `226c9a5` - Phase 6: AbortController-Based Cleanup
@@ -1951,7 +1951,7 @@ function cleanup() {
 ## Dependencies
 
 **Before Sprint:**
-- ✅ Sprint 03.6 (Platform Adapters) complete
+- ✅ Sprint 06 (Platform Adapters) complete
 - ✅ TabManager implemented
 - ✅ Backend note persistence working
 

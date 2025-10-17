@@ -1,4 +1,4 @@
-# Sprint 03.5: Tab Management & Context Switching
+# Sprint 04: Tab Management & Context Switching
 
 **Status:** 🚧 In Progress
 **Started:** 2025-10-15
@@ -848,6 +848,6 @@ chrome.runtime.onMessage.addListener((message) => {
 
 ## Next Sprint
 
-👉 [Sprint 04 - Auto-Posting](./SPRINT_04_auto_posting.md)
+👉 [Sprint 07 - Auto-Posting](../SPRINT_07_auto_posting.md)
 
 **Focus:** Browserbase automation to post notes as comments on video platforms

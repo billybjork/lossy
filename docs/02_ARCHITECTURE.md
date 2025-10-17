@@ -201,7 +201,7 @@
 - ❌ Maintain WebSocket (done in service worker)
 - ❌ Use LiveView (uses Shadow DOM + vanilla JS)
 
-**Architecture (Sprint 03.55 - Reliability Improvements):**
+**Architecture (Sprint 05 - Reliability Improvements):**
 
 The content script uses a modular, self-healing architecture with these core components:
 

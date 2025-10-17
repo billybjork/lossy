@@ -1,4 +1,4 @@
-# Sprint 03.6: Platform-Specific Video Adapters
+# Sprint 06: Platform-Specific Video Adapters
 
 **Status:** 📝 Planned
 **Estimated Duration:** 3-4 days
@@ -457,11 +457,11 @@ export const YouTubeSelectors = {
 
 **Before Sprint:**
 - ✅ Sprint 03 (Video Integration) complete
-- ✅ Sprint 03.5 (Tab Management) complete
+- ✅ Sprint 04 (Tab Management) complete
 
 **After Sprint:**
-- Sprint 04: Auto-Posting (will use platform adapters for posting logic)
-- Sprint 06: Polish (may add more platforms)
+- Sprint 07: Auto-Posting (will use platform adapters for posting logic)
+- Sprint 09: Polish (may add more platforms)
 
 ---
 

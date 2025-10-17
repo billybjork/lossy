@@ -1874,6 +1874,6 @@ end
 
 ## Next Sprint
 
-👉 [Sprint 03.5 - Tab Management](./SPRINT_03.5_tab_management.md)
+👉 [Sprint 04 - Tab Management](./SPRINT_04_tab_management.md)
 
 **Focus:** Per-tab video context tracking, side panel syncs to active tab, tab switcher UI
