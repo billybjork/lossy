@@ -152,13 +152,24 @@ chrome.runtime.onMessage.addListener((message) => {
 
   // Clear UI when content script initializes (new video loading)
   if (message.action === 'clear_ui') {
-    console.log('[SidePanel] 🧹 CLEAR_UI: Clearing for new video');
+    console.log('[SidePanel] 🧹 CLEAR_UI: Preparing for new video');
+
+    // Cancel any existing scheduled clear
+    cancelScheduledTranscriptClear();
+
+    // Mark as loading but preserve content (notes will be replaced by tab_changed)
     markTranscriptsLoading({ preserveContent: true });
-    scheduleTranscriptClear();
+
+    // Invalidate state - tab_changed will set these correctly
     currentVideoContext = null;
     displayedVideoDbId = null;
     loadingSessionId++; // Invalidate any in-flight requests
     console.log('[SidePanel] 🧹 Loading session ID incremented to', loadingSessionId);
+
+    // Schedule a fallback clear in case tab_changed doesn't arrive
+    // This prevents notes from being stuck in "loading" state when navigating away from video pages
+    // The 1 second delay gives tab_changed time to arrive and cancel this
+    scheduleTranscriptClear(1000);
   }
 });
 

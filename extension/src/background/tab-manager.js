@@ -7,6 +7,7 @@ export class TabManager {
     this.tabVideoMap = new Map(); // tabId → VideoContext
     this.activeTabId = null;
     this.recordingTabId = null;
+    this.tabUpdateTimers = new Map(); // tabId → timeout for debouncing
   }
 
   async init() {
@@ -68,24 +69,44 @@ export class TabManager {
       await this.onTabChanged(activeInfo.tabId);
     });
 
-    // Tab updated (URL changed, page loaded, etc)
+    // Tab updated (URL changed, page loaded, etc) - DEBOUNCED
     chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
       // Only care about URL changes and completed loads
       if (changeInfo.url || (changeInfo.status === 'complete' && tab.active)) {
         console.log('[TabManager] Tab updated:', tabId, changeInfo);
 
-        // If URL changed, clear the video context (new video might be detected)
-        if (changeInfo.url) {
-          this.clearVideoContext(tabId);
+        // Clear existing debounce timer for this tab
+        if (this.tabUpdateTimers.has(tabId)) {
+          clearTimeout(this.tabUpdateTimers.get(tabId));
         }
 
-        await this.onTabChanged(tabId);
+        // Debounce: wait 300ms before processing to avoid rapid status change cascades
+        const timer = setTimeout(async () => {
+          console.log('[TabManager] Processing debounced tab update:', tabId);
+          this.tabUpdateTimers.delete(tabId);
+
+          // If URL changed, clear the video context (new video might be detected)
+          if (changeInfo.url) {
+            this.clearVideoContext(tabId);
+          }
+
+          await this.onTabChanged(tabId);
+        }, 300);
+
+        this.tabUpdateTimers.set(tabId, timer);
       }
     });
 
     // Tab removed (user closed tab)
     chrome.tabs.onRemoved.addListener((tabId) => {
       console.log('[TabManager] Tab removed:', tabId);
+
+      // Clear debounce timer if exists
+      if (this.tabUpdateTimers.has(tabId)) {
+        clearTimeout(this.tabUpdateTimers.get(tabId));
+        this.tabUpdateTimers.delete(tabId);
+      }
+
       this.removeTab(tabId);
     });
   }
@@ -162,15 +183,10 @@ export class TabManager {
         console.log('[TabManager] Could not send clear_markers (content script may not be loaded yet):', err);
       });
 
-      // If this is the active tab, immediately tell side panel to clear
-      if (tabId === this.activeTabId) {
-        console.log('[TabManager] Clearing side panel for active tab', tabId);
-        chrome.runtime.sendMessage({
-          action: 'clear_ui'
-        }).catch(err => {
-          console.log('[TabManager] Could not send clear_ui to side panel:', err);
-        });
-      }
+      // DON'T send clear_ui here - the content script will handle it
+      // The content script has smart logic to only clear when the video actually changes
+      // (see universal.js lines 100-111)
+      console.log('[TabManager] Context marked as stale - content script will handle UI clearing if needed');
     }
   }
 
