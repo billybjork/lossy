@@ -286,6 +286,25 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true; // Keep channel open for async response
   }
+
+  // Delete note (from side panel)
+  if (message.action === 'delete_note') {
+    if (!message.noteId) {
+      sendResponse({ error: 'Missing noteId' });
+      return false;
+    }
+
+    console.log('[ServiceWorker] 🗑️ DELETE_NOTE:', message.noteId);
+
+    deleteNote(message.noteId).then(() => {
+      sendResponse({ success: true });
+    }).catch(err => {
+      console.error('[Lossy] Failed to delete note:', err);
+      sendResponse({ error: err.message });
+    });
+
+    return true; // Keep channel open for async response
+  }
 });
 
 async function toggleRecording() {
@@ -697,6 +716,44 @@ function sendNotesToSidePanel(notes, videoDbId, tabId) {
       }, tabId);
     });
   }
+}
+
+async function deleteNote(noteId) {
+  console.log('[ServiceWorker] 🗑️ Deleting note:', noteId);
+
+  // Ensure we have a video channel connection
+  if (!socket || !socket.isConnected()) {
+    socket = new Socket("ws://localhost:4000/socket", {
+      params: {},
+      logger: (kind, msg, data) => {
+        console.log(`Phoenix ${kind}:`, msg, data);
+      }
+    });
+    socket.connect();
+  }
+
+  // Reuse or create video channel
+  if (!videoChannel) {
+    videoChannel = socket.channel('video:meta', {});
+    await new Promise((resolve, reject) => {
+      videoChannel.join()
+        .receive('ok', resolve)
+        .receive('error', reject);
+    });
+  }
+
+  // Delete the note
+  return new Promise((resolve, reject) => {
+    videoChannel.push('delete_note', { note_id: noteId })
+      .receive('ok', () => {
+        console.log('[ServiceWorker] 🗑️ Note deleted successfully');
+        resolve();
+      })
+      .receive('error', (err) => {
+        console.error('[ServiceWorker] Failed to delete note:', err);
+        reject(err);
+      });
+  });
 }
 
 /**

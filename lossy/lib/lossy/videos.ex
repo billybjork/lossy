@@ -48,6 +48,16 @@ defmodule Lossy.Videos do
     |> Repo.update()
   end
 
+  def delete_note(id) do
+    case Repo.get(Note, id) do
+      nil ->
+        {:error, :not_found}
+
+      note ->
+        Repo.delete(note)
+    end
+  end
+
   def list_notes_by_video(video_id) do
     Note
     |> where([n], n.video_id == ^video_id)

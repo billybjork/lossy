@@ -29,9 +29,233 @@ const statusEl = document.getElementById('status');
 const transcriptsEl = document.getElementById('transcripts');
 const videoTimestampEl = document.getElementById('videoTimestamp');
 
+// Initialize LiveWaveform
+const waveformCanvas = document.getElementById('waveformCanvas');
+let waveform = null;
+
+// LiveWaveform class (inline - will be bundled by webpack)
+class LiveWaveform {
+  constructor(canvas, options = {}) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext('2d');
+
+    this.options = {
+      barWidth: options.barWidth || 3,
+      barGap: options.barGap || 1,
+      barColor: options.barColor || '#dc2626',
+      height: options.height || 64,
+      sensitivity: options.sensitivity || 1.2,
+      fftSize: options.fftSize || 256,
+      mode: options.mode || 'static',
+      historySize: options.historySize || 60,
+      ...options
+    };
+
+    this.active = false;
+    this.processing = false;
+    this.audioContext = null;
+    this.analyser = null;
+    this.microphone = null;
+    this.animationFrame = null;
+    this.dataArray = null;
+    this.history = [];
+    this.mediaStream = null;
+
+    this.setupCanvas();
+  }
+
+  setupCanvas() {
+    const dpr = window.devicePixelRatio || 1;
+    const rect = this.canvas.getBoundingClientRect();
+
+    this.canvas.width = rect.width * dpr;
+    this.canvas.height = this.options.height * dpr;
+    this.canvas.style.width = rect.width + 'px';
+    this.canvas.style.height = this.options.height + 'px';
+
+    this.ctx.scale(dpr, dpr);
+  }
+
+  async start() {
+    if (this.active) return;
+
+    try {
+      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.analyser = this.audioContext.createAnalyser();
+      this.analyser.fftSize = this.options.fftSize;
+
+      this.microphone = this.audioContext.createMediaStreamSource(this.mediaStream);
+      this.microphone.connect(this.analyser);
+
+      const bufferLength = this.analyser.frequencyBinCount;
+      this.dataArray = new Uint8Array(bufferLength);
+
+      this.active = true;
+      this.processing = false;
+      this.history = [];
+
+      this.draw();
+    } catch (error) {
+      console.error('Failed to start waveform:', error);
+      throw error;
+    }
+  }
+
+  stop() {
+    if (!this.active) return;
+
+    if (this.animationFrame) {
+      cancelAnimationFrame(this.animationFrame);
+      this.animationFrame = null;
+    }
+
+    if (this.microphone) {
+      this.microphone.disconnect();
+      this.microphone = null;
+    }
+
+    if (this.mediaStream) {
+      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream = null;
+    }
+
+    if (this.audioContext) {
+      this.audioContext.close();
+      this.audioContext = null;
+    }
+
+    this.active = false;
+    this.processing = false;
+
+    this.clearCanvas();
+  }
+
+  setProcessing(processing) {
+    this.processing = processing;
+  }
+
+  draw() {
+    if (!this.active) return;
+
+    this.animationFrame = requestAnimationFrame(() => this.draw());
+
+    this.analyser.getByteFrequencyData(this.dataArray);
+
+    this.clearCanvas();
+
+    if (this.processing) {
+      this.drawProcessingAnimation();
+    } else if (this.options.mode === 'scrolling') {
+      this.drawScrollingMode();
+    } else {
+      this.drawStaticMode();
+    }
+  }
+
+  drawStaticMode() {
+    const rect = this.canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = this.options.height;
+
+    const barCount = Math.floor(width / (this.options.barWidth + this.options.barGap));
+    const step = Math.floor(this.dataArray.length / barCount);
+
+    for (let i = 0; i < barCount; i++) {
+      const dataIndex = i * step;
+      const value = this.dataArray[dataIndex] || 0;
+      const barHeight = Math.max((value / 255) * height * this.options.sensitivity, 2);
+
+      const x = i * (this.options.barWidth + this.options.barGap);
+      const y = (height - barHeight) / 2;
+
+      this.ctx.fillStyle = this.options.barColor;
+      this.ctx.fillRect(x, y, this.options.barWidth, barHeight);
+    }
+  }
+
+  drawScrollingMode() {
+    const rect = this.canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = this.options.height;
+
+    const average = this.dataArray.reduce((sum, val) => sum + val, 0) / this.dataArray.length;
+    const normalizedValue = average / 255;
+
+    this.history.push(normalizedValue);
+    if (this.history.length > this.options.historySize) {
+      this.history.shift();
+    }
+
+    const barCount = Math.min(this.history.length, this.options.historySize);
+    for (let i = 0; i < barCount; i++) {
+      const value = this.history[barCount - 1 - i];
+      const barHeight = Math.max(value * height * this.options.sensitivity, 2);
+
+      const x = width - (i + 1) * (this.options.barWidth + this.options.barGap);
+      const y = (height - barHeight) / 2;
+
+      const opacity = 1 - (i / barCount) * 0.5;
+      this.ctx.fillStyle = this.hexToRgba(this.options.barColor, opacity);
+      this.ctx.fillRect(x, y, this.options.barWidth, barHeight);
+    }
+  }
+
+  drawProcessingAnimation() {
+    const rect = this.canvas.getBoundingClientRect();
+    const width = rect.width;
+    const height = this.options.height;
+
+    const time = Date.now() / 1000;
+    const barCount = Math.floor(width / (this.options.barWidth + this.options.barGap));
+
+    for (let i = 0; i < barCount; i++) {
+      const barHeight = (Math.sin(time * 3 + i * 0.5) * 0.5 + 0.5) * height * 0.3;
+
+      const x = i * (this.options.barWidth + this.options.barGap);
+      const y = (height - barHeight) / 2;
+
+      this.ctx.fillStyle = this.options.barColor;
+      this.ctx.fillRect(x, y, this.options.barWidth, barHeight);
+    }
+  }
+
+  clearCanvas() {
+    const rect = this.canvas.getBoundingClientRect();
+    this.ctx.clearRect(0, 0, rect.width, this.options.height);
+  }
+
+  hexToRgba(hex, alpha) {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+  }
+}
+
 // Handle record button
 recordBtn.addEventListener('click', async () => {
   try {
+    // Start waveform first if not recording
+    if (!isRecording) {
+      try {
+        if (!waveform) {
+          waveform = new LiveWaveform(waveformCanvas, {
+            barColor: '#dc2626',
+            sensitivity: 1.2,
+            mode: 'static'
+          });
+        }
+        await waveform.start();
+        console.log('Waveform started');
+      } catch (error) {
+        console.error('Failed to start waveform:', error);
+        statusEl.textContent = `Microphone error: ${error.message}`;
+        return;
+      }
+    }
+
     const response = await chrome.runtime.sendMessage({
       action: 'toggle_recording'
     });
@@ -41,22 +265,42 @@ recordBtn.addEventListener('click', async () => {
       statusEl.textContent = `Error: ${response.error}`;
       statusEl.classList.remove('connected');
       isRecording = false;
+
+      // Stop waveform on error
+      if (waveform) {
+        waveform.stop();
+      }
+
       updateUI();
       return;
     }
 
     isRecording = response.recording;
+
+    // Stop waveform if we stopped recording
+    if (!isRecording && waveform) {
+      waveform.stop();
+    }
+
     updateUI();
   } catch (error) {
     console.error('Failed to toggle recording:', error);
     statusEl.textContent = `Error: ${error.message}`;
     statusEl.classList.remove('connected');
+
+    // Stop waveform on error
+    if (waveform) {
+      waveform.stop();
+    }
   }
 });
 
 // Initialize side panel
 async function init() {
   console.log('[SidePanel] Initializing...');
+
+  // Update site title immediately
+  updateSiteTitle();
 
   // Request initial timestamp immediately (in parallel with detection)
   // This ensures timecode appears as fast as notes
@@ -184,6 +428,9 @@ async function handleTabChanged(tabId, videoContext) {
   currentTabId = tabId;
   currentVideoContext = videoContext;
   cancelScheduledTranscriptClear();
+
+  // Update site title for the new tab
+  updateSiteTitle();
 
   // If switching to a tab with a video
   if (newVideoDbId) {
@@ -372,15 +619,27 @@ function renderNotesFromCache(videoDbId) {
 
 function updateUI() {
   if (isRecording) {
-    recordBtn.textContent = '⏹️ Stop Recording';
+    recordBtn.textContent = '⏹️ Stop Listening';
     recordBtn.classList.add('recording');
-    statusEl.textContent = 'Recording...';
     statusEl.classList.add('connected');
   } else {
-    recordBtn.textContent = '🎤 Start Recording';
+    recordBtn.textContent = '🎤 Start Listening';
     recordBtn.classList.remove('recording');
-    statusEl.textContent = 'Ready';
     statusEl.classList.remove('connected');
+  }
+}
+
+async function updateSiteTitle() {
+  try {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (tab && tab.title) {
+      statusEl.textContent = tab.title;
+    } else {
+      statusEl.textContent = 'No page';
+    }
+  } catch (err) {
+    console.log('[SidePanel] Could not get tab title:', err);
+    statusEl.textContent = 'Unknown page';
   }
 }
 
@@ -418,6 +677,16 @@ function buildNoteElement(data) {
     noteDiv.dataset.timestamp = data.timestamp_seconds;
   }
 
+  // Add delete button
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'note-delete';
+  deleteBtn.innerHTML = '×';
+  deleteBtn.title = 'Delete comment';
+  deleteBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent triggering note click
+    deleteNote(data.id, data.video_id, noteDiv);
+  });
+
   const categoryDiv = document.createElement('div');
   categoryDiv.className = 'note-category';
   categoryDiv.textContent = data.category || 'note';
@@ -440,6 +709,7 @@ function buildNoteElement(data) {
     textP.appendChild(confidenceDiv);
   }
 
+  noteDiv.appendChild(deleteBtn);
   noteDiv.appendChild(categoryDiv);
   if (timestampDiv) {
     noteDiv.appendChild(timestampDiv);
@@ -459,6 +729,39 @@ function buildNoteElement(data) {
   }
 
   return noteDiv;
+}
+
+function deleteNote(noteId, videoId, noteElement) {
+  console.log('[SidePanel] Deleting note', noteId);
+
+  // Add deleting class for transition
+  noteElement.classList.add('deleting');
+
+  // Wait for transition to complete before removing
+  setTimeout(async () => {
+    // Remove from DOM
+    noteElement.remove();
+    updateTranscriptEmptyState();
+
+    // Remove from cache
+    if (videoId && notesCache.has(videoId)) {
+      const cachedNotes = notesCache.get(videoId);
+      const updatedNotes = cachedNotes.filter(note => note.id !== noteId);
+      notesCache.set(videoId, updatedNotes);
+      console.log('[SidePanel] Removed note from cache, remaining:', updatedNotes.length);
+    }
+
+    // Send delete request to backend
+    try {
+      await chrome.runtime.sendMessage({
+        action: 'delete_note',
+        noteId: noteId
+      });
+      console.log('[SidePanel] Note deleted successfully');
+    } catch (err) {
+      console.error('[SidePanel] Failed to delete note:', err);
+    }
+  }, 200); // Match the CSS transition duration
 }
 
 function updateNoteElement(element, data) {
@@ -535,6 +838,14 @@ chrome.runtime.onMessage.addListener((message) => {
       videoTimestampEl.textContent = 'Video: No video detected';
       videoTimestampEl.classList.remove('active');
     }
+  }
+});
+
+// Listen for tab updates to refresh site title
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  // Only update if the title changed and this is the active tab
+  if (changeInfo.title && tab.active) {
+    updateSiteTitle();
   }
 });
 

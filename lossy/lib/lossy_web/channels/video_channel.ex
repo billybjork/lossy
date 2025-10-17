@@ -41,4 +41,19 @@ defmodule LossyWeb.VideoChannel do
 
     {:reply, {:ok, %{notes: notes}}, socket}
   end
+
+  @impl true
+  def handle_in("delete_note", %{"note_id" => note_id}, socket) do
+    Logger.info("[VideoChannel] Deleting note: #{note_id}")
+
+    case Videos.delete_note(note_id) do
+      {:ok, _note} ->
+        Logger.info("[VideoChannel] Note deleted successfully: #{note_id}")
+        {:reply, {:ok, %{}}, socket}
+
+      {:error, reason} ->
+        Logger.error("[VideoChannel] Failed to delete note: #{inspect(reason)}")
+        {:reply, {:error, %{message: "Failed to delete note"}}, socket}
+    end
+  end
 end
