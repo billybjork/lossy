@@ -85,24 +85,20 @@ defmodule Lossy.Inference.Cloud do
     parts =
       Enum.map(fields, fn
         {name, value} when is_binary(value) ->
-          """
-          --#{boundary}\r
-          Content-Disposition: form-data; name="#{name}"\r
-          \r
-          #{value}\r
-          """
+          # Text field - can use string interpolation
+          "--#{boundary}\r\nContent-Disposition: form-data; name=\"#{name}\"\r\n\r\n#{value}\r\n"
 
         {name, data, filename, content_type} ->
-          """
-          --#{boundary}\r
-          Content-Disposition: form-data; name="#{name}"; filename="#{filename}"\r
-          Content-Type: #{content_type}\r
-          \r
-          #{data}\r
-          """
+          # File field - must preserve binary data
+          header =
+            "--#{boundary}\r\nContent-Disposition: form-data; name=\"#{name}\"; filename=\"#{filename}\"\r\nContent-Type: #{content_type}\r\n\r\n"
+
+          # Concatenate as binaries to preserve audio data
+          [header, data, "\r\n"]
       end)
 
-    Enum.join(parts) <> "--#{boundary}--\r\n"
+    # Flatten and concatenate all parts as binaries
+    IO.iodata_to_binary([parts, "--#{boundary}--\r\n"])
   end
 
   defp build_structuring_prompt(transcript) do
