@@ -25,6 +25,8 @@ const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
 
 const recordBtn = document.getElementById('recordBtn');
+const pauseBtn = document.getElementById('pauseBtn');
+const waveformContainer = document.getElementById('waveformContainer');
 const statusEl = document.getElementById('status');
 const transcriptsEl = document.getElementById('transcripts');
 const videoTimestampEl = document.getElementById('videoTimestamp');
@@ -234,8 +236,8 @@ class LiveWaveform {
   }
 }
 
-// Handle record button
-recordBtn.addEventListener('click', async () => {
+// Shared function to toggle recording
+async function toggleRecording() {
   try {
     // Start waveform first if not recording
     if (!isRecording) {
@@ -293,7 +295,13 @@ recordBtn.addEventListener('click', async () => {
       waveform.stop();
     }
   }
-});
+}
+
+// Handle record button (Start Listening)
+recordBtn.addEventListener('click', toggleRecording);
+
+// Handle pause button (stops recording)
+pauseBtn.addEventListener('click', toggleRecording);
 
 // Initialize side panel
 async function init() {
@@ -619,12 +627,10 @@ function renderNotesFromCache(videoDbId) {
 
 function updateUI() {
   if (isRecording) {
-    recordBtn.textContent = '⏹️ Stop Listening';
-    recordBtn.classList.add('recording');
+    waveformContainer.classList.add('is-recording');
     statusEl.classList.add('connected');
   } else {
-    recordBtn.textContent = '🎤 Start Listening';
-    recordBtn.classList.remove('recording');
+    waveformContainer.classList.remove('is-recording');
     statusEl.classList.remove('connected');
   }
 }

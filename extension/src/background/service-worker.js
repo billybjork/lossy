@@ -297,6 +297,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[ServiceWorker] 🗑️ DELETE_NOTE:', message.noteId);
 
     deleteNote(message.noteId).then(() => {
+      // Notify all tabs to remove the timeline marker
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach(tab => {
+          chrome.tabs.sendMessage(tab.id, {
+            action: 'remove_marker',
+            noteId: message.noteId
+          }).catch(() => {
+            // Silently ignore tabs without content script
+          });
+        });
+      });
+
       sendResponse({ success: true });
     }).catch(err => {
       console.error('[Lossy] Failed to delete note:', err);

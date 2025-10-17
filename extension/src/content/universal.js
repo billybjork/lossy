@@ -521,6 +521,19 @@ function listenForEvents() {
       sendResponse({ success: true });
     }
 
+    if (message.action === 'remove_marker') {
+      console.log('[Lossy] 🗑️ REMOVE_MARKER:', message.noteId);
+
+      if (timelineMarkers) {
+        timelineMarkers.removeMarker(message.noteId);
+        console.log('[Lossy] ✅ Timeline marker removed');
+      } else {
+        console.warn('[Lossy] ⚠️ Timeline markers not initialized');
+      }
+
+      sendResponse({ success: true });
+    }
+
     if (message.action === 'get_current_timestamp') {
       console.log('[Lossy] get_current_timestamp request received, videoController:', videoController);
       if (videoController) {
