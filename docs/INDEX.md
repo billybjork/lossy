@@ -2,7 +2,7 @@
 
 **Voice-First Video Companion - Complete Technical Documentation**
 
-Last Updated: 2025-10-16
+Last Updated: 2025-10-17
 
 ---
 
@@ -15,7 +15,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
 | **[01_PROJECT_OVERVIEW.md](./01_PROJECT_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
-| **[02_ARCHITECTURE.md](./02_ARCHITECTURE.md)** | System design, components, data flow diagrams | Understand how everything fits together |
+| **[02_ARCHITECTURE.md](./02_ARCHITECTURE.md)** | System design, components, data flow, architectural boundaries | Understand how everything fits together + integration rules |
 | **[sprints/](./sprints/)** | Sprint-based implementation roadmap (6 focused sprints) | Ready to implement - follow sprint-by-sprint |
 | **[03_LIVEVIEW_PATTERNS.md](./03_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
 | **[04_BROWSERBASE_INTEGRATION.md](./04_BROWSERBASE_INTEGRATION.md)** | Automated note posting via Browserbase | Setting up automation system |
@@ -51,6 +51,9 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Three detailed data flow examples
 - State management patterns
 - Database schema design
+- **Architectural boundaries and integration rules**
+- **Database access patterns (extension never touches DB)**
+- **Integration decision tree and anti-patterns**
 
 **Key sections:**
 - ASCII architecture diagram
@@ -60,6 +63,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Video context change flow
 - Automated posting flow
 - AgentSession state machine
+- **Architectural Boundaries & Integration Rules** (NEW)
 
 ---
 
@@ -126,6 +130,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Telemetry and monitoring
 
 ---
+
 
 ## 🔗 External Resources
 

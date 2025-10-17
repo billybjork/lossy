@@ -1,6 +1,6 @@
 # System Architecture
 
-**Last Updated:** 2025-10-16
+**Last Updated:** 2025-10-17
 
 ---
 
@@ -714,6 +714,156 @@ check_origin: ["https://your-app.com", "chrome-extension://EXT_ID"]
 
 ---
 
+---
+
+## Architectural Boundaries & Integration Rules
+
+### Core Principle: Strict Separation
+
+**Extension Responsibilities:**
+- ✅ UI rendering and user interaction
+- ✅ Video element detection
+- ✅ Audio capture
+- ✅ WebSocket client (Phoenix Channels)
+- ✅ Local WASM inference (optional)
+
+**Extension NEVER:**
+- ❌ Direct database access
+- ❌ Business logic
+- ❌ External API calls (OpenAI, platform APIs)
+- ❌ Platform integrations
+
+**Backend Responsibilities:**
+- ✅ All database operations (PostgreSQL via Ecto)
+- ✅ Business logic and note structuring
+- ✅ External integrations (OpenAI, Browserbase)
+- ✅ Platform API calls
+- ✅ Authentication and authorization
+- ✅ Job orchestration (Oban)
+
+**Backend NEVER:**
+- ❌ DOM manipulation
+- ❌ Video element access
+- ❌ Browser APIs (getUserMedia, etc.)
+
+### Database Access Pattern
+
+**Rule: Extension has ZERO database access**
+
+All data flows through WebSocket channels:
+
+```
+Extension → channel.push('create_note', data)
+          → VideoChannel.handle_in("create_note")
+          → Videos.create_note() [Ecto]
+          → PostgreSQL
+          → PubSub.broadcast(:note_created)
+          → Extension receives event
+```
+
+**Extension code example:**
+```javascript
+// ✅ CORRECT
+videoChannel.push('create_note', {
+  text: noteText,
+  timestamp_seconds: timestamp
+}).receive('ok', ({ note }) => renderNote(note));
+
+// ❌ NEVER do this
+// import pg from 'pg';
+// await client.query('INSERT INTO notes...');
+```
+
+### Integration Decision Tree
+
+**Where should processing happen?**
+
+```
+Does it need database access?
+  YES → Backend only
+
+Does it involve external APIs?
+  YES → Backend only
+
+Does it need browser APIs (video, audio, DOM)?
+  YES → Extension only
+
+Is it computationally expensive (>100ms)?
+  YES → Consider extension (WASM/WebGPU for speed + privacy)
+  NO  → Backend (simpler, more maintainable)
+
+Does it need to work across sessions/devices?
+  YES → Backend
+  NO  → Extension (if appropriate)
+```
+
+**Examples:**
+- Audio capture → Extension (needs getUserMedia)
+- Transcription → Hybrid (local WASM optional, cloud fallback in backend)
+- Note categorization → Backend (business logic)
+- Video frame capture → Extension (needs video element access)
+- Frame analysis → Extension (WASM CLIP for privacy)
+- Note posting → Backend (platform APIs, authentication)
+
+### Common Anti-Patterns
+
+**❌ Anti-Pattern: Business logic in extension**
+```javascript
+// WRONG: Complex categorization in extension
+function categorizeNote(transcript) {
+  // 50 lines of rules...
+}
+```
+
+**✅ Correct: Backend handles business logic**
+```javascript
+// Extension just sends data
+channel.push('categorize_note', { transcript });
+channel.on('note_categorized', renderCategory);
+```
+
+**❌ Anti-Pattern: API keys in extension**
+```javascript
+// NEVER: Exposed in extension code
+const response = await fetch('https://api.openai.com/...', {
+  headers: { 'Authorization': `Bearer ${apiKey}` }
+});
+```
+
+**✅ Correct: Backend handles API calls**
+```javascript
+channel.push('generate_summary', { transcript });
+```
+
+**❌ Anti-Pattern: Storing database credentials**
+```javascript
+// NEVER EVER
+const db = new PostgreSQLClient({
+  password: 'secret123' // Exposed!
+});
+```
+
+### Current State Verification
+
+As of 2025-10-17:
+
+✅ **Extension has zero database access**
+- No database drivers (`pg`, `postgres`, `postgrex`, etc.)
+- No SQL queries in extension code
+- All data flows through Phoenix Channels
+
+✅ **All DB operations in Elixir backend**
+- `Lossy.Videos` context handles all database operations
+- Ecto schemas and changesets for data validation
+- PostgreSQL connection only from backend
+
+✅ **Clean WebSocket communication**
+- `video:meta` channel for note operations
+- `audio:SESSION_ID` channel for audio streaming
+- PubSub for real-time broadcasts
+
+---
+
 ## Next Steps
 
-See `03_IMPLEMENTATION_PHASES.md` for phased build plan.
+See `sprints/` directory for phased implementation plan.
