@@ -87,10 +87,11 @@ Each sprint file contains:
 ## Quick Links
 
 - [Main Docs Index](../INDEX.md)
-- [Project Overview](../01_PROJECT_OVERVIEW.md)
-- [Architecture](../02_ARCHITECTURE.md)
-- [LiveView Patterns](../03_LIVEVIEW_PATTERNS.md)
-- [Browserbase Integration](../04_BROWSERBASE_INTEGRATION.md)
+- [Project Overview](../01_OVERVIEW.md)
+- [Development Principles](../02_PRINCIPLES.md)
+- [Architecture](../03_ARCHITECTURE.md)
+- [LiveView Patterns](../04_LIVEVIEW_PATTERNS.md)
+- [Browserbase Integration](../05_BROWSERBASE_INTEGRATION.md)
 - [Technical References](../TECHNICAL_REFERENCES.md)
 
 ---

@@ -14,18 +14,19 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 
 | Document | Purpose | When to Read |
 |----------|---------|--------------|
-| **[01_PROJECT_OVERVIEW.md](./01_PROJECT_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
-| **[02_ARCHITECTURE.md](./02_ARCHITECTURE.md)** | System design, components, data flow, architectural boundaries | Understand how everything fits together + integration rules |
+| **[01_OVERVIEW.md](./01_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
+| **[02_PRINCIPLES.md](./02_PRINCIPLES.md)** | Development principles guiding architectural decisions | Understand the "why" behind design choices |
+| **[03_ARCHITECTURE.md](./03_ARCHITECTURE.md)** | System design, components, data flow, architectural boundaries | Understand how everything fits together + integration rules |
 | **[sprints/](./sprints/)** | Sprint-based implementation roadmap (6 focused sprints) | Ready to implement - follow sprint-by-sprint |
-| **[03_LIVEVIEW_PATTERNS.md](./03_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
-| **[04_BROWSERBASE_INTEGRATION.md](./04_BROWSERBASE_INTEGRATION.md)** | Automated note posting via Browserbase | Setting up automation system |
+| **[04_LIVEVIEW_PATTERNS.md](./04_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
+| **[05_BROWSERBASE_INTEGRATION.md](./05_BROWSERBASE_INTEGRATION.md)** | Automated note posting via Browserbase | Setting up automation system |
 | **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Future implementation (WASM Whisper, CLIP) |
 
 ---
 
 ## 📖 Document Summaries
 
-### 01_PROJECT_OVERVIEW.md
+### 01_OVERVIEW.md
 **What it covers:**
 - The problem and solution
 - Complete technology stack with rationale
@@ -43,7 +44,27 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 
 ---
 
-### 02_ARCHITECTURE.md
+### 02_PRINCIPLES.md
+**What it covers:**
+- Core development principles guiding all decisions
+- Progressive Enhancement & Graceful Degradation
+- Progressive Disclosure
+- Self-Healing Systems
+- Flexible Heuristics over Intricate Rules
+- Declarative Design
+- Principle interactions and decision framework
+- Concrete examples from Lossy codebase
+
+**Key sections:**
+- Theoretical foundations for each principle
+- Implementation patterns in Lossy
+- Code examples (JavaScript and Elixir)
+- Anti-patterns to avoid
+- Decision framework for architectural choices
+
+---
+
+### 03_ARCHITECTURE.md
 **What it covers:**
 - Complete system architecture diagram
 - Component responsibilities and boundaries
@@ -63,7 +84,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Video context change flow
 - Automated posting flow
 - AgentSession state machine
-- **Architectural Boundaries & Integration Rules** (NEW)
+- **Architectural Boundaries & Integration Rules**
 
 ---
 
@@ -88,7 +109,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 
 ---
 
-### 03_LIVEVIEW_PATTERNS.md
+### 04_LIVEVIEW_PATTERNS.md
 **What it covers:**
 - How to use Phoenix LiveView in Chrome extensions
 - Complete setup requirements (CSP, check_origin, auth)
@@ -110,7 +131,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 
 ---
 
-### 04_BROWSERBASE_INTEGRATION.md
+### 05_BROWSERBASE_INTEGRATION.md
 **What it covers:**
 - Three-phase integration strategy (Python bridge → Port → Pure Elixir)
 - Oban worker setup for reliable posting

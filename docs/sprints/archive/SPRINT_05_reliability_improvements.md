@@ -40,7 +40,7 @@
 - `extension/src/content/universal.js` - Added AbortController coordination
 
 **Architecture Updates:**
-- `docs/02_ARCHITECTURE.md` - Added detailed Content Script architecture section documenting Sprint 05 improvements
+- `docs/03_ARCHITECTURE.md` - Added detailed Content Script architecture section documenting Sprint 05 improvements
 - `docs/sprints/README.md` - Marked Sprint 05 as complete
 - `docs/sprints/SPRINT_05_reliability_improvements.md` - Updated status to complete
 

@@ -1086,4 +1086,4 @@ end
 ✅ **Streaming** - `stream_insert/3` for efficient updates
 ✅ **Context-aware** - Updates based on current video
 
-For complete examples, see the implementation in `03_IMPLEMENTATION_PHASES.md`.
+For complete examples, see the implementation in `sprints/`.

@@ -52,7 +52,7 @@ The extension runs in **isolated browser contexts** with specific capabilities:
 - Server-rendered components in popup/sidepanel
 - LiveView events for note posting status
 
-See [`../docs/03_LIVEVIEW_PATTERNS.md`](../docs/03_LIVEVIEW_PATTERNS.md) for LiveView integration patterns.
+See [`../docs/04_LIVEVIEW_PATTERNS.md`](../docs/04_LIVEVIEW_PATTERNS.md) for LiveView integration patterns.
 
 ## Message Flow
 

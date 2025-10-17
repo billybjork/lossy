@@ -192,11 +192,12 @@ User can opt-in to send audio for:
 ```
 lossy/
 ├── docs/                          # 📚 Documentation (this directory)
-│   ├── 01_PROJECT_OVERVIEW.md    # This file
-│   ├── 02_ARCHITECTURE.md        # System design
+│   ├── 01_OVERVIEW.md            # This file
+│   ├── 02_PRINCIPLES.md          # Development principles
+│   ├── 03_ARCHITECTURE.md        # System design
 │   ├── sprints/                  # Sprint-based roadmap
-│   ├── 03_LIVEVIEW_PATTERNS.md
-│   └── 04_BROWSERBASE_INTEGRATION.md
+│   ├── 04_LIVEVIEW_PATTERNS.md
+│   └── 05_BROWSERBASE_INTEGRATION.md
 │
 ├── lossy/                         # 🔥 Elixir/Phoenix application (@lossy namespace)
 │   ├── lib/lossy/

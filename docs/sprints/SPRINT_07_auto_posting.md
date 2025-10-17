@@ -1192,7 +1192,7 @@ end
 
 ## Reference Documentation
 
-See [04_BROWSERBASE_INTEGRATION.md](../04_BROWSERBASE_INTEGRATION.md) for:
+See [05_BROWSERBASE_INTEGRATION.md](../05_BROWSERBASE_INTEGRATION.md) for:
 - Complete Browserbase API reference
 - Advanced session management
 - Pure Elixir CDP client (future optimization, optional)

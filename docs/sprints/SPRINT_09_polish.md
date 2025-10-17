@@ -503,7 +503,7 @@ Hooks.FocusManager = {
 
 **4.1 Efficient List Rendering with Streams**
 
-See `03_LIVEVIEW_PATTERNS.md` for complete stream patterns.
+See `04_LIVEVIEW_PATTERNS.md` for complete stream patterns.
 
 ```elixir
 # Use stream/3 for efficient updates (no full re-render)
@@ -842,7 +842,7 @@ end
 
 ## Reference Documentation
 
-- **03_LIVEVIEW_PATTERNS.md** - Offline handling, connection state, stream patterns
+- **04_LIVEVIEW_PATTERNS.md** - Offline handling, connection state, stream patterns
 - **Phoenix LiveView Docs** - https://hexdocs.pm/phoenix_live_view
 - **Stream Documentation** - https://hexdocs.pm/phoenix_live_view/Phoenix.LiveView.html#stream/4
 

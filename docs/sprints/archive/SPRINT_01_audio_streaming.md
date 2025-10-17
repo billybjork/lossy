@@ -642,7 +642,7 @@ These will be addressed in later sprints.
 
 ## Reference Documentation
 
-See [03_LIVEVIEW_PATTERNS.md](../03_LIVEVIEW_PATTERNS.md) for:
+See [04_LIVEVIEW_PATTERNS.md](../04_LIVEVIEW_PATTERNS.md) for:
 - Complete LiveView setup requirements
 - Authentication patterns (for when we add auth in Sprint 05)
 - Advanced streaming patterns

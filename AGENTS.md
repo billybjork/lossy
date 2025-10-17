@@ -8,7 +8,7 @@ This is a **Phoenix + Chrome Extension** project that captures voice feedback wh
 - **`extension/`** - Chrome MV3 extension with LiveView UI, WASM inference (future), and content scripts
 - **`docs/`** - Complete technical documentation (architecture, implementation phases, patterns)
 
-**📚 Start with:** `docs/INDEX.md` for complete documentation structure, or `docs/01_PROJECT_OVERVIEW.md` for project goals and stack overview.
+**📚 Start with:** `docs/INDEX.md` for complete documentation structure, or `docs/01_OVERVIEW.md` for project goals and stack overview.
 
 ## Key Technologies
 
@@ -20,19 +20,20 @@ This is a **Phoenix + Chrome Extension** project that captures voice feedback wh
 
 ### Contribution Workflow
 
-1. Check current implementation phase in `docs/03_IMPLEMENTATION_PHASES.md`
-2. Follow LiveView patterns in `docs/04_LIVEVIEW_PATTERNS.md`
-3. Format code before committing:
+1. Check current implementation phase in `docs/sprints/`
+2. Follow development principles in `docs/02_PRINCIPLES.md`
+3. Follow LiveView patterns in `docs/04_LIVEVIEW_PATTERNS.md`
+4. Format code before committing:
    - Backend: `cd lossy && mix format`
    - Extension: `cd extension && npm run format` (if prettier configured)
-4. Use `mix precommit` alias when you are done with all changes and fix any pending issues
+5. Use `mix precommit` alias when you are done with all changes and fix any pending issues
 
 ### General Guidelines
 
 - Use the already included and available `:req` (`Req`) library for HTTP requests, **avoid** `:httpoison`, `:tesla`, and `:httpc`. Req is included by default and is the preferred HTTP client for Phoenix apps
 - When working on browser extension code, be mindful of MV3 restrictions (service workers, CSP, manifest v3 APIs)
-- For architecture questions, see `docs/02_ARCHITECTURE.md`
-- For implementation roadmap, see `docs/03_IMPLEMENTATION_PHASES.md`
+- For architecture questions, see `docs/03_ARCHITECTURE.md`
+- For implementation roadmap, see `docs/sprints/`
 
 ### Phoenix v1.8 guidelines
 

@@ -176,10 +176,10 @@ extension/
 - `README.md` - Setup and development guide
 - `AGENTS.md` - Project guidelines for AI agents
 - `docs/INDEX.md` - Documentation map
-- `docs/01_PROJECT_OVERVIEW.md` - Goals and tech stack
-- `docs/02_ARCHITECTURE.md` - System design
-- `docs/03_LIVEVIEW_PATTERNS.md` - LiveView + Extension patterns
-- `docs/04_BROWSERBASE_INTEGRATION.md` - Automation setup
+- `docs/01_OVERVIEW.md` - Goals and tech stack
+- `docs/03_ARCHITECTURE.md` - System design
+- `docs/04_LIVEVIEW_PATTERNS.md` - LiveView + Extension patterns
+- `docs/05_BROWSERBASE_INTEGRATION.md` - Automation setup
 - `docs/TECHNICAL_REFERENCES.md` - WASM, WebGPU, model caching
 
 ---

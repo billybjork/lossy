@@ -48,7 +48,7 @@ Extensions have origin `chrome-extension://EXTENSION_ID`, which creates issues w
 - Extension storage encrypted at OS level
 - 30-day expiry with refresh support
 
-See `docs/03_LIVEVIEW_PATTERNS.md` for complete patterns.
+See `docs/04_LIVEVIEW_PATTERNS.md` for complete patterns.
 
 ---
 
