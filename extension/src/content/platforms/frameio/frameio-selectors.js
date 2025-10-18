@@ -13,14 +13,16 @@ export const FrameioSelectors = {
   // Progress bar/timeline selectors
   // We need the container that holds the timeline, not the interaction layer
   //
-  // ⚠️ WARNING: Styled-component class names (.sc-*) are FRAGILE and will change
-  // when Frame.io updates their CSS. These selectors may break on Frame.io updates.
-  // The adapter has fallback strategies (controls container search + generic finder)
-  // to handle this, but timeline markers may not appear until fallback succeeds.
+  // Priority order: Stable selectors first, fragile selectors as last resort
   PROGRESS_BAR: [
+    // Stable selectors (try these first)
+    '[data-testid="player-seek-bar-interaction-layer"]', // Most stable - uses data-testid
+    '[role="slider"][aria-label*="seek" i]', // Semantic HTML - look for seek slider
+    '[role="slider"]', // Any slider in player area
+
+    // Fragile selectors (last resort - will break on Frame.io CSS updates)
     '.sc-58e06160-9', // Timeline container wrapper (FRAGILE - styled-components)
     '.sc-99e5a54f-0.fdZeju.chromatic-ignore', // Timeline visual wrapper (FRAGILE)
-    '[data-testid="player-seek-bar-interaction-layer"]', // Stable selector (preferred)
   ],
 
   // Player container selectors

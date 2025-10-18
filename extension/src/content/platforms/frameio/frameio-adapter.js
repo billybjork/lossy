@@ -92,15 +92,25 @@ export class FrameioAdapter extends BasePlatformAdapter {
       }
     }
 
-    // Frame.io-specific fallback: Find via controls container
+    // Frame.io-specific fallback: Find via controls container using heuristics
     const controls = document.querySelector('[data-testid="advanced-player-controls"]');
     if (controls) {
-      // Look for timeline container within controls
-      // ⚠️ These class names are fragile (styled-components) but we have generic finder fallback
-      const timeline = controls.querySelector('.sc-58e06160-9') ||
-                      controls.querySelector('.sc-99e5a54f-0');
-      if (timeline) {
-        console.log('[FrameioAdapter] Found progress bar via controls container');
+      // Look for horizontal bar elements within controls (progress bars are horizontal)
+      const candidates = Array.from(controls.querySelectorAll('*')).filter(el => {
+        const rect = el.getBoundingClientRect();
+        // Progress bars are wide and short (width > height * 5)
+        return rect.width > 100 && rect.width > rect.height * 5;
+      });
+
+      if (candidates.length > 0) {
+        // Take the widest candidate (likely the main progress bar)
+        const timeline = candidates.reduce((widest, current) => {
+          const currentWidth = current.getBoundingClientRect().width;
+          const widestWidth = widest.getBoundingClientRect().width;
+          return currentWidth > widestWidth ? current : widest;
+        });
+
+        console.log('[FrameioAdapter] Found progress bar via controls container heuristics');
         this.progressBar = timeline;
         return timeline;
       }
