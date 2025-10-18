@@ -96,6 +96,7 @@ export class FrameioAdapter extends BasePlatformAdapter {
     const controls = document.querySelector('[data-testid="advanced-player-controls"]');
     if (controls) {
       // Look for timeline container within controls
+      // ⚠️ These class names are fragile (styled-components) but we have generic finder fallback
       const timeline = controls.querySelector('.sc-58e06160-9') ||
                       controls.querySelector('.sc-99e5a54f-0');
       if (timeline) {
