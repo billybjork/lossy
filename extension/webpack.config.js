@@ -8,8 +8,6 @@ module.exports = (env, argv) => {
     entry: {
       'background/service-worker': './src/background/service-worker.js',
       'sidepanel/sidepanel': './src/sidepanel/sidepanel.js',
-      'popup/popup': './src/popup/popup.js',
-      'content/content': './src/content/content.js',
       'content/universal': './src/content/universal.js',
       'offscreen/offscreen': './src/offscreen/offscreen.js',
     },
@@ -33,7 +31,6 @@ module.exports = (env, argv) => {
           { from: 'manifest.json', to: 'manifest.json' },
           { from: 'public', to: '', noErrorOnMissing: true, globOptions: { dot: true, ignore: ['**/.gitkeep'] } },
           { from: 'src/sidepanel/sidepanel.html', to: 'sidepanel.html' },
-          { from: 'src/popup/popup.html', to: 'popup.html' },
           { from: 'src/offscreen/offscreen.html', to: 'offscreen.html' },
         ],
       }),
