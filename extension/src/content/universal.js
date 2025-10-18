@@ -538,15 +538,23 @@ function listenForEvents() {
       console.log('[Lossy] get_current_timestamp request received, videoController:', videoController);
       if (videoController) {
         videoController.getCurrentTime().then(timestamp => {
-          console.log('[Lossy] Sending timestamp:', timestamp);
-          sendResponse({ timestamp: timestamp });
+          // Check if video duration is available (not NaN or 0)
+          // This helps detect platform limitations like YouTube Shorts lazy-loading
+          const duration = videoController.getDuration();
+          const isTimecodeUnavailable = !duration || isNaN(duration);
+
+          console.log('[Lossy] Sending timestamp:', timestamp, 'duration:', duration, 'unavailable:', isTimecodeUnavailable);
+          sendResponse({
+            timestamp: timestamp,
+            timecodeUnavailable: isTimecodeUnavailable
+          });
         }).catch(err => {
           console.error('[Lossy] Error getting timestamp:', err);
-          sendResponse({ timestamp: null });
+          sendResponse({ timestamp: null, timecodeUnavailable: true });
         });
       } else {
         console.log('[Lossy] No videoController, sending null');
-        sendResponse({ timestamp: null });
+        sendResponse({ timestamp: null, timecodeUnavailable: true });
       }
       return true; // Will respond asynchronously
     }

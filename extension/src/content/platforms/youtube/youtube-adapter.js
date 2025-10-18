@@ -9,6 +9,49 @@ import { YouTubeSpaHooks } from './youtube-spa-hooks.js';
 /**
  * YouTube platform adapter.
  * Handles YouTube-specific video detection, ID extraction, and SPA navigation.
+ *
+ * KNOWN LIMITATIONS - YouTube Shorts:
+ *
+ * YouTube Shorts uses aggressive lazy-loading for video content, which prevents
+ * reliable timeline marker positioning until the video starts playing.
+ *
+ * Technical Details:
+ * - When a user navigates to a new Short (via scrolling), YouTube creates the <video>
+ *   element immediately but does NOT load the video data until later.
+ * - The browser keeps the video at readyState: 0 (HAVE_NOTHING).
+ * - Critical metadata (duration, dimensions) remain unavailable (duration = NaN).
+ * - Standard HTML5 video events (loadedmetadata, canplay, durationchange) do not fire
+ *   until YouTube's JavaScript decides to load the video (typically when it's in viewport
+ *   and/or the user taps to play).
+ *
+ * What Works on Shorts:
+ * ✅ Video element detection - The <video> element is found successfully
+ * ✅ Progress bar detection - YouTube Shorts have their own progress bar structure
+ * ✅ Timestamp tracking - Once the video plays, currentTime tracking works
+ * ✅ Note-taking functionality - Recording and note UI work normally
+ * ✅ First Short on page load - Auto-plays, so metadata loads immediately
+ *
+ * What Doesn't Work Reliably:
+ * ❌ Timeline markers - Cannot position markers without video duration
+ * ❌ Duration display - Shows "NaN" or "Timecode Unavailable" until video plays
+ * ❌ Pre-positioned markers - Markers on subsequent Shorts (via scrolling) won't appear
+ *                             until the user plays the video
+ *
+ * Why Attempted Workarounds Don't Help:
+ * - Polling for duration: YouTube simply hasn't loaded the data yet, no amount of
+ *   polling will make it appear.
+ * - Event listeners: Events don't fire because YouTube's player hasn't initiated loading.
+ * - Shadow DOM inspection: The player UI exists, but the video data doesn't.
+ * - Progress bar detection: We can find the UI, but positioning requires duration.
+ *
+ * User Experience Impact:
+ * - Minimal for regular YouTube videos (works perfectly)
+ * - For Shorts: Timeline markers appear after video starts playing (acceptable UX)
+ * - Core functionality (recording notes, timestamps) works on all YouTube videos
+ *
+ * Decision:
+ * We accept this limitation as it's a YouTube platform constraint, not our bug.
+ * The UI will show "Timecode Unavailable" for Shorts until they start playing.
  */
 export class YouTubeAdapter extends BasePlatformAdapter {
   static get platformId() {

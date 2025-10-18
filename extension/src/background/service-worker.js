@@ -138,7 +138,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Only forward to side panel if it's viewing this tab
       messageRouter.routeToSidePanel({
         action: 'video_timestamp_update',
-        timestamp: message.timestamp
+        timestamp: message.timestamp,
+        timecodeUnavailable: message.timecodeUnavailable
       }, sourceTabId);
     }
     return false;
@@ -192,24 +193,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Forward timestamp to side panel
           chrome.runtime.sendMessage({
             action: 'video_timestamp_update',
-            timestamp: response?.timestamp
+            timestamp: response?.timestamp,
+            timecodeUnavailable: response?.timecodeUnavailable
           }).catch(() => {});
 
           // Also send response back to caller for liveness check
-          sendResponse({ success: true, timestamp: response?.timestamp });
+          sendResponse({ success: true, timestamp: response?.timestamp, timecodeUnavailable: response?.timecodeUnavailable });
         } catch (err) {
           console.log('[Lossy] No response from content script:', err);
           // No video detected - content script not responding
           chrome.runtime.sendMessage({
             action: 'video_timestamp_update',
-            timestamp: null
+            timestamp: null,
+            timecodeUnavailable: true
           }).catch(() => {});
 
           // Send response indicating content script is not alive
-          sendResponse({ success: false, timestamp: null, error: 'Content script not responding' });
+          sendResponse({ success: false, timestamp: null, timecodeUnavailable: true, error: 'Content script not responding' });
         }
       } else {
-        sendResponse({ success: false, timestamp: null, error: 'No active tab' });
+        sendResponse({ success: false, timestamp: null, timecodeUnavailable: true, error: 'No active tab' });
       }
     });
     return true; // Will respond asynchronously

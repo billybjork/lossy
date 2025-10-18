@@ -24,9 +24,14 @@ export class VideoController {
   }
 
   pushTimeUpdate(time) {
+    // Check if video duration is available (helps detect platform limitations)
+    const duration = this.getDuration();
+    const isTimecodeUnavailable = !duration || isNaN(duration);
+
     chrome.runtime.sendMessage({
       action: 'video_time_update',
-      timestamp: time
+      timestamp: time,
+      timecodeUnavailable: isTimecodeUnavailable
     }).catch(() => {
       // Side panel may not be open
     });

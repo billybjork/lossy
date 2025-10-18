@@ -837,12 +837,19 @@ function highlightNote(noteId) {
 // Listen for timestamp updates (push-based, no polling)
 chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'video_timestamp_update') {
-    if (message.timestamp != null) {
+    // Check if timecode is unavailable (e.g., YouTube Shorts lazy-loading)
+    if (message.timecodeUnavailable) {
+      videoTimestampEl.textContent = 'Video: Timecode Unavailable';
+      videoTimestampEl.classList.add('active');
+      videoTimestampEl.classList.add('unavailable');
+    } else if (message.timestamp != null) {
       videoTimestampEl.textContent = `Video: ${formatTimestamp(message.timestamp)}`;
       videoTimestampEl.classList.add('active');
+      videoTimestampEl.classList.remove('unavailable');
     } else {
       videoTimestampEl.textContent = 'Video: No video detected';
       videoTimestampEl.classList.remove('active');
+      videoTimestampEl.classList.remove('unavailable');
     }
   }
 });
