@@ -6,6 +6,7 @@ import { PlatformRegistry } from './index.js';
 import { YouTubeAdapter } from './youtube/youtube-adapter.js';
 import { FrameioAdapter } from './frameio/frameio-adapter.js';
 import { VimeoAdapter } from './vimeo/vimeo-adapter.js';
+import { AirAdapter } from './air/air-adapter.js';
 import { GenericAdapter } from './generic/generic-adapter.js';
 
 // Register adapters in priority order
@@ -13,8 +14,7 @@ import { GenericAdapter } from './generic/generic-adapter.js';
 PlatformRegistry.register(YouTubeAdapter);
 PlatformRegistry.register(FrameioAdapter);
 PlatformRegistry.register(VimeoAdapter);
-// Future adapters will be registered here:
-// PlatformRegistry.register(AirAdapter);
+PlatformRegistry.register(AirAdapter);
 PlatformRegistry.register(GenericAdapter); // Always last
 
 console.log('[Bootstrap] Registered', PlatformRegistry.adapters.length, 'platform adapters');
