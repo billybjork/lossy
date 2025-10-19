@@ -9,6 +9,7 @@ import { VimeoAdapter } from './vimeo/vimeo-adapter.js';
 import { AirAdapter } from './air/air-adapter.js';
 import { WipsterAdapter } from './wipster/wipster-adapter.js';
 import { IconikAdapter } from './iconik/iconik-adapter.js';
+import { TikTokAdapter } from './tiktok/tiktok-adapter.js';
 import { GenericAdapter } from './generic/generic-adapter.js';
 
 // Register adapters in priority order
@@ -19,6 +20,7 @@ PlatformRegistry.register(VimeoAdapter);
 PlatformRegistry.register(AirAdapter);
 PlatformRegistry.register(WipsterAdapter);
 PlatformRegistry.register(IconikAdapter);
+PlatformRegistry.register(TikTokAdapter);
 PlatformRegistry.register(GenericAdapter); // Always last
 
 console.log('[Bootstrap] Registered', PlatformRegistry.adapters.length, 'platform adapters');
