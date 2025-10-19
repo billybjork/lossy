@@ -11,6 +11,7 @@ import { VideoIdGenerator } from '../../core/video-id-generator.js';
  * Known Compatible Platforms:
  * - Dropbox (dropbox.com) - Standard HTML5 video playback
  * - Dropbox Replay (replay.dropbox.com) - Video review platform with timeline markers
+ * - Filestage (app.filestage.io) - Video review and approval platform with timeline markers
  *
  * This adapter uses:
  * - Generic video element detection (VideoDetector)

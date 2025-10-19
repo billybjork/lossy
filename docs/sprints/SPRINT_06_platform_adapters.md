@@ -450,6 +450,7 @@ The generic adapter uses pure heuristics (video element detection, progress bar 
 ### Confirmed Working
 - **Dropbox** (dropbox.com) - Standard HTML5 video playback
 - **Dropbox Replay** (replay.dropbox.com) - Video review platform with timeline markers
+- **Filestage** (app.filestage.io) - Video review and approval platform with timeline markers
 
 ### Testing Notes
 - Generic adapter successfully detects video elements using visual heuristics
