@@ -118,7 +118,7 @@ export class YouTubeAdapter extends BasePlatformAdapter {
     return {
       type: 'platform',
       id: videoId,
-      platform: 'youtube'
+      platform: 'youtube',
     };
   }
 

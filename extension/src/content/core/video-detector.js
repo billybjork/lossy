@@ -21,7 +21,7 @@ export class VideoDetector {
       enableIntersectionObserver: options.enableIntersectionObserver !== false,
       enablePollingWatchdog: options.enablePollingWatchdog !== false,
       signal: options.signal, // AbortSignal for cleanup
-      ...options
+      ...options,
     };
 
     // Setup AbortSignal listener if provided
@@ -76,7 +76,7 @@ export class VideoDetector {
     // Shadow DOM (recursive)
     const searchShadowRoots = (root) => {
       const elements = root.querySelectorAll('*');
-      elements.forEach(el => {
+      elements.forEach((el) => {
         if (el.shadowRoot) {
           videos.push(...el.shadowRoot.querySelectorAll('video'));
           searchShadowRoots(el.shadowRoot);
@@ -110,16 +110,19 @@ export class VideoDetector {
 
     // IntersectionObserver: Track visibility changes
     if (this.options.enableIntersectionObserver) {
-      this.intersectionObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.target === this.primaryVideo) {
-            if (!entry.isIntersecting) {
-              console.log('[VideoDetector] Primary video left viewport, re-scoring...');
-              this.revalidatePrimaryVideo();
+      this.intersectionObserver = new IntersectionObserver(
+        (entries) => {
+          entries.forEach((entry) => {
+            if (entry.target === this.primaryVideo) {
+              if (!entry.isIntersecting) {
+                console.log('[VideoDetector] Primary video left viewport, re-scoring...');
+                this.revalidatePrimaryVideo();
+              }
             }
-          }
-        });
-      }, { threshold: 0.5 });
+          });
+        },
+        { threshold: 0.5 }
+      );
 
       this.intersectionObserver.observe(this.primaryVideo);
 
@@ -156,10 +159,12 @@ export class VideoDetector {
 
     // Check for better candidates
     this.videoElements = this.findAllVideos();
-    const allScored = this.videoElements.map(v => ({
-      video: v,
-      score: this.scoreVideo(v)
-    })).sort((a, b) => b.score - a.score);
+    const allScored = this.videoElements
+      .map((v) => ({
+        video: v,
+        score: this.scoreVideo(v),
+      }))
+      .sort((a, b) => b.score - a.score);
 
     if (allScored.length > 0 && allScored[0].video !== this.primaryVideo) {
       // Only swap if new candidate is significantly better
@@ -225,8 +230,10 @@ export class VideoDetector {
     const visibleWidth = Math.min(rect.right, viewportWidth) - Math.max(rect.left, 0);
     const visibleRatio = (visibleHeight * visibleWidth) / area;
 
-    if (visibleRatio > 0.7) score += 30; // Mostly visible
-    else if (visibleRatio > 0.3) score += 10; // Partially visible
+    if (visibleRatio > 0.7)
+      score += 30; // Mostly visible
+    else if (visibleRatio > 0.3)
+      score += 10; // Partially visible
     else score -= 50; // Mostly off-screen
 
     // Completely hidden (-100)
@@ -250,10 +257,14 @@ export class VideoDetector {
     if (videos.length === 0) return null;
     if (videos.length === 1) return videos[0];
 
-    const scored = videos.map(v => ({ video: v, score: this.scoreVideo(v) }))
+    const scored = videos
+      .map((v) => ({ video: v, score: this.scoreVideo(v) }))
       .sort((a, b) => b.score - a.score);
 
-    console.log('[VideoDetector] Scored videos:', scored.map(s => s.score));
+    console.log(
+      '[VideoDetector] Scored videos:',
+      scored.map((s) => s.score)
+    );
     return scored[0].video;
   }
 
@@ -271,7 +282,7 @@ export class VideoDetector {
 
       observer.observe(document.body, {
         childList: true,
-        subtree: true
+        subtree: true,
       });
 
       this.observers.push(() => observer.disconnect());
@@ -289,7 +300,7 @@ export class VideoDetector {
 
   destroy() {
     console.log('[VideoDetector] Destroying, cleaning up', this.observers.length, 'observers');
-    this.observers.forEach(cleanup => {
+    this.observers.forEach((cleanup) => {
       try {
         cleanup();
       } catch (err) {

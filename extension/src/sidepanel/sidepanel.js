@@ -50,7 +50,7 @@ class LiveWaveform {
       fftSize: options.fftSize || 256,
       mode: options.mode || 'static',
       historySize: options.historySize || 60,
-      ...options
+      ...options,
     };
 
     this.active = false;
@@ -119,7 +119,7 @@ class LiveWaveform {
     }
 
     if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach(track => track.stop());
+      this.mediaStream.getTracks().forEach((track) => track.stop());
       this.mediaStream = null;
     }
 
@@ -246,7 +246,7 @@ async function toggleRecording() {
           waveform = new LiveWaveform(waveformCanvas, {
             barColor: '#dc2626',
             sensitivity: 1.2,
-            mode: 'static'
+            mode: 'static',
           });
         }
         await waveform.start();
@@ -259,7 +259,7 @@ async function toggleRecording() {
     }
 
     const response = await chrome.runtime.sendMessage({
-      action: 'toggle_recording'
+      action: 'toggle_recording',
     });
 
     if (response.success === false) {
@@ -313,7 +313,8 @@ async function init() {
   // Request initial timestamp immediately (in parallel with detection)
   // This ensures timecode appears as fast as notes
   console.log('[SidePanel] Requesting initial timestamp...');
-  chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
+  chrome.runtime
+    .sendMessage({ action: 'get_video_timestamp' })
     .catch(() => console.log('[SidePanel] Could not get initial timestamp'));
 
   // Always trigger fresh detection to ensure content script is alive
@@ -469,20 +470,27 @@ async function handleTabChanged(tabId, videoContext) {
       // If content script isn't responding (success: false), we have stale cached context
       // but no live content script - need to trigger fresh detection
       if (timestampResult && timestampResult.success === false) {
-        console.log('[SidePanel] ⚠️ Content script not responding despite cached context - triggering detection');
+        console.log(
+          '[SidePanel] ⚠️ Content script not responding despite cached context - triggering detection'
+        );
 
         // Show detecting status
         videoTimestampEl.textContent = 'Video: Detecting...';
 
         // Trigger fresh detection to initialize content script
-        const detectionResult = await chrome.runtime.sendMessage({ action: 'trigger_video_detection' });
+        const detectionResult = await chrome.runtime.sendMessage({
+          action: 'trigger_video_detection',
+        });
 
         if (detectionResult?.success) {
           console.log('[SidePanel] ✅ Detection complete after finding stale context');
           // Wait for detection, then request timestamp again
           setTimeout(() => {
-            chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
-              .catch(() => console.log('[SidePanel] Still could not get timestamp after detection'));
+            chrome.runtime
+              .sendMessage({ action: 'get_video_timestamp' })
+              .catch(() =>
+                console.log('[SidePanel] Still could not get timestamp after detection')
+              );
           }, 2000);
         }
       }
@@ -492,13 +500,24 @@ async function handleTabChanged(tabId, videoContext) {
 
     // If we're not currently displaying this video's notes, load them
     if (!hadCachedNotes && (!isSameVideo || !hasCacheEntry)) {
-      console.log('[SidePanel] 🔄 Loading notes for video', newVideoDbId, '(was displaying:', previousVideoDbId, ')');
+      console.log(
+        '[SidePanel] 🔄 Loading notes for video',
+        newVideoDbId,
+        '(was displaying:',
+        previousVideoDbId,
+        ')'
+      );
 
       // Show loading state while we fetch notes
       markTranscriptsLoading();
       loadingSessionId++; // Invalidate any in-flight requests from previous video
       const thisSessionId = loadingSessionId;
-      console.log('[SidePanel] 🔄 Started loading session', thisSessionId, 'for video', newVideoDbId);
+      console.log(
+        '[SidePanel] 🔄 Started loading session',
+        thisSessionId,
+        'for video',
+        newVideoDbId
+      );
 
       // Request notes for this video
       try {
@@ -507,7 +526,7 @@ async function handleTabChanged(tabId, videoContext) {
           action: 'request_notes_for_sidepanel',
           videoDbId: newVideoDbId,
           tabId: tabId,
-          sessionId: thisSessionId
+          sessionId: thisSessionId,
         });
 
         // Check if we're still on the same session (user didn't navigate away)
@@ -517,7 +536,13 @@ async function handleTabChanged(tabId, videoContext) {
             finalizeTranscriptRender();
           }
         } else {
-          console.log('[SidePanel] ⚠️ Session', thisSessionId, 'was invalidated (now on session', loadingSessionId, ')');
+          console.log(
+            '[SidePanel] ⚠️ Session',
+            thisSessionId,
+            'was invalidated (now on session',
+            loadingSessionId,
+            ')'
+          );
         }
       } catch (err) {
         console.log('[SidePanel] ⚠️ Failed to request notes:', err);
@@ -546,7 +571,8 @@ async function handleTabChanged(tabId, videoContext) {
         setTimeout(async () => {
           try {
             // Request timestamp immediately
-            chrome.runtime.sendMessage({ action: 'get_video_timestamp' })
+            chrome.runtime
+              .sendMessage({ action: 'get_video_timestamp' })
               .catch(() => console.log('[SidePanel] Could not get timestamp'));
 
             // Get video context
@@ -554,7 +580,10 @@ async function handleTabChanged(tabId, videoContext) {
             if (response.context) {
               currentVideoContext = response.context;
               const videoDbId = response.context.videoDbId;
-              console.log('[SidePanel] ✅ Video context now available for switched tab:', videoDbId);
+              console.log(
+                '[SidePanel] ✅ Video context now available for switched tab:',
+                videoDbId
+              );
 
               // Load notes for this video
               if (videoDbId) {
@@ -562,12 +591,14 @@ async function handleTabChanged(tabId, videoContext) {
                 loadingSessionId++;
                 const thisSessionId = loadingSessionId;
 
-                chrome.runtime.sendMessage({
-                  action: 'request_notes_for_sidepanel',
-                  videoDbId: videoDbId,
-                  tabId: tabId,
-                  sessionId: thisSessionId
-                }).catch(err => console.log('[SidePanel] Failed to load notes:', err));
+                chrome.runtime
+                  .sendMessage({
+                    action: 'request_notes_for_sidepanel',
+                    videoDbId: videoDbId,
+                    tabId: tabId,
+                    sessionId: thisSessionId,
+                  })
+                  .catch((err) => console.log('[SidePanel] Failed to load notes:', err));
               }
             } else {
               console.log('[SidePanel] No video detected on this tab');
@@ -591,7 +622,7 @@ async function handleTabChanged(tabId, videoContext) {
 
 function storeNoteInCache(videoDbId, noteData) {
   const existing = notesCache.get(videoDbId) || [];
-  const existingIndex = existing.findIndex(note => note.id === noteData.id);
+  const existingIndex = existing.findIndex((note) => note.id === noteData.id);
 
   if (existingIndex >= 0) {
     const updated = [...existing];
@@ -616,7 +647,7 @@ function renderNotesFromCache(videoDbId) {
   }
 
   const fragment = document.createDocumentFragment();
-  cachedNotes.forEach(note => {
+  cachedNotes.forEach((note) => {
     fragment.appendChild(buildNoteElement(note));
   });
 
@@ -727,7 +758,7 @@ function buildNoteElement(data) {
     noteDiv.addEventListener('click', () => {
       chrome.runtime.sendMessage({
         action: 'note_clicked',
-        timestamp: data.timestamp_seconds
+        timestamp: data.timestamp_seconds,
       });
 
       highlightNote(data.id);
@@ -752,7 +783,7 @@ function deleteNote(noteId, videoId, noteElement) {
     // Remove from cache
     if (videoId && notesCache.has(videoId)) {
       const cachedNotes = notesCache.get(videoId);
-      const updatedNotes = cachedNotes.filter(note => note.id !== noteId);
+      const updatedNotes = cachedNotes.filter((note) => note.id !== noteId);
       notesCache.set(videoId, updatedNotes);
       console.log('[SidePanel] Removed note from cache, remaining:', updatedNotes.length);
     }
@@ -761,7 +792,7 @@ function deleteNote(noteId, videoId, noteElement) {
     try {
       await chrome.runtime.sendMessage({
         action: 'delete_note',
-        noteId: noteId
+        noteId: noteId,
       });
       console.log('[SidePanel] Note deleted successfully');
     } catch (err) {
@@ -817,7 +848,7 @@ function formatTimestamp(seconds) {
 
 function highlightNote(noteId) {
   // Remove previous highlights
-  document.querySelectorAll('.note-item').forEach(el => {
+  document.querySelectorAll('.note-item').forEach((el) => {
     el.classList.remove('highlighted');
   });
 

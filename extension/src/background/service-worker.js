@@ -2,9 +2,9 @@
 // Sprint 01: Audio streaming to Phoenix
 // Sprint 03.5: Tab Management
 
-import { Socket } from "phoenix";
-import { TabManager } from "./tab-manager.js";
-import { MessageRouter } from "./message-router.js";
+import { Socket } from 'phoenix';
+import { TabManager } from './tab-manager.js';
+import { MessageRouter } from './message-router.js';
 
 console.log('Service worker loaded');
 
@@ -63,9 +63,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Handle messages from sidepanel
   if (message.action === 'toggle_recording' && !sender.url?.includes('offscreen.html')) {
-    toggleRecording().then(sendResponse).catch(error => {
-      sendResponse({ success: false, error: error.message });
-    });
+    toggleRecording()
+      .then(sendResponse)
+      .catch((error) => {
+        sendResponse({ success: false, error: error.message });
+      });
     return true; // Keep channel open
   }
 
@@ -74,7 +76,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (audioChannel) {
       // Send binary audio to Phoenix as plain Array (not Uint8Array)
       // Phoenix.js doesn't properly serialize Uint8Array, so keep it as Array
-      audioChannel.push('audio_chunk', { data: message.data })
+      audioChannel
+        .push('audio_chunk', { data: message.data })
         .receive('ok', () => console.log('Audio chunk sent'))
         .receive('error', (err) => console.error('Failed to send chunk:', err));
     }
@@ -82,7 +85,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   // Handle responses from offscreen document
-  if ((message.action === 'start_recording' || message.action === 'stop_recording') && sender.url?.includes('offscreen.html')) {
+  if (
+    (message.action === 'start_recording' || message.action === 'stop_recording') &&
+    sender.url?.includes('offscreen.html')
+  ) {
     // This is a response from the offscreen document, not a command
     return false;
   }
@@ -99,26 +105,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[ServiceWorker] 📹 VIDEO_DETECTED in tab', tabId, ':', videoData);
 
     // Send to backend VideoChannel
-    handleVideoDetected(videoData, tabId).then(response => {
-      console.log('[ServiceWorker] 📹 Backend returned videoDbId:', response.videoDbId);
+    handleVideoDetected(videoData, tabId)
+      .then((response) => {
+        console.log('[ServiceWorker] 📹 Backend returned videoDbId:', response.videoDbId);
 
-      // Store in TabManager
-      if (response.videoDbId && tabManager) {
-        console.log('[ServiceWorker] 📹 Storing video context in TabManager for tab', tabId);
-        tabManager.setVideoContext(tabId, {
-          videoDbId: response.videoDbId,
-          platform: videoData.platform,
-          videoId: videoData.videoId,
-          url: videoData.url,
-          title: videoData.title
-        });
-      }
+        // Store in TabManager
+        if (response.videoDbId && tabManager) {
+          console.log('[ServiceWorker] 📹 Storing video context in TabManager for tab', tabId);
+          tabManager.setVideoContext(tabId, {
+            videoDbId: response.videoDbId,
+            platform: videoData.platform,
+            videoId: videoData.videoId,
+            url: videoData.url,
+            title: videoData.title,
+          });
+        }
 
-      sendResponse(response);
-    }).catch(err => {
-      console.error('[Lossy] Failed to handle video detected:', err);
-      sendResponse({ error: err.message });
-    });
+        sendResponse(response);
+      })
+      .catch((err) => {
+        console.error('[Lossy] Failed to handle video detected:', err);
+        sendResponse({ error: err.message });
+      });
 
     return true; // Keep channel open for async response
   }
@@ -136,11 +144,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const sourceTabId = sender.tab?.id;
     if (sourceTabId && messageRouter) {
       // Only forward to side panel if it's viewing this tab
-      messageRouter.routeToSidePanel({
-        action: 'video_timestamp_update',
-        timestamp: message.timestamp,
-        timecodeUnavailable: message.timecodeUnavailable
-      }, sourceTabId);
+      messageRouter.routeToSidePanel(
+        {
+          action: 'video_timestamp_update',
+          timestamp: message.timestamp,
+          timecodeUnavailable: message.timecodeUnavailable,
+        },
+        sourceTabId
+      );
     }
     return false;
   }
@@ -152,11 +163,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const sourceTabId = sender.tab?.id;
     if (sourceTabId && messageRouter) {
       // Only forward to side panel if it's viewing this tab
-      messageRouter.routeToSidePanel({
-        action: 'focus_note',
-        noteId: message.data.noteId,
-        timestamp: message.data.timestamp
-      }, sourceTabId);
+      messageRouter.routeToSidePanel(
+        {
+          action: 'focus_note',
+          noteId: message.data.noteId,
+          timestamp: message.data.timestamp,
+        },
+        sourceTabId
+      );
     }
 
     sendResponse({ success: true });
@@ -170,10 +184,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Forward to content script in active tab
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       if (tabs[0]?.id) {
-        chrome.tabs.sendMessage(tabs[0].id, {
-          action: 'seek_to',
-          timestamp: message.timestamp
-        }).catch(err => console.log('No content script on this page:', err));
+        chrome.tabs
+          .sendMessage(tabs[0].id, {
+            action: 'seek_to',
+            timestamp: message.timestamp,
+          })
+          .catch((err) => console.log('No content script on this page:', err));
       }
     });
 
@@ -187,32 +203,50 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (tabs[0]?.id) {
         try {
           const response = await chrome.tabs.sendMessage(tabs[0].id, {
-            action: 'get_current_timestamp'
+            action: 'get_current_timestamp',
           });
           console.log('[Lossy] Got timestamp from content script:', response);
           // Forward timestamp to side panel
-          chrome.runtime.sendMessage({
-            action: 'video_timestamp_update',
-            timestamp: response?.timestamp,
-            timecodeUnavailable: response?.timecodeUnavailable
-          }).catch(() => {});
+          chrome.runtime
+            .sendMessage({
+              action: 'video_timestamp_update',
+              timestamp: response?.timestamp,
+              timecodeUnavailable: response?.timecodeUnavailable,
+            })
+            .catch(() => {});
 
           // Also send response back to caller for liveness check
-          sendResponse({ success: true, timestamp: response?.timestamp, timecodeUnavailable: response?.timecodeUnavailable });
+          sendResponse({
+            success: true,
+            timestamp: response?.timestamp,
+            timecodeUnavailable: response?.timecodeUnavailable,
+          });
         } catch (err) {
           console.log('[Lossy] No response from content script:', err);
           // No video detected - content script not responding
-          chrome.runtime.sendMessage({
-            action: 'video_timestamp_update',
-            timestamp: null,
-            timecodeUnavailable: true
-          }).catch(() => {});
+          chrome.runtime
+            .sendMessage({
+              action: 'video_timestamp_update',
+              timestamp: null,
+              timecodeUnavailable: true,
+            })
+            .catch(() => {});
 
           // Send response indicating content script is not alive
-          sendResponse({ success: false, timestamp: null, timecodeUnavailable: true, error: 'Content script not responding' });
+          sendResponse({
+            success: false,
+            timestamp: null,
+            timecodeUnavailable: true,
+            error: 'Content script not responding',
+          });
         }
       } else {
-        sendResponse({ success: false, timestamp: null, timecodeUnavailable: true, error: 'No active tab' });
+        sendResponse({
+          success: false,
+          timestamp: null,
+          timecodeUnavailable: true,
+          error: 'No active tab',
+        });
       }
     });
     return true; // Will respond asynchronously
@@ -229,7 +263,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'trigger_video_detection') {
     handleTriggerVideoDetection()
       .then(sendResponse)
-      .catch(err => {
+      .catch((err) => {
         // Don't log as error - handle gracefully for restricted pages
         console.log('[ServiceWorker] Could not trigger video detection:', err.message);
         sendResponse({ success: false, error: err.message });
@@ -259,14 +293,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
-    console.log('[ServiceWorker] 📝 REQUEST_NOTES from content script for video:', message.videoDbId, 'tab:', tabId);
+    console.log(
+      '[ServiceWorker] 📝 REQUEST_NOTES from content script for video:',
+      message.videoDbId,
+      'tab:',
+      tabId
+    );
 
-    loadNotesForVideo(message.videoDbId, tabId).then(() => {
-      sendResponse({ success: true });
-    }).catch(err => {
-      console.error('[Lossy] Failed to load notes:', err);
-      sendResponse({ error: err.message });
-    });
+    loadNotesForVideo(message.videoDbId, tabId)
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((err) => {
+        console.error('[Lossy] Failed to load notes:', err);
+        sendResponse({ error: err.message });
+      });
 
     return true; // Keep channel open for async response
   }
@@ -278,14 +319,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
-    console.log('[ServiceWorker] 📝 REQUEST_NOTES_FOR_SIDEPANEL for video:', message.videoDbId, 'tab:', message.tabId);
+    console.log(
+      '[ServiceWorker] 📝 REQUEST_NOTES_FOR_SIDEPANEL for video:',
+      message.videoDbId,
+      'tab:',
+      message.tabId
+    );
 
-    loadNotesForSidePanel(message.videoDbId, message.tabId).then(() => {
-      sendResponse({ success: true });
-    }).catch(err => {
-      console.error('[Lossy] Failed to load notes:', err);
-      sendResponse({ error: err.message });
-    });
+    loadNotesForSidePanel(message.videoDbId, message.tabId)
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((err) => {
+        console.error('[Lossy] Failed to load notes:', err);
+        sendResponse({ error: err.message });
+      });
 
     return true; // Keep channel open for async response
   }
@@ -299,24 +347,28 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     console.log('[ServiceWorker] 🗑️ DELETE_NOTE:', message.noteId);
 
-    deleteNote(message.noteId).then(() => {
-      // Notify all tabs to remove the timeline marker
-      chrome.tabs.query({}, (tabs) => {
-        tabs.forEach(tab => {
-          chrome.tabs.sendMessage(tab.id, {
-            action: 'remove_marker',
-            noteId: message.noteId
-          }).catch(() => {
-            // Silently ignore tabs without content script
+    deleteNote(message.noteId)
+      .then(() => {
+        // Notify all tabs to remove the timeline marker
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            chrome.tabs
+              .sendMessage(tab.id, {
+                action: 'remove_marker',
+                noteId: message.noteId,
+              })
+              .catch(() => {
+                // Silently ignore tabs without content script
+              });
           });
         });
-      });
 
-      sendResponse({ success: true });
-    }).catch(err => {
-      console.error('[Lossy] Failed to delete note:', err);
-      sendResponse({ error: err.message });
-    });
+        sendResponse({ success: true });
+      })
+      .catch((err) => {
+        console.error('[Lossy] Failed to delete note:', err);
+        sendResponse({ error: err.message });
+      });
 
     return true; // Keep channel open for async response
   }
@@ -370,7 +422,7 @@ async function startRecording() {
       // Wait for timestamp response with timeout
       const response = await Promise.race([
         chrome.tabs.sendMessage(tab.id, { action: 'recording_started' }),
-        new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000))
+        new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000)),
       ]);
 
       if (response && response.success && response.timestamp != null) {
@@ -389,11 +441,11 @@ async function startRecording() {
   await createOffscreenDocument();
 
   // 3. Connect to Phoenix Socket
-  socket = new Socket("ws://localhost:4000/socket", {
-    params: {},  // No token for now
+  socket = new Socket('ws://localhost:4000/socket', {
+    params: {}, // No token for now
     logger: (kind, msg, data) => {
       console.log(`Phoenix ${kind}:`, msg, data);
-    }
+    },
   });
 
   socket.connect();
@@ -406,7 +458,7 @@ async function startRecording() {
 
   audioChannel = socket.channel(`audio:${sessionId}`, {
     video_id: videoContext?.videoDbId,
-    timestamp: capturedTimestamp
+    timestamp: capturedTimestamp,
   });
 
   // Listen for structured note events (we only send the final structured note, not raw transcript)
@@ -415,32 +467,37 @@ async function startRecording() {
 
     // Forward to sidepanel with video context (only if panel is viewing this tab)
     if (tab?.id && messageRouter) {
-      messageRouter.routeToSidePanel({
-        action: 'transcript',
-        data: {
-          id: payload.id,
-          text: payload.text,
-          category: payload.category,
-          confidence: payload.confidence,
-          timestamp_seconds: payload.timestamp_seconds,
-          raw_transcript: payload.raw_transcript,
-          timestamp: payload.timestamp,
-          video_id: videoContext?.videoDbId // Add video context
-        }
-      }, tab.id);
+      messageRouter.routeToSidePanel(
+        {
+          action: 'transcript',
+          data: {
+            id: payload.id,
+            text: payload.text,
+            category: payload.category,
+            confidence: payload.confidence,
+            timestamp_seconds: payload.timestamp_seconds,
+            raw_transcript: payload.raw_transcript,
+            timestamp: payload.timestamp,
+            video_id: videoContext?.videoDbId, // Add video context
+          },
+        },
+        tab.id
+      );
     }
 
     // Forward to content script for timeline marker
     if (tab?.id) {
-      chrome.tabs.sendMessage(tab.id, {
-        action: 'note_created',
-        data: {
-          id: payload.id,
-          text: payload.text,
-          category: payload.category,
-          timestamp_seconds: payload.timestamp_seconds
-        }
-      }).catch(err => console.log('[Lossy] No content script on this page'));
+      chrome.tabs
+        .sendMessage(tab.id, {
+          action: 'note_created',
+          data: {
+            id: payload.id,
+            text: payload.text,
+            category: payload.category,
+            timestamp_seconds: payload.timestamp_seconds,
+          },
+        })
+        .catch((err) => console.log('[Lossy] No content script on this page'));
     }
 
     // Now we can safely cleanup the channel
@@ -460,7 +517,8 @@ async function startRecording() {
   });
 
   await new Promise((resolve, reject) => {
-    audioChannel.join()
+    audioChannel
+      .join()
       .receive('ok', () => {
         console.log('Joined audio channel');
         resolve();
@@ -473,7 +531,7 @@ async function startRecording() {
 
   // 5. Start audio capture in offscreen document
   const offscreenClients = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT']
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
   });
 
   console.log('Offscreen contexts found:', offscreenClients.length);
@@ -481,10 +539,12 @@ async function startRecording() {
   if (offscreenClients.length > 0) {
     // Send message directly to offscreen document
     console.log('Sending start_recording message to offscreen...');
-    chrome.runtime.sendMessage({
-      target: 'offscreen',
-      action: 'start_recording'
-    }).catch(err => console.error('Failed to start offscreen recording:', err));
+    chrome.runtime
+      .sendMessage({
+        target: 'offscreen',
+        action: 'start_recording',
+      })
+      .catch((err) => console.error('Failed to start offscreen recording:', err));
   } else {
     console.warn('No offscreen document found to send recording message');
   }
@@ -509,21 +569,25 @@ async function stopRecording() {
   }
 
   // 2. Notify content script to resume video
-  chrome.tabs.sendMessage(recordingTabId, { action: 'recording_stopped' })
+  chrome.tabs
+    .sendMessage(recordingTabId, { action: 'recording_stopped' })
     .catch((err) => console.log('[Lossy] No content script on this page'));
 
   // 2. Stop audio capture
   if (await hasOffscreenDocument()) {
-    chrome.runtime.sendMessage({
-      target: 'offscreen',
-      action: 'stop_recording'
-    }).catch(err => console.error('Failed to stop offscreen recording:', err));
+    chrome.runtime
+      .sendMessage({
+        target: 'offscreen',
+        action: 'stop_recording',
+      })
+      .catch((err) => console.error('Failed to stop offscreen recording:', err));
   }
 
   // 3. Tell backend to finalize transcription and wait for confirmation
   if (audioChannel) {
     await new Promise((resolve) => {
-      audioChannel.push('stop_recording', {})
+      audioChannel
+        .push('stop_recording', {})
         .receive('ok', () => {
           console.log('Backend notified to finalize');
           resolve();
@@ -568,7 +632,7 @@ async function createOffscreenDocument() {
     await chrome.offscreen.createDocument({
       url: 'offscreen.html',
       reasons: ['USER_MEDIA'],
-      justification: 'Recording audio for voice notes'
+      justification: 'Recording audio for voice notes',
     });
     console.log('Offscreen document created successfully');
   } catch (error) {
@@ -579,7 +643,7 @@ async function createOffscreenDocument() {
 
 async function hasOffscreenDocument() {
   const contexts = await chrome.runtime.getContexts({
-    contextTypes: ['OFFSCREEN_DOCUMENT']
+    contextTypes: ['OFFSCREEN_DOCUMENT'],
   });
   return contexts.length > 0;
 }
@@ -589,11 +653,11 @@ async function handleVideoDetected(videoData, tabId) {
 
   // Connect to socket if not already connected
   if (!socket || !socket.isConnected()) {
-    socket = new Socket("ws://localhost:4000/socket", {
+    socket = new Socket('ws://localhost:4000/socket', {
       params: {},
       logger: (kind, msg, data) => {
         console.log(`Phoenix ${kind}:`, msg, data);
-      }
+      },
     });
     socket.connect();
   }
@@ -602,12 +666,14 @@ async function handleVideoDetected(videoData, tabId) {
   videoChannel = socket.channel('video:meta', {});
 
   return new Promise((resolve, reject) => {
-    videoChannel.join()
+    videoChannel
+      .join()
       .receive('ok', () => {
         console.log('[Lossy] Joined video channel');
 
         // Send video_detected event
-        videoChannel.push('video_detected', videoData)
+        videoChannel
+          .push('video_detected', videoData)
           .receive('ok', (response) => {
             console.log('[Lossy] Video record created:', response);
             // Don't load notes here - content script will request them after initialization
@@ -630,11 +696,11 @@ async function loadNotesForVideo(videoDbId, tabId) {
 
   // Ensure we have a video channel connection
   if (!socket || !socket.isConnected()) {
-    socket = new Socket("ws://localhost:4000/socket", {
+    socket = new Socket('ws://localhost:4000/socket', {
       params: {},
       logger: (kind, msg, data) => {
         console.log(`Phoenix ${kind}:`, msg, data);
-      }
+      },
     });
     socket.connect();
   }
@@ -643,23 +709,28 @@ async function loadNotesForVideo(videoDbId, tabId) {
   if (!videoChannel) {
     videoChannel = socket.channel('video:meta', {});
     await new Promise((resolve, reject) => {
-      videoChannel.join()
-        .receive('ok', resolve)
-        .receive('error', reject);
+      videoChannel.join().receive('ok', resolve).receive('error', reject);
     });
   }
 
   // Request notes
   return new Promise((resolve, reject) => {
-    videoChannel.push('get_notes', { video_id: videoDbId })
+    videoChannel
+      .push('get_notes', { video_id: videoDbId })
       .receive('ok', (notesResponse) => {
-        console.log('[ServiceWorker] 📝 Received', notesResponse.notes?.length || 0, 'existing notes for content script');
+        console.log(
+          '[ServiceWorker] 📝 Received',
+          notesResponse.notes?.length || 0,
+          'existing notes for content script'
+        );
 
         // Send notes ONLY to content script for timeline markers (NOT to side panel)
-        chrome.tabs.sendMessage(tabId, {
-          action: 'load_markers',
-          notes: notesResponse.notes
-        }).catch(err => console.log('[ServiceWorker] ⚠️ No content script on this page'));
+        chrome.tabs
+          .sendMessage(tabId, {
+            action: 'load_markers',
+            notes: notesResponse.notes,
+          })
+          .catch((err) => console.log('[ServiceWorker] ⚠️ No content script on this page'));
 
         resolve();
       })
@@ -675,11 +746,11 @@ async function loadNotesForSidePanel(videoDbId, tabId) {
 
   // Ensure we have a video channel connection
   if (!socket || !socket.isConnected()) {
-    socket = new Socket("ws://localhost:4000/socket", {
+    socket = new Socket('ws://localhost:4000/socket', {
       params: {},
       logger: (kind, msg, data) => {
         console.log(`Phoenix ${kind}:`, msg, data);
-      }
+      },
     });
     socket.connect();
   }
@@ -688,17 +759,20 @@ async function loadNotesForSidePanel(videoDbId, tabId) {
   if (!videoChannel) {
     videoChannel = socket.channel('video:meta', {});
     await new Promise((resolve, reject) => {
-      videoChannel.join()
-        .receive('ok', resolve)
-        .receive('error', reject);
+      videoChannel.join().receive('ok', resolve).receive('error', reject);
     });
   }
 
   // Request notes
   return new Promise((resolve, reject) => {
-    videoChannel.push('get_notes', { video_id: videoDbId })
+    videoChannel
+      .push('get_notes', { video_id: videoDbId })
       .receive('ok', (notesResponse) => {
-        console.log('[ServiceWorker] 📝 Received', notesResponse.notes?.length || 0, 'existing notes for side panel');
+        console.log(
+          '[ServiceWorker] 📝 Received',
+          notesResponse.notes?.length || 0,
+          'existing notes for side panel'
+        );
 
         // Send notes to side panel only (filtered by tab)
         sendNotesToSidePanel(notesResponse.notes, videoDbId, tabId);
@@ -714,21 +788,24 @@ async function loadNotesForSidePanel(videoDbId, tabId) {
 
 function sendNotesToSidePanel(notes, videoDbId, tabId) {
   if (notes && notes.length > 0 && messageRouter) {
-    notes.forEach(note => {
+    notes.forEach((note) => {
       // Only send to side panel if it's viewing this tab
-      messageRouter.routeToSidePanel({
-        action: 'transcript',
-        data: {
-          id: note.id,
-          text: note.text,
-          category: note.category,
-          confidence: note.confidence,
-          timestamp_seconds: note.timestamp_seconds,
-          raw_transcript: note.raw_transcript,
-          timestamp: note.timestamp,
-          video_id: videoDbId // Add video context for filtering
-        }
-      }, tabId);
+      messageRouter.routeToSidePanel(
+        {
+          action: 'transcript',
+          data: {
+            id: note.id,
+            text: note.text,
+            category: note.category,
+            confidence: note.confidence,
+            timestamp_seconds: note.timestamp_seconds,
+            raw_transcript: note.raw_transcript,
+            timestamp: note.timestamp,
+            video_id: videoDbId, // Add video context for filtering
+          },
+        },
+        tabId
+      );
     });
   }
 }
@@ -738,11 +815,11 @@ async function deleteNote(noteId) {
 
   // Ensure we have a video channel connection
   if (!socket || !socket.isConnected()) {
-    socket = new Socket("ws://localhost:4000/socket", {
+    socket = new Socket('ws://localhost:4000/socket', {
       params: {},
       logger: (kind, msg, data) => {
         console.log(`Phoenix ${kind}:`, msg, data);
-      }
+      },
     });
     socket.connect();
   }
@@ -751,15 +828,14 @@ async function deleteNote(noteId) {
   if (!videoChannel) {
     videoChannel = socket.channel('video:meta', {});
     await new Promise((resolve, reject) => {
-      videoChannel.join()
-        .receive('ok', resolve)
-        .receive('error', reject);
+      videoChannel.join().receive('ok', resolve).receive('error', reject);
     });
   }
 
   // Delete the note
   return new Promise((resolve, reject) => {
-    videoChannel.push('delete_note', { note_id: noteId })
+    videoChannel
+      .push('delete_note', { note_id: noteId })
       .receive('ok', () => {
         console.log('[ServiceWorker] 🗑️ Note deleted successfully');
         resolve();
@@ -790,7 +866,12 @@ async function handleTriggerVideoDetection() {
   console.log('[ServiceWorker] 🔍 Triggering detection on tab:', tab.id, tab.url);
 
   // Check if URL is supported - return gracefully for restricted pages
-  if (!tab.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://') || tab.url.startsWith('edge://')) {
+  if (
+    !tab.url ||
+    tab.url.startsWith('chrome://') ||
+    tab.url.startsWith('chrome-extension://') ||
+    tab.url.startsWith('edge://')
+  ) {
     console.log('[ServiceWorker] Cannot inject content script on restricted page:', tab.url);
     return { success: false, error: 'Cannot inject content script on this page', restricted: true };
   }
@@ -807,7 +888,7 @@ async function handleTriggerVideoDetection() {
   try {
     console.log('[ServiceWorker] 🔍 Sending re_initialize message to content script');
     const response = await chrome.tabs.sendMessage(tab.id, {
-      action: 're_initialize'
+      action: 're_initialize',
     });
 
     if (response?.success) {
@@ -834,7 +915,7 @@ async function ensureContentScriptInjected(tabId) {
   try {
     const response = await Promise.race([
       chrome.tabs.sendMessage(tabId, { action: 'ping' }),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Ping timeout')), 500))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Ping timeout')), 500)),
     ]);
 
     if (response?.pong) {
@@ -849,16 +930,18 @@ async function ensureContentScriptInjected(tabId) {
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tabId },
-      files: ['content/universal.js']
+      files: ['content/universal.js'],
     });
     console.log('[ServiceWorker] ✅ Content script injected successfully');
 
     // Wait a bit for the script to initialize
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
   } catch (err) {
     // Ignore "Cannot access" errors (means a script is already running, likely orphaned)
     if (err.message?.includes('Cannot access')) {
-      console.log('[ServiceWorker] ⚠️ Content script injection blocked (likely orphaned script exists)');
+      console.log(
+        '[ServiceWorker] ⚠️ Content script injection blocked (likely orphaned script exists)'
+      );
       // Continue anyway - we'll try to communicate with whatever is there
     } else {
       console.error('[ServiceWorker] ❌ Failed to inject content script:', err);

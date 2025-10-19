@@ -28,13 +28,15 @@ export class VideoController {
     const duration = this.getDuration();
     const isTimecodeUnavailable = !duration || isNaN(duration);
 
-    chrome.runtime.sendMessage({
-      action: 'video_time_update',
-      timestamp: time,
-      timecodeUnavailable: isTimecodeUnavailable
-    }).catch(() => {
-      // Side panel may not be open
-    });
+    chrome.runtime
+      .sendMessage({
+        action: 'video_time_update',
+        timestamp: time,
+        timecodeUnavailable: isTimecodeUnavailable,
+      })
+      .catch(() => {
+        // Side panel may not be open
+      });
   }
 
   async getCurrentTime() {
@@ -52,7 +54,9 @@ export class VideoController {
       return new Promise((resolve) => {
         // CRITICAL: Timeout fallback in case callback doesn't fire
         const timeoutId = setTimeout(() => {
-          console.warn('[VideoController] requestVideoFrameCallback timed out, using currentTime fallback');
+          console.warn(
+            '[VideoController] requestVideoFrameCallback timed out, using currentTime fallback'
+          );
           resolve(this.videoElement.currentTime);
         }, 100);
 

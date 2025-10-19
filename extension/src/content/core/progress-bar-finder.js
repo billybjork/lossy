@@ -15,7 +15,7 @@ export class ProgressBarFinder {
     this.options = {
       searchDepth: options.searchDepth || 10, // Ancestor levels to search
       enableSpatialSearch: options.enableSpatialSearch !== false,
-      ...options
+      ...options,
     };
   }
 
@@ -53,9 +53,16 @@ export class ProgressBarFinder {
 
   findByPatterns() {
     const patterns = [
-      '.progress-bar', '.progressbar', '.seek-bar', '.seekbar',
-      '.scrubber', '.timeline', '.video-progress',
-      '[class*="progress"]', '[class*="seek"]', '[class*="timeline"]'
+      '.progress-bar',
+      '.progressbar',
+      '.seek-bar',
+      '.seekbar',
+      '.scrubber',
+      '.timeline',
+      '.video-progress',
+      '[class*="progress"]',
+      '[class*="seek"]',
+      '[class*="timeline"]',
     ];
 
     for (const pattern of patterns) {
@@ -73,10 +80,12 @@ export class ProgressBarFinder {
     let depth = 0;
 
     while (current && depth < this.options.searchDepth) {
-      const candidates = Array.from(current.querySelectorAll('[class*="progress"], [class*="seek"], [class*="timeline"]'));
+      const candidates = Array.from(
+        current.querySelectorAll('[class*="progress"], [class*="seek"], [class*="timeline"]')
+      );
 
       // Filter to elements that look like progress bars
-      const progressBars = candidates.filter(el => {
+      const progressBars = candidates.filter((el) => {
         const rect = el.getBoundingClientRect();
         return rect.width > rect.height * 5; // Horizontal bars
       });
@@ -98,7 +107,9 @@ export class ProgressBarFinder {
       const elements = root.querySelectorAll('*');
       for (const el of elements) {
         if (el.shadowRoot) {
-          const progressBar = el.shadowRoot.querySelector('[class*="progress"], [class*="seek"], [class*="timeline"]');
+          const progressBar = el.shadowRoot.querySelector(
+            '[class*="progress"], [class*="seek"], [class*="timeline"]'
+          );
           if (progressBar) {
             console.log('[ProgressBarFinder] Found in shadow DOM');
             return progressBar;

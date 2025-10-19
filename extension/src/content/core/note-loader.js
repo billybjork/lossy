@@ -49,17 +49,28 @@ export class NoteLoader {
     const currentSession = this.sessionId;
 
     try {
-      console.log('[NoteLoader] 📝 Requesting notes for video:', videoDbId, 'session:', currentSession);
+      console.log(
+        '[NoteLoader] 📝 Requesting notes for video:',
+        videoDbId,
+        'session:',
+        currentSession
+      );
 
       const response = await chrome.runtime.sendMessage({
         action: 'request_notes',
         videoDbId: videoDbId,
-        sessionId: currentSession
+        sessionId: currentSession,
       });
 
       // Check if session is still valid (user didn't navigate away)
       if (this.sessionId !== currentSession) {
-        console.log('[NoteLoader] ⚠️ Session invalidated (was', currentSession, 'now', this.sessionId, ')');
+        console.log(
+          '[NoteLoader] ⚠️ Session invalidated (was',
+          currentSession,
+          'now',
+          this.sessionId,
+          ')'
+        );
         throw new Error('Session invalidated');
       }
 
@@ -82,7 +93,7 @@ export class NoteLoader {
 
         console.log(`[NoteLoader] 🔄 Retry ${this.retryCount}/${this.maxRetries} in ${delay}ms`);
 
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, delay));
 
         // Verify session still valid before retrying
         if (this.sessionId === currentSession) {

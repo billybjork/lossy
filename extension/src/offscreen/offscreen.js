@@ -13,16 +13,19 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Offscreen received:', message);
 
   if (message.action === 'start_recording') {
-    startRecording().then(() => {
-      console.log('Offscreen: Recording started successfully');
-      sendResponse({ success: true });
-    }).catch(error => {
-      console.error('Offscreen: Failed to start recording:', error);
-      const errorMessage = error.name === 'NotAllowedError'
-        ? 'Microphone permission denied. Please grant permission when prompted.'
-        : error.message || String(error);
-      sendResponse({ success: false, error: errorMessage });
-    });
+    startRecording()
+      .then(() => {
+        console.log('Offscreen: Recording started successfully');
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('Offscreen: Failed to start recording:', error);
+        const errorMessage =
+          error.name === 'NotAllowedError'
+            ? 'Microphone permission denied. Please grant permission when prompted.'
+            : error.message || String(error);
+        sendResponse({ success: false, error: errorMessage });
+      });
     return true; // Keep channel open for async response
   }
 
@@ -38,12 +41,12 @@ async function startRecording() {
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
-        channelCount: 1,  // Mono
-        sampleRate: 16000,  // 16kHz for Whisper
+        channelCount: 1, // Mono
+        sampleRate: 16000, // 16kHz for Whisper
         echoCancellation: true,
         noiseSuppression: true,
-        autoGainControl: true
-      }
+        autoGainControl: true,
+      },
     });
 
     // Prefer WebM/Opus for OpenAI Whisper API
@@ -53,7 +56,7 @@ async function startRecording() {
 
     mediaRecorder = new MediaRecorder(stream, {
       mimeType: mimeType,
-      audioBitsPerSecond: 16000
+      audioBitsPerSecond: 16000,
     });
 
     recordedChunks = [];
@@ -63,12 +66,12 @@ async function startRecording() {
         console.log('Audio chunk available:', event.data.size, 'bytes');
 
         // Convert Blob to ArrayBuffer and send to service worker
-        event.data.arrayBuffer().then(buffer => {
+        event.data.arrayBuffer().then((buffer) => {
           chrome.runtime.sendMessage({
             action: 'audio_chunk',
             data: Array.from(new Uint8Array(buffer)),
             mimeType: mimeType,
-            size: buffer.byteLength
+            size: buffer.byteLength,
           });
         });
       }
@@ -80,14 +83,13 @@ async function startRecording() {
 
     mediaRecorder.onstop = () => {
       console.log('MediaRecorder stopped');
-      stream.getTracks().forEach(track => track.stop());
+      stream.getTracks().forEach((track) => track.stop());
     };
 
     // Start recording with 1-second chunks
     // (Balance between latency and efficiency)
     mediaRecorder.start(1000);
     console.log('Recording started');
-
   } catch (error) {
     console.error('Failed to start recording:', error);
     throw error;

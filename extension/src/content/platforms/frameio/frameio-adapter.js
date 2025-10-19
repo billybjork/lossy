@@ -65,7 +65,9 @@ export class FrameioAdapter extends BasePlatformAdapter {
     const videoId = FrameioVideoId.extract(url);
 
     if (!videoId) {
-      console.warn('[FrameioAdapter] Could not extract Frame.io video ID, falling back to URL hash');
+      console.warn(
+        '[FrameioAdapter] Could not extract Frame.io video ID, falling back to URL hash'
+      );
       // Fallback to generic URL hash
       return VideoIdGenerator.generate(url);
     }
@@ -73,7 +75,7 @@ export class FrameioAdapter extends BasePlatformAdapter {
     return {
       type: 'platform',
       id: videoId,
-      platform: 'frameio'
+      platform: 'frameio',
     };
   }
 
@@ -96,7 +98,7 @@ export class FrameioAdapter extends BasePlatformAdapter {
     const controls = document.querySelector('[data-testid="advanced-player-controls"]');
     if (controls) {
       // Look for horizontal bar elements within controls (progress bars are horizontal)
-      const candidates = Array.from(controls.querySelectorAll('*')).filter(el => {
+      const candidates = Array.from(controls.querySelectorAll('*')).filter((el) => {
         const rect = el.getBoundingClientRect();
         // Progress bars are wide and short (width > height * 5)
         return rect.width > 100 && rect.width > rect.height * 5;
@@ -164,7 +166,9 @@ export class FrameioAdapter extends BasePlatformAdapter {
     }
 
     // Fallback to player container
-    const playerContainer = document.querySelector('[role="contentinfo"][aria-label="Media Player"]');
+    const playerContainer = document.querySelector(
+      '[role="contentinfo"][aria-label="Media Player"]'
+    );
     if (playerContainer) {
       return playerContainer;
     }

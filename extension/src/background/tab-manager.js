@@ -122,13 +122,15 @@ export class TabManager {
     }
 
     // Notify side panel to sync to this tab
-    chrome.runtime.sendMessage({
-      action: 'tab_changed',
-      tabId: tabId,
-      videoContext: context
-    }).catch(() => {
-      // Side panel may not be open, that's OK
-    });
+    chrome.runtime
+      .sendMessage({
+        action: 'tab_changed',
+        tabId: tabId,
+        videoContext: context,
+      })
+      .catch(() => {
+        // Side panel may not be open, that's OK
+      });
   }
 
   setVideoContext(tabId, videoContext) {
@@ -136,7 +138,7 @@ export class TabManager {
     this.tabVideoMap.set(tabId, {
       ...videoContext,
       recordingState: existing?.recordingState || 'idle',
-      lastUpdated: Date.now() // Track when context was set
+      lastUpdated: Date.now(), // Track when context was set
     });
     this.persist();
     console.log('[TabManager] Video context set for tab', tabId);
@@ -177,16 +179,23 @@ export class TabManager {
       }, 10000); // 10s grace period
 
       // Tell content script to clear timeline markers
-      chrome.tabs.sendMessage(tabId, {
-        action: 'clear_markers'
-      }).catch(err => {
-        console.log('[TabManager] Could not send clear_markers (content script may not be loaded yet):', err);
-      });
+      chrome.tabs
+        .sendMessage(tabId, {
+          action: 'clear_markers',
+        })
+        .catch((err) => {
+          console.log(
+            '[TabManager] Could not send clear_markers (content script may not be loaded yet):',
+            err
+          );
+        });
 
       // DON'T send clear_ui here - the content script will handle it
       // The content script has smart logic to only clear when the video actually changes
       // (see universal.js lines 100-111)
-      console.log('[TabManager] Context marked as stale - content script will handle UI clearing if needed');
+      console.log(
+        '[TabManager] Context marked as stale - content script will handle UI clearing if needed'
+      );
     }
   }
 
@@ -215,8 +224,9 @@ export class TabManager {
     }
 
     // Persist to session storage
-    chrome.storage.session.set({ recording_tab_id: tabId })
-      .catch(err => console.error('[TabManager] Failed to persist recording state:', err));
+    chrome.storage.session
+      .set({ recording_tab_id: tabId })
+      .catch((err) => console.error('[TabManager] Failed to persist recording state:', err));
 
     console.log('[TabManager] Recording started on tab', tabId);
   }
@@ -235,8 +245,9 @@ export class TabManager {
     }
 
     // Clear from session storage
-    chrome.storage.session.remove('recording_tab_id')
-      .catch(err => console.error('[TabManager] Failed to clear recording state:', err));
+    chrome.storage.session
+      .remove('recording_tab_id')
+      .catch((err) => console.error('[TabManager] Failed to clear recording state:', err));
 
     console.log('[TabManager] Recording stopped on tab', tabId);
   }
@@ -252,7 +263,7 @@ export class TabManager {
   getAllTabs() {
     return Array.from(this.tabVideoMap.entries()).map(([tabId, context]) => ({
       tabId,
-      ...context
+      ...context,
     }));
   }
 

@@ -21,7 +21,7 @@ export class VideoLifecycleManager {
       persistentDetectionInterval: options.persistentDetectionInterval || 5000,
       persistentDetectionMaxAttempts: options.persistentDetectionMaxAttempts || 20,
       signal: options.signal, // AbortSignal for cleanup
-      ...options
+      ...options,
     };
 
     // Setup AbortSignal listener if provided
@@ -98,7 +98,8 @@ export class VideoLifecycleManager {
       }
 
       // All checks passed (only log occasionally to reduce noise)
-      if (Math.random() < 0.1) { // Log 10% of the time
+      if (Math.random() < 0.1) {
+        // Log 10% of the time
         console.log('[VideoLifecycle] 🏥 Health check passed');
       }
     }, this.options.healthCheckInterval);
@@ -112,7 +113,9 @@ export class VideoLifecycleManager {
 
     this.persistentDetectionInterval = setInterval(async () => {
       attempts++;
-      console.log(`[VideoLifecycle] 🔄 Persistent detection attempt ${attempts}/${this.options.persistentDetectionMaxAttempts}`);
+      console.log(
+        `[VideoLifecycle] 🔄 Persistent detection attempt ${attempts}/${this.options.persistentDetectionMaxAttempts}`
+      );
 
       if (attempts >= this.options.persistentDetectionMaxAttempts) {
         console.error('[VideoLifecycle] ❌ Persistent detection failed after max attempts');
@@ -177,7 +180,7 @@ export class VideoLifecycleManager {
   }
 
   notifyStateChange(event, data) {
-    this.stateChangeCallbacks.forEach(cb => {
+    this.stateChangeCallbacks.forEach((cb) => {
       try {
         cb(event, data);
       } catch (err) {

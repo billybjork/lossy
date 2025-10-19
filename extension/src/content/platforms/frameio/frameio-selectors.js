@@ -4,11 +4,7 @@
  */
 export const FrameioSelectors = {
   // Video element selectors
-  VIDEO: [
-    '[data-testid="video-player"]',
-    '[data-player="main"]',
-    'video'
-  ],
+  VIDEO: ['[data-testid="video-player"]', '[data-player="main"]', 'video'],
 
   // Progress bar/timeline selectors
   // We need the container that holds the timeline, not the interaction layer
@@ -26,13 +22,8 @@ export const FrameioSelectors = {
   ],
 
   // Player container selectors
-  PLAYER_CONTAINER: [
-    '[data-testid="media-viewer"]',
-    '[data-testid="advanced-player-controls"]'
-  ],
+  PLAYER_CONTAINER: ['[data-testid="media-viewer"]', '[data-testid="advanced-player-controls"]'],
 
   // Controls container
-  CONTROLS: [
-    '[data-testid="advanced-player-controls"]'
-  ]
+  CONTROLS: ['[data-testid="advanced-player-controls"]'],
 };

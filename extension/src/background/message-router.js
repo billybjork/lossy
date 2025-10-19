@@ -51,14 +51,20 @@ export class MessageRouter {
   routeToSidePanel(message, sourceTabId) {
     // Filter: Only route messages from the currently active tab
     if (this.activePanelTabId !== sourceTabId) {
-      console.log('[MessageRouter] Filtering message from tab', sourceTabId, '(active:', this.activePanelTabId, ')');
+      console.log(
+        '[MessageRouter] Filtering message from tab',
+        sourceTabId,
+        '(active:',
+        this.activePanelTabId,
+        ')'
+      );
       return false;
     }
 
     console.log('[MessageRouter] Routing message to side panel from tab', sourceTabId);
 
     // Forward to side panel
-    chrome.runtime.sendMessage(message).catch(err => {
+    chrome.runtime.sendMessage(message).catch((err) => {
       // Side panel may not be open, that's OK
       console.log('[MessageRouter] Side panel not reachable:', err.message);
     });

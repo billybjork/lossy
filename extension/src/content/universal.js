@@ -20,7 +20,9 @@ let extensionContextInvalidated = (() => {
 })();
 
 if (extensionContextInvalidated) {
-  console.log('[Lossy] 🔴 Extension context is already invalidated on load - this content script is orphaned');
+  console.log(
+    '[Lossy] 🔴 Extension context is already invalidated on load - this content script is orphaned'
+  );
 }
 
 // Wrap all chrome.runtime calls to detect invalidation
@@ -34,7 +36,9 @@ const safeRuntimeSendMessage = async (message) => {
     return await chrome.runtime.sendMessage(message);
   } catch (err) {
     if (err.message?.includes('Extension context invalidated')) {
-      console.log('[Lossy] 🔴 Extension context invalidated - content script is orphaned. Please reload the page.');
+      console.log(
+        '[Lossy] 🔴 Extension context invalidated - content script is orphaned. Please reload the page.'
+      );
       extensionContextInvalidated = true;
       // Cleanup to stop all activity
       cleanup();
@@ -114,7 +118,7 @@ async function init() {
   if (shouldClearUI) {
     console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
     safeRuntimeSendMessage({
-      action: 'clear_ui'
+      action: 'clear_ui',
     }).catch(() => {
       console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
     });
@@ -174,9 +178,9 @@ async function onVideoReady(videoElement) {
       platform: videoIdData.platform,
       videoId: videoIdData.id,
       url: window.location.href,
-      title: document.title
-    }
-  }).catch(err => {
+      title: document.title,
+    },
+  }).catch((err) => {
     console.warn('[Lossy] ⚠️ Could not send video_detected message:', err);
     return null;
   });
@@ -234,14 +238,14 @@ function interceptHistoryApi() {
 
   // Intercept pushState
   const originalPushState = history.pushState;
-  history.pushState = function(...args) {
+  history.pushState = function (...args) {
     originalPushState.apply(this, args);
     checkUrlChange();
   };
 
   // Intercept replaceState
   const originalReplaceState = history.replaceState;
-  history.replaceState = function(...args) {
+  history.replaceState = function (...args) {
     originalReplaceState.apply(this, args);
     checkUrlChange();
   };
@@ -287,14 +291,14 @@ function loadMarkersFromNotes(notes) {
   let added = 0;
   let skipped = 0;
 
-  notes.forEach(note => {
+  notes.forEach((note) => {
     if (note.timestamp_seconds != null) {
       const hadPending = timelineMarkers.pendingMarkers.length;
       timelineMarkers.addMarker({
         id: note.id,
         timestamp: note.timestamp_seconds,
         category: note.category,
-        text: note.text
+        text: note.text,
       });
       const nowPending = timelineMarkers.pendingMarkers.length;
 
@@ -311,7 +315,14 @@ function loadMarkersFromNotes(notes) {
     }
   });
 
-  console.log('[Lossy] 📍 LOAD_MARKERS: Results - Added:', added, 'Queued:', queued, 'Skipped:', skipped);
+  console.log(
+    '[Lossy] 📍 LOAD_MARKERS: Results - Added:',
+    added,
+    'Queued:',
+    queued,
+    'Skipped:',
+    skipped
+  );
   return added > 0 || queued > 0;
 }
 
@@ -342,7 +353,11 @@ function retryTimelineMarkersSetup(videoElement, attempt) {
   const delays = [500, 1000, 2000, 3000, 5000]; // Exponential backoff
 
   if (attempt >= maxAttempts) {
-    console.error('[Lossy] ❌ Failed to find progress bar after', maxAttempts, 'attempts. Timeline markers disabled.');
+    console.error(
+      '[Lossy] ❌ Failed to find progress bar after',
+      maxAttempts,
+      'attempts. Timeline markers disabled.'
+    );
     return;
   }
 
@@ -372,7 +387,7 @@ function createTimelineMarkers(videoElement, progressBar) {
     console.log('[Lossy] 📍 Timeline marker clicked:', noteId, timestamp);
     safeRuntimeSendMessage({
       action: 'marker_clicked',
-      data: { noteId, timestamp }
+      data: { noteId, timestamp },
     }).catch(() => {});
   });
 
@@ -380,7 +395,11 @@ function createTimelineMarkers(videoElement, progressBar) {
 
   // If we had pending notes waiting for timeline markers, load them now
   if (pendingNotesForMarkers && pendingNotesForMarkers.length > 0) {
-    console.log('[Lossy] 🎯 Timeline markers ready, loading', pendingNotesForMarkers.length, 'pending notes');
+    console.log(
+      '[Lossy] 🎯 Timeline markers ready, loading',
+      pendingNotesForMarkers.length,
+      'pending notes'
+    );
     loadMarkersFromNotes(pendingNotesForMarkers);
     pendingNotesForMarkers = null;
   }
@@ -392,11 +411,12 @@ function createTimelineMarkers(videoElement, progressBar) {
 
   // Request notes ONCE with automatic deduplication and retry
   if (currentVideoDbId) {
-    noteLoader.loadNotes(currentVideoDbId)
+    noteLoader
+      .loadNotes(currentVideoDbId)
       .then(() => {
         console.log('[Lossy] Notes loaded successfully via NoteLoader');
       })
-      .catch(err => {
+      .catch((err) => {
         console.error('[Lossy] Failed to load notes after all retries:', err);
       });
   }
@@ -416,31 +436,34 @@ function listenForEvents() {
   messageListenerHandler = (message, sender, sendResponse) => {
     if (message.action === 'recording_started') {
       // Handle async operation properly
-      videoController.getCurrentTime().then(timestamp => {
-        console.log('[Lossy] Recording started at timestamp:', timestamp);
+      videoController
+        .getCurrentTime()
+        .then((timestamp) => {
+          console.log('[Lossy] Recording started at timestamp:', timestamp);
 
-        videoController.pause();
+          videoController.pause();
 
-        if (anchorChip) {
-          anchorChip.show(timestamp);
-        }
-
-        // Store timestamp globally for later use
-        safeRuntimeSendMessage({
-          action: 'timestamp_captured',
-          data: {
-            videoId: currentVideoId,
-            videoDbId: currentVideoDbId,
-            timestamp: timestamp
+          if (anchorChip) {
+            anchorChip.show(timestamp);
           }
-        }).catch(() => {});
 
-        // Return timestamp directly in response
-        sendResponse({ success: true, timestamp: timestamp });
-      }).catch(err => {
-        console.error('[Lossy] Error getting timestamp:', err);
-        sendResponse({ success: false, error: err.message });
-      });
+          // Store timestamp globally for later use
+          safeRuntimeSendMessage({
+            action: 'timestamp_captured',
+            data: {
+              videoId: currentVideoId,
+              videoDbId: currentVideoDbId,
+              timestamp: timestamp,
+            },
+          }).catch(() => {});
+
+          // Return timestamp directly in response
+          sendResponse({ success: true, timestamp: timestamp });
+        })
+        .catch((err) => {
+          console.error('[Lossy] Error getting timestamp:', err);
+          sendResponse({ success: false, error: err.message });
+        });
       return true; // Keep channel open for async response
     }
 
@@ -470,7 +493,7 @@ function listenForEvents() {
           id: message.data.id,
           timestamp: message.data.timestamp_seconds,
           category: message.data.category,
-          text: message.data.text
+          text: message.data.text,
         });
       } else {
         console.warn('[Lossy] ⚠️ NOTE_CREATED: Missing timestamp for note:', message.data.id);
@@ -498,12 +521,17 @@ function listenForEvents() {
       }
 
       if (!timelineMarkers) {
-        console.warn('[Lossy] ⚠️ LOAD_MARKERS: Timeline markers not initialized yet, storing notes for later...');
+        console.warn(
+          '[Lossy] ⚠️ LOAD_MARKERS: Timeline markers not initialized yet, storing notes for later...'
+        );
 
         // Store notes for when timeline markers become ready
         pendingNotesForMarkers = message.notes;
 
-        sendResponse({ success: false, error: 'Timeline markers initializing, notes stored for retry' });
+        sendResponse({
+          success: false,
+          error: 'Timeline markers initializing, notes stored for retry',
+        });
         return false;
       }
 
@@ -535,23 +563,36 @@ function listenForEvents() {
     }
 
     if (message.action === 'get_current_timestamp') {
-      console.log('[Lossy] get_current_timestamp request received, videoController:', videoController);
+      console.log(
+        '[Lossy] get_current_timestamp request received, videoController:',
+        videoController
+      );
       if (videoController) {
-        videoController.getCurrentTime().then(timestamp => {
-          // Check if video duration is available (not NaN or 0)
-          // This helps detect platform limitations like YouTube Shorts lazy-loading
-          const duration = videoController.getDuration();
-          const isTimecodeUnavailable = !duration || isNaN(duration);
+        videoController
+          .getCurrentTime()
+          .then((timestamp) => {
+            // Check if video duration is available (not NaN or 0)
+            // This helps detect platform limitations like YouTube Shorts lazy-loading
+            const duration = videoController.getDuration();
+            const isTimecodeUnavailable = !duration || isNaN(duration);
 
-          console.log('[Lossy] Sending timestamp:', timestamp, 'duration:', duration, 'unavailable:', isTimecodeUnavailable);
-          sendResponse({
-            timestamp: timestamp,
-            timecodeUnavailable: isTimecodeUnavailable
+            console.log(
+              '[Lossy] Sending timestamp:',
+              timestamp,
+              'duration:',
+              duration,
+              'unavailable:',
+              isTimecodeUnavailable
+            );
+            sendResponse({
+              timestamp: timestamp,
+              timecodeUnavailable: isTimecodeUnavailable,
+            });
+          })
+          .catch((err) => {
+            console.error('[Lossy] Error getting timestamp:', err);
+            sendResponse({ timestamp: null, timecodeUnavailable: true });
           });
-        }).catch(err => {
-          console.error('[Lossy] Error getting timestamp:', err);
-          sendResponse({ timestamp: null, timecodeUnavailable: true });
-        });
       } else {
         console.log('[Lossy] No videoController, sending null');
         sendResponse({ timestamp: null, timecodeUnavailable: true });
@@ -573,13 +614,15 @@ function listenForEvents() {
       cleanup();
 
       // Re-run initialization
-      init().then(() => {
-        console.log('[Lossy] ✅ RE_INITIALIZE: Re-initialization complete');
-        sendResponse({ success: true });
-      }).catch(err => {
-        console.error('[Lossy] ❌ RE_INITIALIZE: Failed to re-initialize:', err);
-        sendResponse({ success: false, error: err.message });
-      });
+      init()
+        .then(() => {
+          console.log('[Lossy] ✅ RE_INITIALIZE: Re-initialization complete');
+          sendResponse({ success: true });
+        })
+        .catch((err) => {
+          console.error('[Lossy] ❌ RE_INITIALIZE: Failed to re-initialize:', err);
+          sendResponse({ success: false, error: err.message });
+        });
 
       return true; // Will respond asynchronously
     }
