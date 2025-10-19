@@ -451,6 +451,9 @@ The generic adapter uses pure heuristics (video element detection, progress bar 
 - **Dropbox** (dropbox.com) - Standard HTML5 video playback
 - **Dropbox Replay** (replay.dropbox.com) - Video review platform with timeline markers
 - **Filestage** (app.filestage.io) - Video review and approval platform with timeline markers
+- **Krock** (krock.io) - Video review and approval platform with timeline markers
+- **ReviewStudio** (reviewstudio.com) - Video review and approval platform with timeline markers
+- **Ziflow** (ziflow.io) - Video review and approval platform with timeline markers
 
 ### Testing Notes
 - Generic adapter successfully detects video elements using visual heuristics
@@ -464,6 +467,15 @@ Consider creating a platform-specific adapter when:
 - Platform uses non-standard video controls or custom players
 - Need platform-specific features (e.g., extracting platform video IDs, SPA navigation hooks)
 - Timeline marker injection requires special container or positioning logic
+
+## Platform-Specific Adapters
+
+### Iconik (iconik.io)
+- **Status**: Partial - Timeline markers visible but partially clipped
+- **Known Limitation**: Markers are clipped at edges due to Iconik's CSS containment hierarchy that cannot be fully overridden from the adapter level
+- **Workaround Attempted**: Setting `overflow-y: visible !important` on progress bar and parent containers
+- **Potential Fix**: Portal pattern (attach markers to `document.body` with fixed positioning) would require changes to shared `TimelineMarkers` class
+- **Current Functionality**: Video detection works, progress bar found, markers are positioned correctly but may be clipped at top/bottom edges
 
 ---
 
