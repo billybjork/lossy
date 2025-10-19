@@ -1,7 +1,8 @@
 # Sprint 06: Platform-Specific Video Adapters
 
-**Status:** 📝 Planned
-**Estimated Duration:** 3-4 days
+**Status:** ✅ Completed
+**Duration:** 3 days
+**Completion Date:** October 19, 2025
 **Priority:** High
 
 ---
@@ -470,12 +471,68 @@ Consider creating a platform-specific adapter when:
 
 ## Platform-Specific Adapters
 
+### TikTok (tiktok.com)
+- **Status**: ✅ Fully Working
+- **Implementation**: Dedicated adapter with aggressive z-index and overflow fixes
+- **Key Features**:
+  - TikTok-specific DOM selectors for CSS-in-JS class names (DivSeekBarContainer, DivVideoSwiperControlContainer)
+  - Video ID extraction from `/video/[ID]` URLs
+  - Multi-level parent container overflow fixes (walks up 5 levels)
+  - Shadow DOM style injection for marker visibility
+  - Ultra-high z-index (999999) to overcome TikTok's complex UI layering
+  - MutationObserver to watch for marker container creation
+- **Challenges Solved**: TikTok's CSS-in-JS with dynamic class names, complex z-index stacking, CSS containment clipping
+- **Commit**: `eca51e2`
+
 ### Iconik (iconik.io)
 - **Status**: Partial - Timeline markers visible but partially clipped
 - **Known Limitation**: Markers are clipped at edges due to Iconik's CSS containment hierarchy that cannot be fully overridden from the adapter level
 - **Workaround Attempted**: Setting `overflow-y: visible !important` on progress bar and parent containers
 - **Potential Fix**: Portal pattern (attach markers to `document.body` with fixed positioning) would require changes to shared `TimelineMarkers` class
 - **Current Functionality**: Video detection works, progress bar found, markers are positioned correctly but may be clipped at top/bottom edges
+
+---
+
+## Sprint Completion Summary
+
+**Completed:** October 19, 2025
+**Duration:** 3 days
+
+### Delivered
+✅ **Core Architecture**
+- Plugin-based adapter pattern with `BasePlatformAdapter` interface
+- Platform registry for automatic adapter selection
+- Separation of universal (`core/`) and platform-specific (`platforms/`) code
+
+✅ **Platform Adapters Implemented**
+- YouTube (video detection, SPA hooks, timeline markers)
+- Frame.io (custom video player support)
+- Vimeo (timeline positioning fixes)
+- Air.inc (overflow visibility fixes)
+- Wipster (heuristic-based progress bar detection)
+- Iconik (multi-view support with partial marker clipping)
+- **TikTok (full support with aggressive visibility fixes)**
+- Generic fallback adapter (works on most HTML5 video sites)
+
+✅ **Generic Adapter Compatibility**
+- Confirmed working on: Dropbox, Dropbox Replay, Filestage, Krock, ReviewStudio, Ziflow
+- Robust fallback for unknown platforms
+
+### Key Achievements
+- **Clean Architecture**: Platform-specific code isolated in separate adapters
+- **Extensibility**: New platforms can be added without modifying core code
+- **Reliability**: Platform-specific optimizations + generic fallback
+- **TikTok Support**: Solved complex CSS-in-JS and z-index stacking challenges
+
+### Lessons Learned
+- Z-index alone isn't sufficient for complex platforms - need multi-level overflow fixes
+- CSS-in-JS platforms require pattern matching on class name fragments
+- Shadow DOM style injection necessary for isolated marker visibility
+- MutationObserver pattern effective for dynamic marker container creation
+
+### Technical Debt
+- Iconik markers still partially clipped (would require portal pattern in shared TimelineMarkers)
+- Some adapters could benefit from more specific selectors as platforms evolve
 
 ---
 
