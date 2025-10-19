@@ -26,8 +26,13 @@
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
 | [07 - Auto Posting](./SPRINT_07_auto_posting.md) | ⏳ Planned | Browserbase automation + Oban workers | 3-5 days |
-| [08 - Auth](./SPRINT_08_auth.md) | ⏳ Future | User authentication & multi-user support | 2-3 days |
-| [09 - Polish](./SPRINT_09_polish.md) | ⏳ Future | On-video overlays + UX refinements | 3-4 days |
+
+### Planned Sprints (Not Yet Scheduled)
+
+| Sprint | Goal | Duration |
+|--------|------|----------|
+| [TBD - Auth](./planned/SPRINT_TBD_auth.md) | User authentication & multi-user support | 2-3 days |
+| [TBD - Polish](./planned/SPRINT_TBD_polish.md) | UX polish & animations | 3-4 days |
 
 ### Completed Sprints
 

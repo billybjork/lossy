@@ -102,8 +102,8 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - **[Sprint 02](./sprints/SPRINT_02_transcription.md)**: ⏳ OpenAI Whisper + GPT-4o structuring
 - **[Sprint 03](./sprints/SPRINT_03_video_integration.md)**: ⏳ Video timestamp anchoring
 - **[Sprint 07](./sprints/SPRINT_07_auto_posting.md)**: ⏳ Browserbase automation
-- **[Sprint 08](./sprints/SPRINT_08_auth.md)**: ⏳ Authentication (Future)
-- **[Sprint 09](./sprints/SPRINT_09_polish.md)**: ⏳ UX polish (Future)
+- **[Sprint TBD](./sprints/planned/SPRINT_TBD_auth.md)**: ⏳ Authentication (Planned)
+- **[Sprint TBD](./sprints/planned/SPRINT_TBD_polish.md)**: ⏳ UX polish (Planned)
 
 **See:** [sprints/README.md](./sprints/README.md) for current status and sprint system overview
 

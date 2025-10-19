@@ -1219,6 +1219,6 @@ See [05_BROWSERBASE_INTEGRATION.md](../05_BROWSERBASE_INTEGRATION.md) for:
 
 ## Next Sprint
 
-👉 [Sprint 08 - Authentication](./SPRINT_08_auth.md)
+👉 [Sprint TBD - Authentication](./planned/SPRINT_TBD_auth.md)
 
 **Focus:** Add user authentication, multi-user support, token-based auth for LiveView

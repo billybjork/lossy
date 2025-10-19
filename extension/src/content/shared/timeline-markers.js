@@ -18,6 +18,15 @@ export class TimelineMarkers {
     this.progressBarObserver = null;
     this.resizeObserver = null;
     this.options = options;
+    this.pendingProcessTimer = null;
+    this.durationWatcherAttached = false;
+
+    this.cleanupFunctions.push(() => {
+      if (this.pendingProcessTimer) {
+        clearTimeout(this.pendingProcessTimer);
+        this.pendingProcessTimer = null;
+      }
+    });
 
     // Setup AbortSignal listener if provided
     if (this.options.signal) {
@@ -196,6 +205,13 @@ export class TimelineMarkers {
    * Process any markers that were queued while waiting for video to be ready.
    */
   processPendingMarkers() {
+    if (!this.hasUsableDuration()) {
+      console.log('[TimelineMarkers] ⏳ Duration still unavailable, keeping', this.pendingMarkers.length, 'markers pending');
+      this.waitForUsableDuration();
+      this.schedulePendingProcessing(200);
+      return;
+    }
+
     if (this.pendingMarkers.length === 0) {
       console.log('[TimelineMarkers] ℹ️ No pending markers to process');
       return;
@@ -217,19 +233,23 @@ export class TimelineMarkers {
       return;
     }
 
-    const duration = this.videoElement.duration;
-
     // If video isn't ready yet, queue this marker for later
-    if (!this.videoReady || !duration || isNaN(duration) || duration === 0) {
+    if (!this.videoReady || !this.hasUsableDuration()) {
       console.log(
         '[TimelineMarkers] ⏳ Video not ready, queuing marker:',
         id,
         'timestamp:',
         timestamp
       );
-      this.pendingMarkers.push({ id, timestamp, category, text });
+      this.queuePendingMarker({ id, timestamp, category, text });
+      if (this.videoReady) {
+        this.waitForUsableDuration();
+        this.schedulePendingProcessing(100);
+      }
       return;
     }
+
+    const duration = this.videoElement.duration;
 
     // Validate timestamp
     if (timestamp > duration) {
@@ -302,6 +322,17 @@ export class TimelineMarkers {
       marker.remove();
       this.markers.delete(noteId);
     }
+
+    // Ensure marker cannot be resurrected
+    if (this.markerData.has(noteId)) {
+      this.markerData.delete(noteId);
+    }
+
+    if (this.pendingMarkers.length > 0) {
+      this.pendingMarkers = this.pendingMarkers.filter((markerData) => markerData.id !== noteId);
+    }
+
+    console.log('[TimelineMarkers] ✅ Marker removed:', noteId);
   }
 
   highlightMarker(noteId) {
@@ -457,6 +488,11 @@ export class TimelineMarkers {
     });
     this.cleanupFunctions = [];
 
+    if (this.pendingProcessTimer) {
+      clearTimeout(this.pendingProcessTimer);
+      this.pendingProcessTimer = null;
+    }
+
     // Remove DOM elements
     if (this.container) {
       this.container.remove();
@@ -469,7 +505,64 @@ export class TimelineMarkers {
     this.pendingMarkers = [];
     this.shadowRoot = null;
     this.clickCallback = null;
+    this.durationWatcherAttached = false;
 
     console.log('[TimelineMarkers] ✅ Destroyed');
+  }
+
+  hasUsableDuration() {
+    const duration = this.videoElement.duration;
+    return Number.isFinite(duration) && duration > 0;
+  }
+
+  queuePendingMarker(markerData) {
+    this.pendingMarkers = this.pendingMarkers.filter((marker) => marker.id !== markerData.id);
+    this.pendingMarkers.push(markerData);
+  }
+
+  schedulePendingProcessing(delay = 0) {
+    if (this.pendingProcessTimer) {
+      return;
+    }
+
+    this.pendingProcessTimer = setTimeout(() => {
+      this.pendingProcessTimer = null;
+      if (!this.videoReady || this.pendingMarkers.length === 0) {
+        return;
+      }
+
+      if (!this.hasUsableDuration()) {
+        this.waitForUsableDuration();
+        this.schedulePendingProcessing(200);
+        return;
+      }
+
+      this.processPendingMarkers();
+    }, delay);
+  }
+
+  waitForUsableDuration() {
+    if (this.durationWatcherAttached) {
+      return;
+    }
+
+    const checkDuration = () => {
+      if (this.hasUsableDuration()) {
+        this.durationWatcherAttached = false;
+        this.videoElement.removeEventListener('timeupdate', checkDuration);
+        this.videoElement.removeEventListener('loadeddata', checkDuration);
+        this.processPendingMarkers();
+      }
+    };
+
+    this.durationWatcherAttached = true;
+    this.videoElement.addEventListener('timeupdate', checkDuration);
+    this.videoElement.addEventListener('loadeddata', checkDuration);
+
+    this.cleanupFunctions.push(() => {
+      this.videoElement.removeEventListener('timeupdate', checkDuration);
+      this.videoElement.removeEventListener('loadeddata', checkDuration);
+      this.durationWatcherAttached = false;
+    });
   }
 }

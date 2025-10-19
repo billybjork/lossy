@@ -326,6 +326,30 @@ function loadMarkersFromNotes(notes) {
   return added > 0 || queued > 0;
 }
 
+function enqueuePendingNote(note) {
+  if (!note || note.timestamp_seconds == null) {
+    return;
+  }
+
+  if (!pendingNotesForMarkers) {
+    pendingNotesForMarkers = [];
+  }
+
+  const normalized = {
+    id: note.id,
+    timestamp_seconds: note.timestamp_seconds,
+    category: note.category,
+    text: note.text,
+  };
+
+  const existingIndex = pendingNotesForMarkers.findIndex((pending) => pending.id === note.id);
+  if (existingIndex >= 0) {
+    pendingNotesForMarkers[existingIndex] = normalized;
+  } else {
+    pendingNotesForMarkers.push(normalized);
+  }
+}
+
 // attemptLoadMarkersWithRetry removed - consolidated into NoteLoader
 
 function setupTimelineMarkers(videoElement) {
@@ -483,8 +507,18 @@ function listenForEvents() {
       console.log('[Lossy] 📍 NOTE_CREATED: Adding new timeline marker:', message.data);
 
       if (!timelineMarkers) {
-        console.warn('[Lossy] ⚠️ NOTE_CREATED: Timeline markers not initialized');
-        sendResponse({ success: false, error: 'Timeline markers not initialized' });
+        console.warn(
+          '[Lossy] ⚠️ NOTE_CREATED: Timeline markers not initialized, storing for later'
+        );
+
+        if (message.data.timestamp_seconds != null) {
+          enqueuePendingNote(message.data);
+        }
+
+        sendResponse({
+          success: false,
+          error: 'Timeline markers not initialized, note stored for retry',
+        });
         return false;
       }
 
@@ -526,7 +560,8 @@ function listenForEvents() {
         );
 
         // Store notes for when timeline markers become ready
-        pendingNotesForMarkers = message.notes;
+        pendingNotesForMarkers = [];
+        message.notes.forEach((note) => enqueuePendingNote(note));
 
         sendResponse({
           success: false,

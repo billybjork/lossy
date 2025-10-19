@@ -1,4 +1,4 @@
-# Sprint 08: Authentication
+# Sprint TBD: Authentication
 
 **Status:** ⏳ Future
 **Estimated Duration:** 2-3 days
@@ -48,7 +48,7 @@ Extensions have origin `chrome-extension://EXTENSION_ID`, which creates issues w
 - Extension storage encrypted at OS level
 - 30-day expiry with refresh support
 
-See `docs/04_LIVEVIEW_PATTERNS.md` for complete patterns.
+See `../../04_LIVEVIEW_PATTERNS.md` for complete patterns.
 
 ---
 
@@ -811,12 +811,12 @@ Phoenix.PubSub.broadcast(
 
 ## Reference Documentation
 
-- **03_LIVEVIEW_PATTERNS.md** - Complete auth patterns with LiveView
-- **02_ARCHITECTURE.md** - Token flow and PubSub topics
+- **../../04_LIVEVIEW_PATTERNS.md** - Complete auth patterns with LiveView
+- **../../03_ARCHITECTURE.md** - Token flow and PubSub topics
 - **Phoenix.Token docs** - https://hexdocs.pm/phoenix/Phoenix.Token.html
 
 ---
 
 ## Next Sprint
 
-👉 [Sprint 09 - Polish & UX](./SPRINT_09_polish.md)
+👉 [Sprint TBD - Polish & UX](./SPRINT_TBD_polish.md)
