@@ -16,6 +16,9 @@ let currentTimestamp = null;
 let tabManager = null;
 let messageRouter = null;
 
+// Track side panel state per window: windowId → port
+const openPanels = new Map();
+
 // Initialize TabManager and MessageRouter
 (async () => {
   tabManager = new TabManager();
@@ -44,6 +47,53 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   if (messageRouter) {
     messageRouter.unsubscribeFromTab(tabId);
   }
+});
+
+// Track side panel open/close via port connections
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name !== 'sidepanel') return;
+
+  console.log('[ServiceWorker] Side panel connected');
+
+  // Get the window ID from the sender
+  // Since side panel doesn't have a tab, we need to find the active window
+  chrome.windows.getCurrent((window) => {
+    const windowId = window.id;
+    console.log('[ServiceWorker] Side panel opened for window:', windowId);
+
+    // Store the port
+    openPanels.set(windowId, port);
+
+    // Notify all tabs in this window that panel is open
+    chrome.tabs.query({ windowId }, (tabs) => {
+      tabs.forEach((tab) => {
+        chrome.tabs
+          .sendMessage(tab.id, { action: 'panel_opened' })
+          .catch(() => {
+            // Silently ignore tabs without content script
+          });
+      });
+    });
+
+    // Listen for disconnect (panel closed)
+    port.onDisconnect.addListener(() => {
+      console.log('[ServiceWorker] Side panel disconnected for window:', windowId);
+
+      // Remove from tracking
+      openPanels.delete(windowId);
+
+      // Notify all tabs in this window that panel is closed
+      chrome.tabs.query({ windowId }, (tabs) => {
+        tabs.forEach((tab) => {
+          chrome.tabs
+            .sendMessage(tab.id, { action: 'panel_closed' })
+            .catch(() => {
+              // Silently ignore tabs without content script
+            });
+        });
+      });
+    });
+  });
 });
 
 // Extension installed
@@ -257,6 +307,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const context = tabManager ? tabManager.getActiveVideoContext() : null;
     sendResponse({ context });
     return false;
+  }
+
+  // Check if side panel is open (from content script on initialization)
+  if (message.action === 'is_panel_open') {
+    const tabId = sender.tab?.id;
+    if (!tabId) {
+      sendResponse({ isOpen: false });
+      return false;
+    }
+
+    // Get window ID for this tab
+    chrome.tabs.get(tabId, (tab) => {
+      const isOpen = openPanels.has(tab.windowId);
+      sendResponse({ isOpen });
+    });
+    return true; // Will respond asynchronously
   }
 
   // Trigger video detection on current tab (from side panel when no context)

@@ -415,6 +415,18 @@ function createTimelineMarkers(videoElement, progressBar) {
     }).catch(() => {});
   });
 
+  // Check if panel is already open and show markers if it is
+  safeRuntimeSendMessage({ action: 'is_panel_open' })
+    .then((response) => {
+      if (response?.isOpen) {
+        console.log('[Lossy] 👁️ Panel already open, showing timeline markers');
+        timelineMarkers.show();
+      }
+    })
+    .catch(() => {
+      console.log('[Lossy] Could not check panel state');
+    });
+
   console.log('[Lossy] 🎯 Timeline markers setup complete');
 
   // If we had pending notes waiting for timeline markers, load them now
@@ -633,6 +645,24 @@ function listenForEvents() {
         sendResponse({ timestamp: null, timecodeUnavailable: true });
       }
       return true; // Will respond asynchronously
+    }
+
+    // Side panel opened - show timeline markers
+    if (message.action === 'panel_opened') {
+      console.log('[Lossy] 👁️ Side panel opened - showing timeline markers');
+      if (timelineMarkers) {
+        timelineMarkers.show();
+      }
+      return false;
+    }
+
+    // Side panel closed - hide timeline markers
+    if (message.action === 'panel_closed') {
+      console.log('[Lossy] 🙈 Side panel closed - hiding timeline markers');
+      if (timelineMarkers) {
+        timelineMarkers.hide();
+      }
+      return false;
     }
 
     // Ping check for content script presence (used by programmatic injection)

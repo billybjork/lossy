@@ -20,6 +20,7 @@ export class TimelineMarkers {
     this.options = options;
     this.pendingProcessTimer = null;
     this.durationWatcherAttached = false;
+    this.isVisible = false; // Start hidden, show when panel opens
 
     this.cleanupFunctions.push(() => {
       if (this.pendingProcessTimer) {
@@ -67,6 +68,16 @@ export class TimelineMarkers {
     this.shadowRoot = this.container.attachShadow({ mode: 'open' });
     this.shadowRoot.innerHTML = `
       <style>
+        #markers-container {
+          width: 100%;
+          height: 100%;
+        }
+
+        #markers-container.hidden {
+          display: none;
+          pointer-events: none;
+        }
+
         .marker {
           position: absolute;
           top: 50%;
@@ -122,7 +133,7 @@ export class TimelineMarkers {
           margin-right: 6px;
         }
       </style>
-      <div id="markers-container"></div>
+      <div id="markers-container" class="hidden"></div>
     `;
 
     // Append to progress bar (make relative if needed)
@@ -468,6 +479,34 @@ export class TimelineMarkers {
     this.pendingMarkers = [];
 
     console.log('[TimelineMarkers] ✅ All markers cleared');
+  }
+
+  /**
+   * Show timeline markers (when side panel opens).
+   */
+  show() {
+    if (this.isVisible) return;
+
+    const markersContainer = this.shadowRoot?.getElementById('markers-container');
+    if (markersContainer) {
+      markersContainer.classList.remove('hidden');
+      this.isVisible = true;
+      console.log('[TimelineMarkers] 👁️ Markers visible');
+    }
+  }
+
+  /**
+   * Hide timeline markers (when side panel closes).
+   */
+  hide() {
+    if (!this.isVisible) return;
+
+    const markersContainer = this.shadowRoot?.getElementById('markers-container');
+    if (markersContainer) {
+      markersContainer.classList.add('hidden');
+      this.isVisible = false;
+      console.log('[TimelineMarkers] 🙈 Markers hidden');
+    }
   }
 
   truncate(text, maxLength) {

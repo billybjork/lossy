@@ -893,6 +893,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
+// Open persistent connection to notify service worker that panel is open
+// This allows the service worker to track panel state and notify content scripts
+const panelPort = chrome.runtime.connect({ name: 'sidepanel' });
+console.log('[SidePanel] Opened connection to service worker');
+
+// Handle port disconnection (if needed in the future)
+panelPort.onDisconnect.addListener(() => {
+  console.log('[SidePanel] Port disconnected');
+});
+
 // Initialize
 init();
 updateUI();
