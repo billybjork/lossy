@@ -37,8 +37,22 @@ defmodule LossyWeb.AudioChannel do
 
   # Handle audio chunks from extension
   @impl true
+  def handle_in("audio_chunk", %{"data" => audio_data}, socket) when is_list(audio_data) do
+    # Convert array to binary (most common case - from JS Array)
+    audio_binary = :binary.list_to_bin(audio_data)
+
+    Logger.debug("Received audio chunk: #{byte_size(audio_binary)} bytes (from array)")
+
+    # Send to AgentSession
+    Lossy.Agent.Session.cast_audio(socket.assigns.session_id, audio_binary)
+
+    {:noreply, socket}
+  end
+
+  @impl true
   def handle_in("audio_chunk", %{"data" => audio_data}, socket) when is_map(audio_data) do
     # Convert map with string keys to binary (JSON serialization artifact)
+    # This handles the case where Phoenix.js serializes Uint8Array as object
     audio_list =
       audio_data
       |> Enum.sort_by(fn {k, _v} -> String.to_integer(k) end)
@@ -46,7 +60,7 @@ defmodule LossyWeb.AudioChannel do
 
     audio_binary = :binary.list_to_bin(audio_list)
 
-    Logger.debug("Received audio chunk: #{byte_size(audio_binary)} bytes")
+    Logger.debug("Received audio chunk: #{byte_size(audio_binary)} bytes (from map)")
 
     # Send to AgentSession
     Lossy.Agent.Session.cast_audio(socket.assigns.session_id, audio_binary)
@@ -56,7 +70,7 @@ defmodule LossyWeb.AudioChannel do
 
   @impl true
   def handle_in("audio_chunk", %{"data" => audio_data}, socket) when is_binary(audio_data) do
-    Logger.debug("Received audio chunk: #{byte_size(audio_data)} bytes")
+    Logger.debug("Received audio chunk: #{byte_size(audio_data)} bytes (from binary)")
 
     # Send to AgentSession
     Lossy.Agent.Session.cast_audio(socket.assigns.session_id, audio_data)

@@ -72,9 +72,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   // Handle audio chunks from offscreen document
   if (message.action === 'audio_chunk' && sender.url?.includes('offscreen.html')) {
     if (audioChannel) {
-      // Send binary audio to Phoenix
-      const audioData = new Uint8Array(message.data);
-      audioChannel.push('audio_chunk', { data: audioData })
+      // Send binary audio to Phoenix as plain Array (not Uint8Array)
+      // Phoenix.js doesn't properly serialize Uint8Array, so keep it as Array
+      audioChannel.push('audio_chunk', { data: message.data })
         .receive('ok', () => console.log('Audio chunk sent'))
         .receive('error', (err) => console.error('Failed to send chunk:', err));
     }
