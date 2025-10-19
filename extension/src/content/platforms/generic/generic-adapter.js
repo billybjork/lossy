@@ -7,6 +7,17 @@ import { VideoIdGenerator } from '../../core/video-id-generator.js';
  * Generic fallback adapter - works on any video site.
  * Uses pure heuristics with no platform-specific selectors.
  * This is the catch-all adapter when no platform-specific adapter matches.
+ *
+ * Known Compatible Platforms:
+ * - Dropbox (dropbox.com) - Standard HTML5 video playback
+ * - Dropbox Replay (replay.dropbox.com) - Video review platform with timeline markers
+ *
+ * This adapter uses:
+ * - Generic video element detection (VideoDetector)
+ * - Progress bar pattern matching (ProgressBarFinder)
+ * - URL-based video ID generation (VideoIdGenerator)
+ *
+ * @see docs/sprints/SPRINT_06_platform_adapters.md for full compatibility list
  */
 export class GenericAdapter extends BasePlatformAdapter {
   static get platformId() {

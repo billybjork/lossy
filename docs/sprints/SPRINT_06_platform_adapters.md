@@ -443,6 +443,29 @@ export const YouTubeSelectors = {
 
 ---
 
+## Generic Adapter Compatibility
+
+The generic adapter uses pure heuristics (video element detection, progress bar pattern matching) and works well on many platforms without requiring a dedicated adapter. This is a list of platforms that have been tested and confirmed to work with the generic adapter:
+
+### Confirmed Working
+- **Dropbox** (dropbox.com) - Standard HTML5 video playback
+- **Dropbox Replay** (replay.dropbox.com) - Video review platform with timeline markers
+
+### Testing Notes
+- Generic adapter successfully detects video elements using visual heuristics
+- Progress bar detection works when platforms use standard HTML5 controls or detectable progress bar patterns
+- Timeline markers may or may not appear depending on progress bar availability
+- Platforms with custom video players or non-standard controls may require dedicated adapters
+
+### When to Create a Dedicated Adapter
+Consider creating a platform-specific adapter when:
+- Video detection fails or is unreliable with generic heuristics
+- Platform uses non-standard video controls or custom players
+- Need platform-specific features (e.g., extracting platform video IDs, SPA navigation hooks)
+- Timeline marker injection requires special container or positioning logic
+
+---
+
 ## Future Enhancements (Post-Sprint)
 
 - **Platform Auto-Detection Improvements**: ML-based video element scoring

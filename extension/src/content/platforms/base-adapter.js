@@ -3,6 +3,14 @@ import { VideoController } from '../video-controller.js';
 /**
  * Base adapter class - all platform adapters extend this.
  * Defines the interface for platform-specific video detection and control.
+ *
+ * This is an ABSTRACT BASE CLASS / INTERFACE - do not instantiate directly.
+ * Instead, create concrete implementations by extending this class:
+ * - YouTubeAdapter (platforms/youtube/) - YouTube-specific logic
+ * - FrameioAdapter (platforms/frameio/) - Frame.io-specific logic
+ * - GenericAdapter (platforms/generic/) - Fallback for all other platforms
+ *
+ * Concrete adapters must implement all abstract methods (those that throw errors).
  */
 export class BasePlatformAdapter {
   /**
@@ -137,7 +145,7 @@ export class BasePlatformAdapter {
       subtree: true,
       attributes: true,
       attributeFilter: ['src', 'currentSrc'],
-      attributeOldValue: true
+      attributeOldValue: true,
     });
 
     this._changeObserver = observer;
