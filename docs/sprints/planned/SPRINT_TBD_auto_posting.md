@@ -1,4 +1,4 @@
-# Sprint 07: Automated Note Posting with Browserbase
+# Sprint TBD: Automated Note Posting with Browserbase
 
 **Status:** ⏳ Planned
 **Estimated Duration:** 3-5 days

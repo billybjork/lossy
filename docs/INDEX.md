@@ -101,7 +101,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - **[Sprint 01](./sprints/SPRINT_01_audio_streaming.md)**: 🚧 Audio capture + Phoenix Channels (In Progress)
 - **[Sprint 02](./sprints/SPRINT_02_transcription.md)**: ⏳ OpenAI Whisper + GPT-4o structuring
 - **[Sprint 03](./sprints/SPRINT_03_video_integration.md)**: ⏳ Video timestamp anchoring
-- **[Sprint 07](./sprints/SPRINT_07_auto_posting.md)**: ⏳ Browserbase automation
+- **[Sprint TBD](./sprints/planned/SPRINT_TBD_auto_posting.md)**: ⏳ Browserbase automation (Planned)
 - **[Sprint TBD](./sprints/planned/SPRINT_TBD_auth.md)**: ⏳ Authentication (Planned)
 - **[Sprint TBD](./sprints/planned/SPRINT_TBD_polish.md)**: ⏳ UX polish (Planned)
 
