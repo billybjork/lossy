@@ -10,8 +10,6 @@
  * - Self-test for performance validation
  */
 
-import { shouldUseLocalStt } from '../shared/settings.js';
-
 const MODEL_NAME = 'Xenova/whisper-tiny.en';
 const MIN_MEMORY_MB = 150; // Whisper Tiny minimum memory requirement
 
@@ -27,7 +25,8 @@ let loadPromise = null;
  * Checks:
  * - WebGPU availability
  * - Available memory (heuristic)
- * - User preference from settings
+ *
+ * Note: User preference (STT mode) is passed from service worker, not checked here.
  *
  * @returns {Promise<Object>} Capabilities result
  */
@@ -42,7 +41,6 @@ export async function detectCapabilities() {
     estimatedMemoryMB: 0,
     device: 'wasm',
     dtype: 'int8',
-    userPreference: await shouldUseLocalStt(),
     canUseLocal: false,
   };
 
@@ -79,11 +77,11 @@ export async function detectCapabilities() {
     console.log('[WhisperLoader] Memory API unavailable, using conservative estimate');
   }
 
-  // Determine if local transcription is feasible
+  // Determine if local transcription is feasible (hardware only)
+  // User preference is checked separately in offscreen.js using mode from service worker
   const hasEnoughMemory = capabilities.estimatedMemoryMB >= MIN_MEMORY_MB;
 
-  capabilities.canUseLocal =
-    capabilities.userPreference && hasEnoughMemory && (capabilities.webgpu || capabilities.wasm);
+  capabilities.canUseLocal = hasEnoughMemory && (capabilities.webgpu || capabilities.wasm);
 
   console.log('[WhisperLoader] Capabilities:', capabilities);
 
