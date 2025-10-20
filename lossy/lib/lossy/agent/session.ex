@@ -25,6 +25,10 @@ defmodule Lossy.Agent.Session do
     GenServer.cast(via_tuple(session_id), :stop_recording)
   end
 
+  def handle_transcript(session_id, text, opts \\ []) do
+    GenServer.cast(via_tuple(session_id), {:transcript_ready, text, opts})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -92,6 +96,28 @@ defmodule Lossy.Agent.Session do
     {:noreply, transition_to(state, :transcribing)}
   end
 
+  # Sprint 07: Handle client-supplied transcript
+  @impl true
+  def handle_cast({:transcript_ready, text, opts}, state) do
+    source = Keyword.get(opts, :source, :local)
+
+    Logger.info(
+      "[#{state.session_id}] Received #{source} transcript: #{String.slice(text, 0..50)}..."
+    )
+
+    # Broadcast that we received the transcript
+    broadcast_event(state.session_id, %{
+      type: :transcript_ready,
+      text: text,
+      source: source
+    })
+
+    # Move to structuring (skip transcription since we already have text)
+    structure_note(state, text, source: source, opts: opts)
+
+    {:noreply, %{state | status: :structuring}}
+  end
+
   # State Transitions
 
   defp transition_to(%{status: :listening} = state, :transcribing) do
@@ -130,20 +156,27 @@ defmodule Lossy.Agent.Session do
   # Async Work
 
   defp transcribe_audio(state) do
+    Logger.info("[#{state.session_id}] Starting cloud transcription (#{byte_size(state.audio_buffer)} bytes)")
+    start_time = System.monotonic_time(:millisecond)
+
     case Cloud.transcribe_audio(state.audio_buffer) do
       {:ok, transcript_text} ->
+        transcription_time = System.monotonic_time(:millisecond) - start_time
+
         Logger.info(
-          "[#{state.session_id}] Transcription complete: #{String.slice(transcript_text, 0..50)}..."
+          "[#{state.session_id}] Cloud transcription complete in #{transcription_time}ms: #{String.slice(transcript_text, 0..50)}..."
         )
 
         # Broadcast transcript
         broadcast_event(state.session_id, %{
           type: :transcript_ready,
-          text: transcript_text
+          text: transcript_text,
+          source: :cloud,
+          transcription_time_ms: transcription_time
         })
 
         # Now structure the note
-        structure_note(state, transcript_text)
+        structure_note(state, transcript_text, source: :cloud, transcription_time_ms: transcription_time)
 
       {:error, reason} ->
         Logger.error("[#{state.session_id}] Transcription failed: #{inspect(reason)}")
@@ -155,10 +188,14 @@ defmodule Lossy.Agent.Session do
     end
   end
 
-  defp structure_note(state, transcript_text) do
+  defp structure_note(state, transcript_text, keyword_opts) do
+    source = Keyword.get(keyword_opts, :source, :cloud)
+
     case Cloud.structure_note(transcript_text) do
       {:ok, structured_note} ->
-        Logger.info("[#{state.session_id}] Note structured: #{inspect(structured_note)}")
+        Logger.info(
+          "[#{state.session_id}] Note structured (source: #{source}): #{inspect(structured_note)}"
+        )
 
         # Store in database
         {:ok, note} =
@@ -176,7 +213,8 @@ defmodule Lossy.Agent.Session do
         # Broadcast final result
         broadcast_event(state.session_id, %{
           type: :note_created,
-          note: note
+          note: note,
+          source: source
         })
 
         # Also broadcast to video topic

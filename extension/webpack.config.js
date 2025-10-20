@@ -16,6 +16,10 @@ module.exports = (env, argv) => {
       filename: '[name].js',
     },
     devtool: isDev ? 'inline-source-map' : false,
+    // Enable WebAssembly and async modules for Transformers.js
+    experiments: {
+      asyncWebAssembly: true,
+    },
     module: {
       rules: [
         {
@@ -32,6 +36,18 @@ module.exports = (env, argv) => {
           { from: 'public', to: '', noErrorOnMissing: true, globOptions: { dot: true, ignore: ['**/.gitkeep'] } },
           { from: 'src/sidepanel/sidepanel.html', to: 'sidepanel.html' },
           { from: 'src/offscreen/offscreen.html', to: 'offscreen.html' },
+          // Copy ONNX Runtime WASM files for local bundling (Chrome MV3 requirement)
+          // Chrome extensions cannot load remotely hosted code from CDNs
+          {
+            from: 'node_modules/onnxruntime-web/dist/*.wasm',
+            to: 'onnx/[name][ext]',
+            noErrorOnMissing: false,
+          },
+          {
+            from: 'node_modules/onnxruntime-web/dist/*.mjs',
+            to: 'onnx/[name][ext]',
+            noErrorOnMissing: false,
+          },
         ],
       }),
     ],

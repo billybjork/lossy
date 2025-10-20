@@ -20,6 +20,13 @@ end
 config :lossy,
   openai_api_key: System.get_env("OPENAI_API_KEY")
 
+# Local STT (Speech-to-Text) Configuration
+# Sprint 07: Hybrid local/cloud transcription
+# When true (default), accepts client-supplied transcripts from browser-side Whisper
+# When false, always uses cloud Whisper API
+config :lossy,
+  local_stt_enabled: System.get_env("LOCAL_STT_ENABLED", "true") == "true"
+
 # ## Using releases
 #
 # If you use `mix release`, you need to explicitly enable the server

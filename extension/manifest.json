@@ -11,7 +11,7 @@
   ],
 
   "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' ws://localhost:4000 wss://localhost:4000"
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' ws://localhost:4000 wss://localhost:4000 https://huggingface.co https://cdn-lfs.huggingface.co https://*.huggingface.co https://*.hf.co"
   },
 
   "side_panel": {
@@ -36,7 +36,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["dist/*"],
+      "resources": ["dist/*", "onnx/*"],
       "matches": ["<all_urls>"]
     }
   ]

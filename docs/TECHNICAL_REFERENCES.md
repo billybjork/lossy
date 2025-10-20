@@ -1,12 +1,116 @@
 # Technical References
 
-**Last Updated:** 2025-10-14
+**Last Updated:** 2025-10-20
 
 ---
 
 ## Overview
 
 This document contains essential code patterns and technical details extracted from research. Reference these when implementing Phases 6-7 (WASM inference, CLIP emoji tokens).
+
+---
+
+## 0. Chrome Extension Manifest V3 CSP Requirements for Transformers.js
+
+### The Problem
+
+Chrome Manifest V3 extensions **cannot load remotely hosted code from CDNs**. This causes Transformers.js to fail when trying to load ONNX Runtime WASM files from `https://cdn.jsdelivr.net`:
+
+```
+Failed to fetch dynamically imported module: https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.7.5/dist/ort-wasm-simd-threaded.jsep.mjs
+```
+
+Even adding CDN URLs to `content_security_policy.script-src` results in "Insecure CSP value" errors, as MV3 only permits: `'self'`, `'wasm-unsafe-eval'`, and `'none'`.
+
+### The Solution: Bundle WASM Files Locally
+
+#### 1. Webpack Configuration
+
+Copy ONNX Runtime WASM files from `node_modules` to your extension's dist folder:
+
+```javascript
+// webpack.config.js
+const CopyPlugin = require('copy-webpack-plugin');
+
+module.exports = {
+  plugins: [
+    new CopyPlugin({
+      patterns: [
+        // Copy ONNX Runtime WASM files for local bundling
+        {
+          from: 'node_modules/onnxruntime-web/dist/*.wasm',
+          to: 'onnx/[name][ext]',
+        },
+        {
+          from: 'node_modules/onnxruntime-web/dist/*.mjs',
+          to: 'onnx/[name][ext]',
+        },
+      ],
+    }),
+  ],
+};
+```
+
+#### 2. Configure Transformers.js to Use Local WASM
+
+```javascript
+// offscreen/whisper-loader.js (or wherever you load Transformers.js)
+const { pipeline, env } = await import('@huggingface/transformers');
+
+// CRITICAL: Point to bundled local WASM files
+env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('onnx/');
+
+// Required workaround for Chrome extension threading bug
+env.backends.onnx.wasm.numThreads = 1;
+
+console.log('[WhisperLoader] ONNX Runtime configured for local WASM:', env.backends.onnx.wasm.wasmPaths);
+```
+
+#### 3. Manifest.json Configuration
+
+**CSP (Content Security Policy):**
+```json
+{
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; connect-src 'self' ws://localhost:4000 https://huggingface.co https://cdn-lfs.huggingface.co https://*.huggingface.co https://*.hf.co"
+  }
+}
+```
+
+**Notes:**
+- `'wasm-unsafe-eval'` is **required** for WebAssembly execution
+- No CDN URLs in `script-src` (MV3 disallows them)
+- HuggingFace URLs in `connect-src` are still needed to download model weights
+- **DO NOT** include `https://cdn.jsdelivr.net` in `script-src`
+
+**Web Accessible Resources:**
+```json
+{
+  "web_accessible_resources": [
+    {
+      "resources": ["dist/*", "onnx/*"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
+```
+
+#### 4. Required WASM Files (Bundled Size)
+
+After webpack build, you'll have:
+- `onnx/ort-wasm-simd-threaded.jsep.wasm` (20.6 MB) - WebGPU version
+- `onnx/ort-wasm-simd-threaded.jsep.mjs` (43 KB) - WebGPU module loader
+- `onnx/ort-wasm-simd-threaded.wasm` (10.6 MB) - WASM fallback
+- `onnx/ort-wasm-simd-threaded.mjs` (20 KB) - WASM module loader
+- Various `ort.*.mjs` helper modules
+
+**Total bundled size:** ~32 MB of WASM files (acceptable for Chrome Web Store)
+
+### References
+
+- Issue #1248: Transformers.js in chrome extension fails to execute remote code
+- Issue #839: Extension rejected from Chrome Web Store for "including remotely hosted code"
+- Medium: "🤗 Transformers.js + ONNX Runtime WebGPU in Chrome extension" by Wei Lu
 
 ---
 
@@ -548,9 +652,114 @@ const model = await SiglipVisionModel.from_pretrained(
 
 ---
 
+## 12. Sprint 07: Local Transcription Feature Flags
+
+### Manual Override Procedure
+
+#### Extension Settings (Client-Side)
+
+The extension stores the local STT preference in `chrome.storage.local`:
+
+```javascript
+import { setLocalSttMode, LOCAL_STT_MODES } from './src/shared/settings.js';
+
+// Default: Auto (try local, fall back to cloud)
+await setLocalSttMode(LOCAL_STT_MODES.AUTO);
+
+// Force local only (fail if unavailable)
+await setLocalSttMode(LOCAL_STT_MODES.FORCE_LOCAL);
+
+// Force cloud only (bypass local)
+await setLocalSttMode(LOCAL_STT_MODES.FORCE_CLOUD);
+```
+
+**Via DevTools Console (chrome-extension context):**
+```javascript
+// Get current settings
+chrome.storage.local.get('settings', (result) => console.log(result));
+
+// Force cloud transcription
+chrome.storage.local.set({
+  settings: {
+    features: {
+      localSttEnabled: 'force_cloud'
+    }
+  }
+});
+
+// Reset to auto
+chrome.storage.local.set({
+  settings: {
+    features: {
+      localSttEnabled: 'auto'
+    }
+  }
+});
+```
+
+#### Backend Configuration (Server-Side)
+
+Add to `.env` file (in repo root):
+
+```bash
+# Local STT Configuration
+# Set to "false" to disable local transcription server-side
+# Default: "true" (accepts client-supplied transcripts)
+LOCAL_STT_ENABLED=true
+```
+
+**Production Override:**
+```bash
+# Disable local STT in production
+LOCAL_STT_ENABLED=false mix phx.server
+```
+
+**Runtime Check (IEx):**
+```elixir
+# Check if local STT is enabled
+Application.get_env(:lossy, :local_stt_enabled)
+# => true
+
+# Temporarily disable (does not persist)
+Application.put_env(:lossy, :local_stt_enabled, false)
+```
+
+### Debugging Local Transcription
+
+**Enable verbose logging in offscreen document:**
+```javascript
+// In extension/src/offscreen/offscreen.js
+localStorage.setItem('debug_whisper', 'true');
+
+// Disable
+localStorage.removeItem('debug_whisper');
+```
+
+**Check transcription source in backend logs:**
+```bash
+# Backend will log:
+[info] [session_abc123] Transcription source: :local
+[info] [session_abc123] Transcription source: :cloud
+```
+
+**Monitor circuit breaker state:**
+```elixir
+# In IEx console
+alias Lossy.Inference.CircuitBreaker
+
+# Check failure count for a device
+CircuitBreaker.get_failure_count("device_fingerprint_xyz")
+
+# Reset circuit breaker
+CircuitBreaker.reset("device_fingerprint_xyz")
+```
+
+---
+
 ## When to Reference This Document
 
-- **Phase 6 (Week 7-8)**: Implementing WASM Whisper transcription
+- **Sprint 07 (Current)**: Implementing local Whisper transcription with cloud fallback
 - **Phase 7 (Future)**: Adding CLIP emoji token generation
 - **Performance tuning**: When optimizing inference speed
-- **Debugging**: WebGPU/WASM fallback issues
+- **Debugging**: WebGPU/WASM fallback issues, local/cloud routing
+- **Feature flag management**: Enabling/disabling local STT

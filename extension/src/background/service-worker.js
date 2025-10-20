@@ -134,6 +134,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false; // No async response needed
   }
 
+  // Sprint 07: Handle transcription status updates from offscreen
+  if (message.action === 'transcription_status' && sender.url?.includes('offscreen.html')) {
+    // Forward status to side panel for UI updates
+    chrome.runtime.sendMessage(message).catch(() => {
+      // Silently ignore if side panel not open
+    });
+    return false;
+  }
+
+  // Sprint 07: Handle transcript from local transcription
+  if (message.action === 'transcript_final' && sender.url?.includes('offscreen.html')) {
+    console.log('[Lossy] Local transcript received:', message.text.substring(0, 50) + '...');
+
+    if (audioChannel) {
+      audioChannel
+        .push('transcript_final', {
+          text: message.text,
+          source: message.source,
+          chunks: message.chunks,
+          durationSeconds: message.durationSeconds,
+          transcriptionTimeMs: message.transcriptionTimeMs,
+        })
+        .receive('ok', () => {
+          console.log('[Lossy] Local transcript sent to backend');
+        })
+        .receive('error', (err) => {
+          console.error('[Lossy] Failed to send transcript:', err);
+        });
+    }
+    return false;
+  }
+
+  // Sprint 07: Handle local transcription fallback
+  if (message.action === 'transcript_fallback_required' && sender.url?.includes('offscreen.html')) {
+    console.warn('[Lossy] Local transcription failed, cloud fallback:', message.reason);
+
+    // Notify side panel of fallback
+    chrome.runtime.sendMessage({
+      action: 'transcription_status',
+      stage: 'fallback',
+      source: 'cloud',
+      reason: message.reason,
+    }).catch(() => {});
+
+    if (!message.canFallback) {
+      console.error('[Lossy] Cloud fallback disabled by user settings');
+      // TODO: Show error to user in side panel
+    }
+
+    // Backend will use buffered audio for cloud transcription
+    return false;
+  }
+
   // Handle responses from offscreen document
   if (
     (message.action === 'start_recording' || message.action === 'stop_recording') &&
@@ -639,18 +692,34 @@ async function stopRecording() {
     .sendMessage(recordingTabId, { action: 'recording_stopped' })
     .catch((err) => console.log('[Lossy] No content script on this page'));
 
-  // 2. Stop audio capture
+  // 2. Stop audio capture and attempt local transcription
+  let localTranscriptSent = false;
+
   if (await hasOffscreenDocument()) {
-    chrome.runtime
-      .sendMessage({
+    try {
+      const offscreenResponse = await chrome.runtime.sendMessage({
         target: 'offscreen',
         action: 'stop_recording',
-      })
-      .catch((err) => console.error('Failed to stop offscreen recording:', err));
+      });
+
+      console.log('[Lossy] Offscreen stop response:', offscreenResponse);
+
+      // Check if local transcription was attempted and succeeded
+      if (offscreenResponse?.localTranscription && offscreenResponse?.success) {
+        console.log('[Lossy] Local transcription succeeded, transcript already sent to backend');
+        localTranscriptSent = true;
+        // Offscreen already sent transcript_final, backend will handle it
+        // Don't send stop_recording to backend - it would trigger cloud transcription
+      }
+    } catch (err) {
+      console.error('[Lossy] Failed to stop offscreen recording:', err);
+    }
   }
 
-  // 3. Tell backend to finalize transcription and wait for confirmation
-  if (audioChannel) {
+  // 3. Tell backend to finalize transcription ONLY if local transcription didn't happen
+  // If local transcript was sent, backend is already processing it
+  if (audioChannel && !localTranscriptSent) {
+    console.log('[Lossy] Sending stop_recording to backend (local transcript not available)');
     await new Promise((resolve) => {
       audioChannel
         .push('stop_recording', {})
@@ -667,6 +736,8 @@ async function stopRecording() {
           resolve();
         });
     });
+  } else if (localTranscriptSent) {
+    console.log('[Lossy] Skipping stop_recording to backend - local transcript already sent');
   }
 
   // 4. DON'T leave the channel yet - wait for note_created event

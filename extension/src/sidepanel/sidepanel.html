@@ -294,6 +294,91 @@
       color: #991b1b;
       transform: scale(1.05);
     }
+
+    /* Transcription Status (Sprint 07) */
+    .transcription-status {
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      background: #f3f4f6;
+      color: #374151;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .transcription-mode {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-weight: 600;
+    }
+
+    .mode-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    .mode-badge.local-webgpu {
+      background: #34d399;
+      color: #064e3b;
+    }
+
+    .mode-badge.local-wasm {
+      background: #60a5fa;
+      color: #1e3a8a;
+    }
+
+    .mode-badge.cloud {
+      background: #fbbf24;
+      color: #78350f;
+    }
+
+    .mode-badge.inactive {
+      background: #e5e7eb;
+      color: #6b7280;
+    }
+
+    .transcription-timing {
+      font-size: 11px;
+      color: #6b7280;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .mode-toggle {
+      margin-top: 4px;
+      display: flex;
+      gap: 4px;
+    }
+
+    .mode-toggle button {
+      flex: 1;
+      padding: 6px 12px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid #d1d5db;
+      background: white;
+      color: #6b7280;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+
+    .mode-toggle button:hover {
+      background: #f9fafb;
+      border-color: #9ca3af;
+    }
+
+    .mode-toggle button.active {
+      background: #3b82f6;
+      color: white;
+      border-color: #3b82f6;
+    }
   </style>
 </head>
 <body>
@@ -301,6 +386,20 @@
     <h1 style="margin: 0;">Voice Notes</h1>
     <div class="status" id="status">Loading...</div>
     <div class="video-timestamp" id="videoTimestamp">Video: --:--</div>
+
+    <!-- Transcription Status (Sprint 07) -->
+    <div class="transcription-status" id="transcriptionStatus">
+      <div class="transcription-mode">
+        <span id="modeLabel">Transcription:</span>
+        <span class="mode-badge inactive" id="modeBadge">INACTIVE</span>
+      </div>
+      <div class="transcription-timing" id="timingInfo">Ready</div>
+      <div class="mode-toggle">
+        <button id="modeAuto" class="active">Auto</button>
+        <button id="modeForceLocal">Force Local</button>
+        <button id="modeForceCloud">Force Cloud</button>
+      </div>
+    </div>
 
     <!-- Waveform visualization -->
     <div class="waveform-container" id="waveformContainer">

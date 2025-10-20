@@ -88,6 +88,46 @@ defmodule LossyWeb.AudioChannel do
     {:reply, {:ok, %{}}, socket}
   end
 
+  # Sprint 07: Handle client-supplied transcript (partial)
+  @impl true
+  def handle_in("transcript_partial", %{"text" => text} = payload, socket) do
+    Logger.debug("Partial transcript received: #{String.slice(text, 0..50)}...")
+
+    confidence = Map.get(payload, "confidence", 1.0)
+
+    # Broadcast to PubSub for LiveView progress (optional)
+    Phoenix.PubSub.broadcast(
+      Lossy.PubSub,
+      "session:#{socket.assigns.session_id}",
+      {:agent_event, %{type: :transcript_partial, text: text, confidence: confidence}}
+    )
+
+    {:noreply, socket}
+  end
+
+  # Sprint 07: Handle client-supplied transcript (final)
+  @impl true
+  def handle_in("transcript_final", payload, socket) do
+    text = Map.fetch!(payload, "text")
+    source = Map.get(payload, "source", "local")
+
+    Logger.info(
+      "Final transcript received (#{source}): #{String.slice(text, 0..50)}... (#{byte_size(text)} bytes)"
+    )
+
+    # Pass transcript to AgentSession
+    Lossy.Agent.Session.handle_transcript(
+      socket.assigns.session_id,
+      text,
+      source: String.to_atom(source),
+      chunks: Map.get(payload, "chunks", []),
+      duration_seconds: Map.get(payload, "durationSeconds"),
+      transcription_time_ms: Map.get(payload, "transcriptionTimeMs")
+    )
+
+    {:reply, {:ok, %{}}, socket}
+  end
+
   @impl true
   def handle_in("ping", _payload, socket) do
     {:reply, {:ok, %{pong: true}}, socket}

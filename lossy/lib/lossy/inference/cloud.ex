@@ -1,6 +1,8 @@
 defmodule Lossy.Inference.Cloud do
   @moduledoc """
   OpenAI API integration for Whisper transcription and GPT-4o-mini note structuring.
+
+  Sprint 07: Migrated from HTTPoison to Req for consistency.
   """
 
   require Logger
@@ -15,38 +17,46 @@ defmodule Lossy.Inference.Cloud do
   def transcribe_audio(audio_binary) when is_binary(audio_binary) do
     Logger.info("Transcribing audio with Whisper API (#{byte_size(audio_binary)} bytes)")
 
-    # Create multipart form data
-    boundary = "----WebKitFormBoundary#{:crypto.strong_rand_bytes(16) |> Base.encode16()}"
-
-    body =
-      build_multipart(
-        [
-          {"model", "whisper-1"},
-          {"file", audio_binary, "audio.webm", "audio/webm"},
-          {"language", "en"},
-          {"response_format", "json"}
-        ],
-        boundary
+    # Build multipart form using Multipart library (Req doesn't support binary file uploads directly)
+    multipart =
+      Multipart.new()
+      |> Multipart.add_part(Multipart.Part.text_field("whisper-1", "model"))
+      |> Multipart.add_part(Multipart.Part.text_field("en", "language"))
+      |> Multipart.add_part(Multipart.Part.text_field("json", "response_format"))
+      |> Multipart.add_part(
+        Multipart.Part.file_content_field("audio.webm", audio_binary, :file,
+          filename: "audio.webm"
+        )
       )
 
+    content_length = Multipart.content_length(multipart)
+    content_type = Multipart.content_type(multipart, "multipart/form-data")
+
     headers = [
-      {"Authorization", "Bearer #{get_api_key()}"},
-      {"Content-Type", "multipart/form-data; boundary=#{boundary}"}
+      {"authorization", "Bearer #{get_api_key()}"},
+      {"content-type", content_type},
+      {"content-length", to_string(content_length)}
     ]
 
-    case HTTPoison.post(@whisper_url, body, headers, recv_timeout: 30_000) do
-      {:ok, %{status_code: 200, body: response_body}} ->
-        response = Jason.decode!(response_body)
-        transcript = Map.get(response, "text", "")
+    response =
+      Req.post(@whisper_url,
+        headers: headers,
+        body: Multipart.body_stream(multipart),
+        receive_timeout: 30_000
+      )
+
+    case response do
+      {:ok, %{status: 200, body: body}} ->
+        transcript = Map.get(body, "text", "")
         {:ok, transcript}
 
-      {:ok, %{status_code: status, body: error_body}} ->
-        Logger.error("Whisper API error: #{status} - #{error_body}")
+      {:ok, %{status: status, body: body}} ->
+        Logger.error("Whisper API error: #{status} - #{inspect(body)}")
         {:error, "Whisper API error: #{status}"}
 
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        Logger.error("Whisper request failed: #{inspect(reason)}")
-        {:error, "Request failed: #{inspect(reason)}"}
+      {:error, exception} ->
+        Logger.error("Whisper request failed: #{inspect(exception)}")
+        {:error, "Request failed: #{inspect(exception)}"}
     end
   end
 
@@ -81,26 +91,6 @@ defmodule Lossy.Inference.Cloud do
       raise "OPENAI_API_KEY not configured"
   end
 
-  defp build_multipart(fields, boundary) do
-    parts =
-      Enum.map(fields, fn
-        {name, value} when is_binary(value) ->
-          # Text field - can use string interpolation
-          "--#{boundary}\r\nContent-Disposition: form-data; name=\"#{name}\"\r\n\r\n#{value}\r\n"
-
-        {name, data, filename, content_type} ->
-          # File field - must preserve binary data
-          header =
-            "--#{boundary}\r\nContent-Disposition: form-data; name=\"#{name}\"; filename=\"#{filename}\"\r\nContent-Type: #{content_type}\r\n\r\n"
-
-          # Concatenate as binaries to preserve audio data
-          [header, data, "\r\n"]
-      end)
-
-    # Flatten and concatenate all parts as binaries
-    IO.iodata_to_binary([parts, "--#{boundary}--\r\n"])
-  end
-
   defp build_structuring_prompt(transcript) do
     """
     You are a video feedback assistant. Convert this raw voice transcript into a clear, actionable note.
@@ -123,39 +113,39 @@ defmodule Lossy.Inference.Cloud do
   end
 
   defp call_openai_chat(prompt) do
-    headers = [
-      {"Authorization", "Bearer #{get_api_key()}"},
-      {"Content-Type", "application/json"}
-    ]
+    request_body = %{
+      model: "gpt-4o-mini",
+      messages: [
+        %{
+          role: "system",
+          content:
+            "You structure voice transcripts into actionable video feedback. Always respond with valid JSON."
+        },
+        %{role: "user", content: prompt}
+      ],
+      temperature: 0.3,
+      max_tokens: 150
+    }
 
-    body =
-      Jason.encode!(%{
-        model: "gpt-4o-mini",
-        messages: [
-          %{
-            role: "system",
-            content:
-              "You structure voice transcripts into actionable video feedback. Always respond with valid JSON."
-          },
-          %{role: "user", content: prompt}
-        ],
-        temperature: 0.3,
-        max_tokens: 150
-      })
+    response =
+      Req.post(@chat_url,
+        auth: {:bearer, get_api_key()},
+        json: request_body,
+        receive_timeout: 15_000
+      )
 
-    case HTTPoison.post(@chat_url, body, headers, recv_timeout: 15_000) do
-      {:ok, %{status_code: 200, body: response_body}} ->
-        response = Jason.decode!(response_body)
-        content = get_in(response, ["choices", Access.at(0), "message", "content"])
+    case response do
+      {:ok, %{status: 200, body: body}} ->
+        content = get_in(body, ["choices", Access.at(0), "message", "content"])
         {:ok, content}
 
-      {:ok, %{status_code: status, body: error_body}} ->
-        Logger.error("OpenAI Chat API error: #{status} - #{error_body}")
+      {:ok, %{status: status, body: body}} ->
+        Logger.error("OpenAI Chat API error: #{status} - #{inspect(body)}")
         {:error, "API error: #{status}"}
 
-      {:error, %HTTPoison.Error{reason: reason}} ->
-        Logger.error("OpenAI Chat request failed: #{inspect(reason)}")
-        {:error, "Request failed: #{inspect(reason)}"}
+      {:error, exception} ->
+        Logger.error("OpenAI Chat request failed: #{inspect(exception)}")
+        {:error, "Request failed: #{inspect(exception)}"}
     end
   end
 

@@ -1,15 +1,16 @@
 # Sprint Roadmap
 
 **Project:** Lossy - Voice-First Video Companion
-**Last Updated:** 2025-10-19
+**Last Updated:** 2025-10-20
 
 ---
 
 ## Current Status
 
-✅ **Latest Completed Sprint:** [Sprint 06 - Platform-Specific Video Adapters](./archive/SPRINT_06_platform_adapters.md)
-📅 **Completed:** 2025-10-19
-🎯 **Achievement:** Adapter architecture with TikTok, YouTube, Frame.io, Vimeo, Air, Wipster, and Iconik support
+🟢 **Active Sprint:** [Sprint 07 - Local Transcription](./SPRINT_07_local_transcription.md)
+📅 **Started:** 2025-10-20
+🎯 **Goal:** Browser-side Whisper transcription with automatic cloud fallback
+⏳ **Progress:** ~75% - Core implementation complete, cloud fallback validated, local transcription pending end-to-end test
 
 ---
 
@@ -19,7 +20,7 @@
 
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
-| None | - | - | - |
+| [07 - Local Transcription](./SPRINT_07_local_transcription.md) | 🟢 In Progress | Transformers.js Whisper Tiny with WebGPU + automatic cloud fallback | 3-4 days |
 
 ### Upcoming Sprints
 
@@ -117,7 +118,7 @@ Each sprint file contains:
 **Outcome:** Full UX, auth system, ready for real users
 
 ### Future Enhancements
-- WASM Whisper (local transcription)
-- CLIP emoji tokens (visual context)
+- CLIP emoji tokens / SigLIP frame embeddings (visual context)
 - Multi-note merging
 - Platform-specific optimizations
+- Advanced diarization / multi-speaker separation

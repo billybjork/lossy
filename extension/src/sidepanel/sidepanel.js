@@ -11,6 +11,8 @@
 //
 // See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
 
+import { getLocalSttMode, setLocalSttMode, LOCAL_STT_MODES } from '../shared/settings.js';
+
 console.log('Side panel loaded');
 
 let isRecording = false;
@@ -30,6 +32,13 @@ const waveformContainer = document.getElementById('waveformContainer');
 const statusEl = document.getElementById('status');
 const transcriptsEl = document.getElementById('transcripts');
 const videoTimestampEl = document.getElementById('videoTimestamp');
+
+// Sprint 07: Transcription status elements
+const modeBadge = document.getElementById('modeBadge');
+const timingInfo = document.getElementById('timingInfo');
+const modeAutoBtn = document.getElementById('modeAuto');
+const modeForceLocalBtn = document.getElementById('modeForceLocal');
+const modeForceCloudBtn = document.getElementById('modeForceCloud');
 
 // Initialize LiveWaveform
 const waveformCanvas = document.getElementById('waveformCanvas');
@@ -952,3 +961,85 @@ function updateTranscriptEmptyState() {
   const isEmpty = transcriptsEl.childElementCount === 0;
   transcriptsEl.classList.toggle('is-empty', isEmpty);
 }
+
+// Sprint 07: Transcription Mode Management
+async function initTranscriptionMode() {
+  // Load current mode using settings helper
+  const mode = await getLocalSttMode();
+
+  // Update UI to reflect current mode
+  updateModeButtons(mode);
+}
+
+function updateModeButtons(mode) {
+  modeAutoBtn.classList.toggle('active', mode === LOCAL_STT_MODES.AUTO);
+  modeForceLocalBtn.classList.toggle('active', mode === LOCAL_STT_MODES.FORCE_LOCAL);
+  modeForceCloudBtn.classList.toggle('active', mode === LOCAL_STT_MODES.FORCE_CLOUD);
+
+  // Update timingInfo to show current configuration
+  if (mode === LOCAL_STT_MODES.AUTO) {
+    timingInfo.textContent = 'Auto: Local with cloud fallback';
+  } else if (mode === LOCAL_STT_MODES.FORCE_LOCAL) {
+    timingInfo.textContent = 'Forced: Local transcription only';
+  } else if (mode === LOCAL_STT_MODES.FORCE_CLOUD) {
+    timingInfo.textContent = 'Forced: Cloud transcription only';
+  }
+}
+
+async function setTranscriptionMode(mode) {
+  await setLocalSttMode(mode);
+  updateModeButtons(mode);
+  console.log('[SidePanel] Transcription mode set to:', mode);
+}
+
+// Mode toggle handlers
+modeAutoBtn.addEventListener('click', () => setTranscriptionMode(LOCAL_STT_MODES.AUTO));
+modeForceLocalBtn.addEventListener('click', () => setTranscriptionMode(LOCAL_STT_MODES.FORCE_LOCAL));
+modeForceCloudBtn.addEventListener('click', () => setTranscriptionMode(LOCAL_STT_MODES.FORCE_CLOUD));
+
+// Listen for transcription status updates from service worker/offscreen
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'transcription_status') {
+    updateTranscriptionStatus(message);
+  }
+});
+
+function updateTranscriptionStatus(status) {
+  const { source, device, timingMs, stage } = status;
+
+  // Update badge based on source and device
+  if (stage === 'started') {
+    if (source === 'local') {
+      if (device === 'webgpu') {
+        modeBadge.textContent = 'LOCAL (WebGPU)';
+        modeBadge.className = 'mode-badge local-webgpu';
+      } else {
+        modeBadge.textContent = 'LOCAL (WASM)';
+        modeBadge.className = 'mode-badge local-wasm';
+      }
+      timingInfo.textContent = 'Transcribing locally...';
+    } else if (source === 'cloud') {
+      modeBadge.textContent = 'CLOUD';
+      modeBadge.className = 'mode-badge cloud';
+      timingInfo.textContent = 'Transcribing via cloud...';
+    }
+  } else if (stage === 'completed') {
+    if (timingMs != null) {
+      const timeSeconds = (timingMs / 1000).toFixed(2);
+      timingInfo.textContent = `Completed in ${timeSeconds}s (${source})`;
+    }
+
+    // Reset badge after 3 seconds
+    setTimeout(() => {
+      modeBadge.textContent = 'INACTIVE';
+      modeBadge.className = 'mode-badge inactive';
+    }, 3000);
+  } else if (stage === 'fallback') {
+    modeBadge.textContent = 'CLOUD (FALLBACK)';
+    modeBadge.className = 'mode-badge cloud';
+    timingInfo.textContent = `Local failed, using cloud fallback`;
+  }
+}
+
+// Initialize transcription mode on load
+initTranscriptionMode();

@@ -1,7 +1,25 @@
+/**
+ * Offscreen Document - Audio Recording & Local Transcription
+ *
+ * Sprint 07: Hybrid local/cloud transcription
+ * - Captures audio from microphone
+ * - Sends chunks to backend (for cloud fallback)
+ * - Buffers audio locally for local transcription
+ * - Transcribes locally using Whisper (if enabled)
+ * - Falls back to cloud if local fails
+ */
+
+import { loadWhisperModel, detectCapabilities, unloadModel } from './whisper-loader.js';
+import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
+import { shouldUseLocalStt, allowCloudFallback } from '../shared/settings.js';
+
 console.log('Offscreen document loaded');
 
 let mediaRecorder = null;
+let audioContext = null;
 let recordedChunks = [];
+let audioBuffer = []; // Float32Array chunks for local transcription
+let localTranscriptionEnabled = false;
 
 // Listen for commands from service worker
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -30,15 +48,36 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'stop_recording') {
-    stopRecording();
-    console.log('Offscreen: Recording stopped');
-    sendResponse({ success: true });
-    return false;
+    stopRecording()
+      .then((result) => {
+        console.log('Offscreen: Recording stopped');
+        sendResponse({ success: true, ...result });
+      })
+      .catch((error) => {
+        console.error('Offscreen: Failed to stop recording:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async transcription
   }
 });
 
 async function startRecording() {
   try {
+    // Check if local transcription should be used
+    localTranscriptionEnabled = await shouldUseLocalStt();
+    console.log('[Offscreen] Local transcription enabled:', localTranscriptionEnabled);
+
+    if (localTranscriptionEnabled) {
+      // Detect capabilities
+      const capabilities = await detectCapabilities();
+      console.log('[Offscreen] Device capabilities:', capabilities);
+
+      if (!capabilities.canUseLocal) {
+        console.warn('[Offscreen] Local transcription unavailable, will use cloud fallback');
+        localTranscriptionEnabled = false;
+      }
+    }
+
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: {
         channelCount: 1, // Mono
@@ -49,7 +88,7 @@ async function startRecording() {
       },
     });
 
-    // Prefer WebM/Opus for OpenAI Whisper API
+    // Prefer WebM/Opus for OpenAI Whisper API (cloud fallback)
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
@@ -60,12 +99,38 @@ async function startRecording() {
     });
 
     recordedChunks = [];
+    audioBuffer = [];
+
+    // If local transcription enabled, create AudioContext for Float32 audio
+    if (localTranscriptionEnabled) {
+      audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+
+      // Create ScriptProcessor to capture raw audio samples
+      const bufferSize = 4096;
+      const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+      processor.onaudioprocess = (event) => {
+        // Copy input buffer (Float32Array)
+        const inputData = event.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(inputData.length);
+        copy.set(inputData);
+        audioBuffer.push(copy);
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      // Store processor for cleanup
+      mediaRecorder._audioProcessor = processor;
+      mediaRecorder._audioSource = source;
+    }
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
         console.log('Audio chunk available:', event.data.size, 'bytes');
 
-        // Convert Blob to ArrayBuffer and send to service worker
+        // Always send to backend for cloud fallback
         event.data.arrayBuffer().then((buffer) => {
           chrome.runtime.sendMessage({
             action: 'audio_chunk',
@@ -81,24 +146,185 @@ async function startRecording() {
       console.error('MediaRecorder error:', event.error);
     };
 
-    mediaRecorder.onstop = () => {
+    mediaRecorder.onstop = function() {
       console.log('MediaRecorder stopped');
       stream.getTracks().forEach((track) => track.stop());
+
+      // Cleanup audio processor (use 'this' instead of 'mediaRecorder' to avoid null reference)
+      if (this._audioProcessor) {
+        this._audioProcessor.disconnect();
+        this._audioSource.disconnect();
+      }
     };
 
     // Start recording with 1-second chunks
-    // (Balance between latency and efficiency)
     mediaRecorder.start(1000);
-    console.log('Recording started');
+    console.log('[Offscreen] Recording started');
   } catch (error) {
-    console.error('Failed to start recording:', error);
+    console.error('[Offscreen] Failed to start recording:', error);
     throw error;
   }
 }
 
-function stopRecording() {
-  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-    mediaRecorder.stop();
-    mediaRecorder = null;
+async function stopRecording() {
+  if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+    return { localTranscription: false };
+  }
+
+  mediaRecorder.stop();
+  mediaRecorder = null;
+
+  // Close AudioContext
+  if (audioContext) {
+    await audioContext.close();
+    audioContext = null;
+  }
+
+  // Attempt local transcription if enabled and audio was captured
+  if (localTranscriptionEnabled && audioBuffer.length > 0) {
+    console.log(`[Offscreen] Attempting local transcription (${audioBuffer.length} chunks)`);
+
+    try {
+      const result = await transcribeLocally();
+      return {
+        localTranscription: true,
+        success: true,
+        ...result,
+      };
+    } catch (error) {
+      console.error('[Offscreen] Local transcription failed:', error);
+      console.error('[Offscreen] Error stack:', error.stack);
+      console.error('[Offscreen] Error type:', error.constructor.name);
+
+      // Notify service worker to fall back to cloud
+      const canFallback = await allowCloudFallback();
+
+      chrome.runtime.sendMessage({
+        action: 'transcript_fallback_required',
+        reason: error.message,
+        canFallback,
+      });
+
+      return {
+        localTranscription: true,
+        success: false,
+        error: error.message,
+        stack: error.stack,
+        fallback: canFallback,
+      };
+    } finally {
+      // Clear audio buffer
+      audioBuffer = [];
+    }
+  } else {
+    console.log('[Offscreen] Skipping local transcription (cloud only)');
+    return { localTranscription: false };
   }
 }
+
+/**
+ * Transcribe audio locally using Whisper.
+ *
+ * Concatenates buffered audio chunks and runs through Whisper model.
+ *
+ * @returns {Promise<Object>} Transcription result
+ */
+async function transcribeLocally() {
+  const startTime = performance.now();
+
+  // Concatenate all audio chunks into single Float32Array
+  const totalLength = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
+  const concatenated = new Float32Array(totalLength);
+
+  let offset = 0;
+  for (const chunk of audioBuffer) {
+    concatenated.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const durationSeconds = concatenated.length / 16000;
+  console.log(`[Offscreen] Transcribing ${durationSeconds.toFixed(1)}s of audio`);
+
+  // Get capability info for status reporting
+  const capabilities = await detectCapabilities();
+  const device = capabilities.device || 'wasm';
+
+  // Notify UI: transcription started
+  chrome.runtime.sendMessage({
+    action: 'transcription_status',
+    stage: 'started',
+    source: 'local',
+    device: device,
+  });
+
+  // Enqueue transcription job in GPU queue
+  const result = await enqueueGpuTask(
+    'whisper',
+    async () => {
+      // Load Whisper model (uses cache if already loaded)
+      console.log('[Offscreen] Loading Whisper model...');
+      const transcriber = await loadWhisperModel((progress) => {
+        console.log('[Offscreen] Model load progress:', progress);
+        if (progress === 1.0) {
+          console.log('[Offscreen] Model loaded successfully');
+        }
+      });
+
+      console.log('[Offscreen] Transcriber ready, starting transcription...');
+
+      // Transcribe with chunking
+      // Note: Don't pass 'language' parameter for English-only models (whisper-tiny.en)
+      // English-only models are hardcoded to English and don't support language selection
+      const output = await transcriber(concatenated, {
+        chunk_length_s: 15,
+        stride_length_s: 5,
+        return_timestamps: 'word',
+      });
+
+      console.log('[Offscreen] Transcription complete, output:', output);
+      return output;
+    },
+    {
+      priority: JobPriority.HIGH,
+      timeout: 30000, // 30 second timeout
+    }
+  );
+
+  const transcriptionTime = performance.now() - startTime;
+
+  console.log(`[Offscreen] Local transcription complete in ${transcriptionTime.toFixed(0)}ms`);
+  console.log(`[Offscreen] Transcript: "${result.text}"`);
+
+  // Notify UI: transcription completed
+  chrome.runtime.sendMessage({
+    action: 'transcription_status',
+    stage: 'completed',
+    source: 'local',
+    device: device,
+    timingMs: transcriptionTime,
+  });
+
+  // Send final transcript to service worker
+  chrome.runtime.sendMessage({
+    action: 'transcript_final',
+    text: result.text,
+    chunks: result.chunks || [],
+    source: 'local',
+    durationSeconds,
+    transcriptionTimeMs: Math.round(transcriptionTime),
+  });
+
+  return {
+    text: result.text,
+    chunks: result.chunks || [],
+    transcriptionTimeMs: Math.round(transcriptionTime),
+  };
+}
+
+// Handle document visibility changes (for cleanup)
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    console.log('[Offscreen] Document hidden, unloading model');
+    unloadModel();
+  }
+});
