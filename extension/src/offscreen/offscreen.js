@@ -13,8 +13,6 @@ import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { LOCAL_STT_MODES } from '../shared/settings.js';
 
-console.log('Offscreen document loaded');
-
 let mediaRecorder = null;
 let audioContext = null;
 let recordedChunks = [];
@@ -29,8 +27,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  console.log('Offscreen received:', message);
-
   if (message.action === 'start_recording') {
     // Receive STT mode from service worker
     if (message.sttMode) {
@@ -40,7 +36,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     startRecording()
       .then(() => {
-        console.log('Offscreen: Recording started successfully');
         sendResponse({ success: true });
       })
       .catch((error) => {
@@ -57,7 +52,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'stop_recording') {
     stopRecording()
       .then((result) => {
-        console.log('Offscreen: Recording stopped');
         sendResponse({ success: true, ...result });
       })
       .catch((error) => {
@@ -150,8 +144,6 @@ async function startRecording() {
 
     mediaRecorder.ondataavailable = (event) => {
       if (event.data.size > 0) {
-        console.log('Audio chunk available:', event.data.size, 'bytes');
-
         // Always send to backend for cloud fallback
         event.data.arrayBuffer().then((buffer) => {
           chrome.runtime.sendMessage({
@@ -169,7 +161,6 @@ async function startRecording() {
     };
 
     mediaRecorder.onstop = function() {
-      console.log('MediaRecorder stopped');
       stream.getTracks().forEach((track) => track.stop());
 
       // Cleanup audio processor (use 'this' instead of 'mediaRecorder' to avoid null reference)
@@ -181,7 +172,6 @@ async function startRecording() {
 
     // Start recording with 1-second chunks
     mediaRecorder.start(1000);
-    console.log('[Offscreen] Recording started');
   } catch (error) {
     console.error('[Offscreen] Failed to start recording:', error);
     throw error;
@@ -284,13 +274,7 @@ async function transcribeLocally() {
     'whisper',
     async () => {
       // Load Whisper model (uses cache if already loaded)
-      console.log('[Offscreen] Loading Whisper model...');
-      const transcriber = await loadWhisperModel((progress) => {
-        console.log('[Offscreen] Model load progress:', progress);
-        if (progress === 1.0) {
-          console.log('[Offscreen] Model loaded successfully');
-        }
-      });
+      const transcriber = await loadWhisperModel();
 
       console.log('[Offscreen] Transcriber ready, starting transcription...');
 

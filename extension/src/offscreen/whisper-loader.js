@@ -101,13 +101,11 @@ export async function detectCapabilities() {
 export async function loadWhisperModel(onProgress = null) {
   // Return cached pipeline if already loaded
   if (whisperPipeline) {
-    console.log('[WhisperLoader] Returning cached pipeline');
     return whisperPipeline;
   }
 
   // If already loading, wait for existing promise
   if (isLoading && loadPromise) {
-    console.log('[WhisperLoader] Load in progress, waiting...');
     return loadPromise;
   }
 
@@ -157,14 +155,6 @@ async function _loadWhisperModelInternal(onProgress) {
 
   console.log('[WhisperLoader] ONNX Runtime configured for local WASM:', env.backends.onnx.wasm.wasmPaths);
 
-  // Set up progress callback for model download
-  // Transformers.js uses env.backends.onnx.wasm.proxy for progress events
-  if (onProgress) {
-    console.log('[WhisperLoader] Progress tracking enabled');
-    // Note: Progress tracking in Transformers.js v3+ happens automatically during pipeline creation
-    // The pipeline function itself handles download progress internally
-  }
-
   console.log(`[WhisperLoader] Creating pipeline with device: ${capabilities.device}`);
 
   const startTime = performance.now();
@@ -173,10 +163,7 @@ async function _loadWhisperModelInternal(onProgress) {
   const transcriber = await pipeline('automatic-speech-recognition', MODEL_NAME, {
     device: capabilities.device,
     dtype: capabilities.dtype,
-    progress_callback: onProgress ? (progress) => {
-      console.log('[WhisperLoader] Model download progress:', progress);
-      onProgress(progress.progress || 0);
-    } : undefined,
+    progress_callback: onProgress || undefined,
   });
 
   const loadTime = performance.now() - startTime;
@@ -222,9 +209,7 @@ export async function runSelfTest() {
 
   try {
     // Load model first
-    const transcriber = await loadWhisperModel((progress) => {
-      console.log(`[WhisperLoader] Self-test model download: ${(progress * 100).toFixed(0)}%`);
-    });
+    const transcriber = await loadWhisperModel();
 
     const loadTime = performance.now() - startTime;
 
@@ -302,9 +287,7 @@ export async function warmCache() {
   console.log('[WhisperLoader] Warming cache...');
 
   try {
-    await loadWhisperModel((progress) => {
-      console.log(`[WhisperLoader] Cache warming: ${(progress * 100).toFixed(0)}%`);
-    });
+    await loadWhisperModel();
 
     console.log('[WhisperLoader] Cache warmed successfully');
   } catch (error) {

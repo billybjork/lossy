@@ -7,8 +7,6 @@ import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
 import { getLocalSttMode } from '../shared/settings.js';
 
-console.log('Service worker loaded');
-
 let socket = null;
 let audioChannel = null;
 let videoChannel = null;
@@ -24,10 +22,8 @@ const openPanels = new Map();
 (async () => {
   tabManager = new TabManager();
   await tabManager.init();
-  console.log('[ServiceWorker] TabManager initialized');
 
   messageRouter = new MessageRouter();
-  console.log('[ServiceWorker] MessageRouter initialized');
 
   // Subscribe panel to the current active tab
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -125,14 +121,11 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
 // Extension button clicked - open side panel
 chrome.action.onClicked.addListener(async (tab) => {
-  console.log('Extension button clicked, opening side panel');
   await chrome.sidePanel.open({ windowId: tab.windowId });
 });
 
 // Handle messages from extension pages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Service worker received:', message, 'from', sender);
-
   // Handle messages from sidepanel
   if (message.action === 'toggle_recording' && !sender.url?.includes('offscreen.html')) {
     toggleRecording()
@@ -150,7 +143,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       // Phoenix.js doesn't properly serialize Uint8Array, so keep it as Array
       audioChannel
         .push('audio_chunk', { data: message.data })
-        .receive('ok', () => console.log('Audio chunk sent'))
         .receive('error', (err) => console.error('Failed to send chunk:', err));
     }
     return false; // No async response needed
@@ -584,9 +576,6 @@ async function startRecording() {
   // 3. Connect to Phoenix Socket
   socket = new Socket('ws://localhost:4000/socket', {
     params: {}, // No token for now
-    logger: (kind, msg, data) => {
-      console.log(`Phoenix ${kind}:`, msg, data);
-    },
   });
 
   socket.connect();
@@ -674,8 +663,6 @@ async function startRecording() {
   const offscreenClients = await chrome.runtime.getContexts({
     contextTypes: ['OFFSCREEN_DOCUMENT'],
   });
-
-  console.log('Offscreen contexts found:', offscreenClients.length);
 
   if (offscreenClients.length > 0) {
     // Get STT mode and send to offscreen document
@@ -816,9 +803,6 @@ async function handleVideoDetected(videoData, tabId) {
   if (!socket || !socket.isConnected()) {
     socket = new Socket('ws://localhost:4000/socket', {
       params: {},
-      logger: (kind, msg, data) => {
-        console.log(`Phoenix ${kind}:`, msg, data);
-      },
     });
     socket.connect();
   }
@@ -859,9 +843,6 @@ async function loadNotesForVideo(videoDbId, tabId) {
   if (!socket || !socket.isConnected()) {
     socket = new Socket('ws://localhost:4000/socket', {
       params: {},
-      logger: (kind, msg, data) => {
-        console.log(`Phoenix ${kind}:`, msg, data);
-      },
     });
     socket.connect();
   }
@@ -909,9 +890,6 @@ async function loadNotesForSidePanel(videoDbId, tabId) {
   if (!socket || !socket.isConnected()) {
     socket = new Socket('ws://localhost:4000/socket', {
       params: {},
-      logger: (kind, msg, data) => {
-        console.log(`Phoenix ${kind}:`, msg, data);
-      },
     });
     socket.connect();
   }
@@ -978,9 +956,6 @@ async function deleteNote(noteId) {
   if (!socket || !socket.isConnected()) {
     socket = new Socket('ws://localhost:4000/socket', {
       params: {},
-      logger: (kind, msg, data) => {
-        console.log(`Phoenix ${kind}:`, msg, data);
-      },
     });
     socket.connect();
   }
