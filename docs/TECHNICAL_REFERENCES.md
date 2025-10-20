@@ -758,8 +758,8 @@ CircuitBreaker.reset("device_fingerprint_xyz")
 
 ## When to Reference This Document
 
-- **Sprint 07 (Current)**: Implementing local Whisper transcription with cloud fallback
-- **Phase 7 (Future)**: Adding CLIP emoji token generation
+- **Sprint 07 (Complete)**: Local Whisper transcription with cloud fallback - see [archive](./sprints/archive/SPRINT_07_local_transcription.md)
+- **Sprint 08 (Next)**: SigLIP frame embeddings will reuse GPU job queue infrastructure
 - **Performance tuning**: When optimizing inference speed
 - **Debugging**: WebGPU/WASM fallback issues, local/cloud routing
 - **Feature flag management**: Enabling/disabling local STT

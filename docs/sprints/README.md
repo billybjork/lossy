@@ -7,10 +7,8 @@
 
 ## Current Status
 
-🟢 **Active Sprint:** [Sprint 07 - Local Transcription](./SPRINT_07_local_transcription.md)
-📅 **Started:** 2025-10-20
-🎯 **Goal:** Browser-side Whisper transcription with automatic cloud fallback
-⏳ **Progress:** ~75% - Core implementation complete, cloud fallback validated, local transcription pending end-to-end test
+🎉 **Latest:** Sprint 07 (Local Transcription) completed 2025-10-20
+🔜 **Next:** Ready for Sprint 08 (SigLIP Frame Embeddings) - GPU job queue infrastructure in place
 
 ---
 
@@ -20,13 +18,13 @@
 
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
-| [07 - Local Transcription](./SPRINT_07_local_transcription.md) | 🟢 In Progress | Transformers.js Whisper Tiny with WebGPU + automatic cloud fallback | 3-4 days |
+| None | - | - | - |
 
 ### Upcoming Sprints
 
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
-| None | - | - | - |
+| 08 - SigLIP Frame Embeddings | 🔜 Ready | Visual context via browser-side SigLIP inference | 3-4 days |
 
 ### Planned Sprints (Not Yet Scheduled)
 
@@ -47,6 +45,7 @@
 | [04 - Tab Management](./archive/SPRINT_04_tab_management.md) | ✅ 2025-10-15 | Multi-tab context tracking & message routing | 2 days |
 | [05 - Reliability](./archive/SPRINT_05_reliability_improvements.md) | ✅ 2025-10-16 | Self-healing architecture + 95%+ reliability | 6 days |
 | [06 - Platform Adapters](./archive/SPRINT_06_platform_adapters.md) | ✅ 2025-10-19 | Plugin-based adapter architecture for multi-platform support | 3 days |
+| [07 - Local Transcription](./archive/SPRINT_07_local_transcription.md) | ✅ 2025-10-20 | Browser-side Whisper Tiny with WebGPU/WASM + cloud fallback | 3 days |
 
 ---
 
