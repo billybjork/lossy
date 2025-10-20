@@ -11,7 +11,7 @@
 
 import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './whisper-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
-import { shouldUseLocalStt, allowCloudFallback } from '../shared/settings.js';
+import { LOCAL_STT_MODES } from '../shared/settings.js';
 
 console.log('Offscreen document loaded');
 
@@ -20,6 +20,7 @@ let audioContext = null;
 let recordedChunks = [];
 let audioBuffer = []; // Float32Array chunks for local transcription
 let localTranscriptionEnabled = false;
+let currentSttMode = LOCAL_STT_MODES.AUTO; // Default mode
 
 // Listen for commands from service worker
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -31,6 +32,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   console.log('Offscreen received:', message);
 
   if (message.action === 'start_recording') {
+    // Receive STT mode from service worker
+    if (message.sttMode) {
+      currentSttMode = message.sttMode;
+      console.log('[Offscreen] STT mode set to:', currentSttMode);
+    }
+
     startRecording()
       .then(() => {
         console.log('Offscreen: Recording started successfully');
@@ -77,8 +84,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function startRecording() {
   try {
-    // Check if local transcription should be used
-    localTranscriptionEnabled = await shouldUseLocalStt();
+    // Check if local transcription should be used based on mode passed from service worker
+    localTranscriptionEnabled = currentSttMode !== LOCAL_STT_MODES.FORCE_CLOUD;
+    console.log('[Offscreen] Using STT mode:', currentSttMode);
     console.log('[Offscreen] Local transcription enabled:', localTranscriptionEnabled);
 
     if (localTranscriptionEnabled) {
@@ -210,8 +218,8 @@ async function stopRecording() {
       console.error('[Offscreen] Error stack:', error.stack);
       console.error('[Offscreen] Error type:', error.constructor.name);
 
-      // Notify service worker to fall back to cloud
-      const canFallback = await allowCloudFallback();
+      // Notify service worker to fall back to cloud (unless forced local-only)
+      const canFallback = currentSttMode !== LOCAL_STT_MODES.FORCE_LOCAL;
 
       chrome.runtime.sendMessage({
         action: 'transcript_fallback_required',

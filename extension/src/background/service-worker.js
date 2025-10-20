@@ -5,6 +5,7 @@
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
+import { getLocalSttMode } from '../shared/settings.js';
 
 console.log('Service worker loaded');
 
@@ -677,12 +678,14 @@ async function startRecording() {
   console.log('Offscreen contexts found:', offscreenClients.length);
 
   if (offscreenClients.length > 0) {
-    // Send message directly to offscreen document
-    console.log('Sending start_recording message to offscreen...');
+    // Get STT mode and send to offscreen document
+    const sttMode = await getLocalSttMode();
+    console.log('Sending start_recording message to offscreen with mode:', sttMode);
     chrome.runtime
       .sendMessage({
         target: 'offscreen',
         action: 'start_recording',
+        sttMode: sttMode,
       })
       .catch((err) => console.error('Failed to start offscreen recording:', err));
   } else {
