@@ -9,7 +9,7 @@
  * - Falls back to cloud if local fails
  */
 
-import { loadWhisperModel, detectCapabilities, unloadModel } from './whisper-loader.js';
+import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './whisper-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { shouldUseLocalStt, allowCloudFallback } from '../shared/settings.js';
 
@@ -58,6 +58,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open for async transcription
+  }
+
+  if (message.action === 'warm_cache') {
+    console.log('[Offscreen] Warming Whisper model cache...');
+    warmCache()
+      .then(() => {
+        console.log('[Offscreen] Cache warmed successfully');
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[Offscreen] Failed to warm cache:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async response
   }
 });
 

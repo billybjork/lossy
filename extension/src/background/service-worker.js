@@ -96,9 +96,30 @@ chrome.runtime.onConnect.addListener((port) => {
   });
 });
 
-// Extension installed
-chrome.runtime.onInstalled.addListener(() => {
+// Extension installed - preload Whisper model for better first-run experience
+chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('Voice Video Companion installed');
+
+  // Warm cache on install or update
+  if (details.reason === 'install' || details.reason === 'update') {
+    console.log('[ServiceWorker] Preloading Whisper model...');
+
+    try {
+      // Create offscreen document for model loading
+      await createOffscreenDocument();
+
+      // Send warm cache message
+      await chrome.runtime.sendMessage({
+        target: 'offscreen',
+        action: 'warm_cache',
+      });
+
+      console.log('[ServiceWorker] Model preloading initiated');
+    } catch (err) {
+      console.warn('[ServiceWorker] Failed to preload model:', err);
+      // Non-critical error - extension still works
+    }
+  }
 });
 
 // Extension button clicked - open side panel
