@@ -729,7 +729,7 @@ function listenForEvents() {
             console.log('[Lossy] Seek completed, current time:', videoElement.currentTime);
 
             // Pause the video after seeking (for "Refine with Vision" workflow)
-            const videoController = lifecycleManager?.getVideoController();
+            // Use module-level videoController variable (initialized at line 172)
             if (videoController) {
               videoController.pause();
               console.log('[Lossy] Video paused after seek for frame capture');
