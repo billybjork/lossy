@@ -201,6 +201,73 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  // Sprint 08: Handle frame embedding from local vision
+  if (message.action === 'embedding_ready' && sender.url?.includes('offscreen.html')) {
+    console.log(
+      `[Lossy] Frame embedding received: ${message.embedding.length} dims at ${message.timestamp}s`
+    );
+
+    if (audioChannel) {
+      audioChannel
+        .push('frame_embedding', {
+          embedding: message.embedding,
+          timestamp: message.timestamp,
+          source: message.source,
+          device: message.device,
+          embeddingTimeMs: message.embeddingTimeMs,
+        })
+        .receive('ok', () => {
+          console.log('[Lossy] Frame embedding sent to backend');
+        })
+        .receive('error', (err) => {
+          console.error('[Lossy] Failed to send embedding:', err);
+        });
+    }
+    return false;
+  }
+
+  // Sprint 08: Handle local vision fallback
+  if (message.action === 'vision_fallback_required' && sender.url?.includes('offscreen.html')) {
+    console.warn('[Lossy] Local vision failed:', message.reason);
+
+    // Notify side panel of fallback (optional)
+    chrome.runtime.sendMessage({
+      action: 'vision_status',
+      stage: 'fallback',
+      source: 'cloud',
+      reason: message.reason,
+    }).catch(() => {});
+
+    if (!message.canFallback) {
+      console.log('[Lossy] Cloud vision fallback disabled, skipping enrichment');
+    }
+
+    return false;
+  }
+
+  // Sprint 08: Handle frame embedding generation request from content script
+  if (message.action === 'generate_frame_embedding') {
+    handleFrameEmbeddingRequest(message)
+      .then(sendResponse)
+      .catch((error) => {
+        console.error('[ServiceWorker] Frame embedding failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async response
+  }
+
+  // Sprint 08: Handle clarify note request from side panel
+  // Sprint 08: Refine note with GPT-4o Vision
+  if (message.action === 'refine_note_with_vision') {
+    handleRefineNoteWithVision(message.noteId, message.timestamp)
+      .then(sendResponse)
+      .catch((error) => {
+        console.error('[ServiceWorker] Refine note with vision failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async response
+  }
+
   // Handle responses from offscreen document
   if (
     (message.action === 'start_recording' || message.action === 'stop_recording') &&
@@ -1083,5 +1150,152 @@ async function ensureContentScriptInjected(tabId) {
       console.error('[ServiceWorker] ❌ Failed to inject content script:', err);
       throw err;
     }
+  }
+}
+
+/**
+ * Sprint 08: Handle frame embedding generation request from ClarifyButton
+ * Relays frame capture to offscreen document for SigLIP processing
+ */
+async function handleFrameEmbeddingRequest(message) {
+  const { imageData, timestamp } = message;
+
+  console.log('[ServiceWorker] 🔍 Handling frame embedding request at timestamp:', timestamp);
+
+  // Ensure offscreen document exists
+  await createOffscreenDocument();
+
+  // Get current session ID from audio channel (if active) or generate one
+  // For now, we'll get it from the audio channel topic since embeddings are tied to sessions
+  const sessionId = audioChannel?.topic?.split(':')[1] || null;
+
+  if (!sessionId) {
+    console.warn('[ServiceWorker] No active session - embedding will be sent without session context');
+  }
+
+  // Get vision mode from settings
+  const { getLocalVisionMode } = await import('../shared/settings.js');
+  const visionMode = await getLocalVisionMode();
+
+  console.log('[ServiceWorker] Sending frame to offscreen for embedding (mode:', visionMode, ')');
+
+  // Send to offscreen document for embedding generation
+  try {
+    const response = await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'generate_embedding',
+      imageData,
+      timestamp,
+      sessionId,
+      visionMode,
+    });
+
+    if (response?.success) {
+      console.log(
+        '[ServiceWorker] ✅ Embedding generated:',
+        response.embedding?.length,
+        'dims in',
+        response.embeddingTimeMs,
+        'ms on',
+        response.device
+      );
+      return {
+        success: true,
+        embedding: response.embedding,
+        embeddingTimeMs: response.embeddingTimeMs,
+        device: response.device,
+      };
+    } else {
+      throw new Error(response?.error || 'Embedding generation failed');
+    }
+  } catch (error) {
+    console.error('[ServiceWorker] ❌ Failed to generate embedding:', error);
+    throw error;
+  }
+}
+
+/**
+ * Sprint 08: Handle clarify note request from side panel
+ * Captures frame, generates embedding, and enriches note
+ */
+// Sprint 08: Refine note with GPT-4o Vision using captured video frame
+async function handleRefineNoteWithVision(noteId, timestamp) {
+  console.log('[ServiceWorker] 🔍 Refining note with vision:', noteId, 'at timestamp:', timestamp);
+
+  // Get the active tab
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    throw new Error('No active tab');
+  }
+
+  // Request frame capture from content script
+  console.log('[ServiceWorker] Requesting frame capture from content script...');
+  const captureResponse = await chrome.tabs.sendMessage(tab.id, {
+    action: 'capture_frame',
+    timestamp: timestamp,
+  });
+
+  if (!captureResponse?.success) {
+    throw new Error(captureResponse?.error || 'Frame capture failed');
+  }
+
+  const { imageData, actualTimestamp, base64 } = captureResponse;
+  console.log('[ServiceWorker] Frame captured at', actualTimestamp);
+
+  // Validate we have base64 data
+  if (!base64) {
+    throw new Error('No base64 image data returned from frame capture');
+  }
+
+  console.log('[ServiceWorker] Sending frame to backend for GPT-4o Vision refinement...');
+
+  try {
+    // Ensure we have a video channel connection
+    if (!socket || !socket.isConnected()) {
+      console.log('[ServiceWorker] Creating new socket connection');
+      socket = new Socket('ws://localhost:4000/socket', {
+        params: {},
+      });
+      socket.connect();
+    }
+
+    // Always ensure video channel is joined
+    if (!videoChannel) {
+      console.log('[ServiceWorker] Creating new video channel');
+      videoChannel = socket.channel('video:meta', {});
+      await new Promise((resolve, reject) => {
+        videoChannel.join().receive('ok', resolve).receive('error', reject);
+      });
+    }
+
+    // Send refinement request with base64 frame
+    return new Promise((resolve, reject) => {
+      videoChannel
+        .push('refine_note_with_vision', {
+          note_id: noteId,
+          frame_base64: base64,
+          timestamp: actualTimestamp,
+        })
+        .receive('ok', (response) => {
+          console.log('[ServiceWorker] ✅ Note refined successfully with GPT-4o Vision');
+          resolve({
+            success: true,
+            noteId: noteId,
+            timestamp: actualTimestamp,
+            refinedText: response.refined_text,
+          });
+        })
+        .receive('error', (err) => {
+          console.error('[ServiceWorker] Failed to refine note:', err);
+          reject(new Error('Failed to refine note with vision'));
+        })
+        .receive('timeout', () => {
+          console.error('[ServiceWorker] Vision refinement timed out');
+          reject(new Error('Vision refinement timed out'));
+        });
+    });
+  } catch (error) {
+    console.error('[ServiceWorker] Error in vision refinement flow:', error);
+    throw error;
   }
 }

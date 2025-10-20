@@ -29,6 +29,11 @@ defmodule Lossy.Agent.Session do
     GenServer.cast(via_tuple(session_id), {:transcript_ready, text, opts})
   end
 
+  # Sprint 08: Handle frame embedding from visual intelligence
+  def handle_frame_embedding(session_id, embedding, timestamp, opts \\ []) do
+    GenServer.cast(via_tuple(session_id), {:frame_embedding, embedding, timestamp, opts})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -118,6 +123,28 @@ defmodule Lossy.Agent.Session do
     {:noreply, %{state | status: :structuring}}
   end
 
+  # Sprint 08: Handle frame embedding from visual intelligence
+  @impl true
+  def handle_cast({:frame_embedding, embedding, timestamp, opts}, state) do
+    source = Keyword.get(opts, :source, :local)
+    device = Keyword.get(opts, :device, "unknown")
+
+    Logger.info(
+      "[#{state.session_id}] Received #{source} frame embedding: #{length(embedding)} dims at #{timestamp}s (#{device})"
+    )
+
+    # Store embedding in state for potential use in note enrichment
+    # For now, we just log it. In Task 6 (Clarify action), we'll use this to enrich notes.
+    visual_context = %{
+      embedding: embedding,
+      timestamp: timestamp,
+      source: source,
+      device: device
+    }
+
+    {:noreply, Map.put(state, :pending_visual_context, visual_context)}
+  end
+
   # State Transitions
 
   defp transition_to(%{status: :listening} = state, :transcribing) do
@@ -156,7 +183,10 @@ defmodule Lossy.Agent.Session do
   # Async Work
 
   defp transcribe_audio(state) do
-    Logger.info("[#{state.session_id}] Starting cloud transcription (#{byte_size(state.audio_buffer)} bytes)")
+    Logger.info(
+      "[#{state.session_id}] Starting cloud transcription (#{byte_size(state.audio_buffer)} bytes)"
+    )
+
     start_time = System.monotonic_time(:millisecond)
 
     case Cloud.transcribe_audio(state.audio_buffer) do
@@ -176,7 +206,10 @@ defmodule Lossy.Agent.Session do
         })
 
         # Now structure the note
-        structure_note(state, transcript_text, source: :cloud, transcription_time_ms: transcription_time)
+        structure_note(state, transcript_text,
+          source: :cloud,
+          transcription_time_ms: transcription_time
+        )
 
       {:error, reason} ->
         Logger.error("[#{state.session_id}] Transcription failed: #{inspect(reason)}")

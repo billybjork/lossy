@@ -128,6 +128,31 @@ defmodule LossyWeb.AudioChannel do
     {:reply, {:ok, %{}}, socket}
   end
 
+  # Sprint 08: Handle frame embedding from visual intelligence
+  @impl true
+  def handle_in("frame_embedding", payload, socket) do
+    embedding = Map.fetch!(payload, "embedding")
+    timestamp = Map.fetch!(payload, "timestamp")
+    source = Map.get(payload, "source", "local")
+    device = Map.get(payload, "device", "unknown")
+
+    Logger.info(
+      "Frame embedding received (#{source}): #{length(embedding)} dims at #{timestamp}s on #{device}"
+    )
+
+    # Pass embedding to AgentSession
+    Lossy.Agent.Session.handle_frame_embedding(
+      socket.assigns.session_id,
+      embedding,
+      timestamp,
+      source: String.to_atom(source),
+      device: device,
+      embedding_time_ms: Map.get(payload, "embeddingTimeMs")
+    )
+
+    {:reply, {:ok, %{}}, socket}
+  end
+
   @impl true
   def handle_in("ping", _payload, socket) do
     {:reply, {:ok, %{pong: true}}, socket}

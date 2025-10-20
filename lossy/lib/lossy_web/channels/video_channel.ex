@@ -1,4 +1,15 @@
 defmodule LossyWeb.VideoChannel do
+  @moduledoc """
+  Phoenix Channel for video metadata and note management.
+
+  Handles real-time communication for:
+  - Video detection and record creation
+  - Note CRUD operations (create, read, update, delete)
+  - Visual intelligence features (Sprint 08: GPT-4o Vision refinement)
+
+  Channel topic: `video:meta`
+  """
+
   use Phoenix.Channel
   require Logger
 
@@ -11,18 +22,22 @@ defmodule LossyWeb.VideoChannel do
   end
 
   @impl true
-  def handle_in("video_detected", %{"platform" => platform, "videoId" => video_id} = payload, socket) do
+  def handle_in(
+        "video_detected",
+        %{"platform" => platform, "videoId" => video_id} = payload,
+        socket
+      ) do
     Logger.info("[VideoChannel] Video detected: #{platform}/#{video_id}")
 
     url = Map.get(payload, "url")
     title = Map.get(payload, "title")
 
     case Videos.find_or_create_video(%{
-      platform: platform,
-      external_id: video_id,
-      url: url,
-      title: title
-    }) do
+           platform: platform,
+           external_id: video_id,
+           url: url,
+           title: title
+         }) do
       {:ok, video} ->
         Logger.info("[VideoChannel] Video record created/found: #{video.id}")
         {:reply, {:ok, %{video_id: video.id}}, socket}
@@ -54,6 +69,91 @@ defmodule LossyWeb.VideoChannel do
       {:error, reason} ->
         Logger.error("[VideoChannel] Failed to delete note: #{inspect(reason)}")
         {:reply, {:error, %{message: "Failed to delete note"}}, socket}
+    end
+  end
+
+  # Sprint 08: Enrich note with visual context (embedding storage)
+  @impl true
+  def handle_in("enrich_note", payload, socket) do
+    note_id = Map.fetch!(payload, "note_id")
+    embedding = Map.fetch!(payload, "embedding")
+    timestamp = Map.fetch!(payload, "timestamp")
+    source = Map.get(payload, "source", "local")
+    device = Map.get(payload, "device", "unknown")
+
+    Logger.info(
+      "[VideoChannel] Enriching note #{note_id} with visual context (#{source}, #{device}, #{length(embedding)} dims)"
+    )
+
+    # Create visual context map
+    visual_context = %{
+      embedding: embedding,
+      timestamp: timestamp,
+      source: source,
+      device: device
+    }
+
+    # Update note with visual context
+    case Videos.update_note_visual_context(note_id, visual_context) do
+      {:ok, updated_note} ->
+        Logger.info("[VideoChannel] Note enriched successfully: #{note_id}")
+
+        # Convert to map for JSON serialization (don't expose embedding in response)
+        note_response = %{
+          id: updated_note.id,
+          text: updated_note.text,
+          enrichment_source: updated_note.enrichment_source,
+          updated_at: updated_note.updated_at
+        }
+
+        {:reply, {:ok, %{note: note_response}}, socket}
+
+      {:error, reason} ->
+        Logger.error("[VideoChannel] Failed to enrich note: #{inspect(reason)}")
+        {:reply, {:error, %{message: "Failed to enrich note"}}, socket}
+    end
+  end
+
+  # Sprint 08: Refine note with GPT-4o Vision
+  @impl true
+  def handle_in("refine_note_with_vision", payload, socket) do
+    note_id = Map.fetch!(payload, "note_id")
+    frame_base64 = Map.fetch!(payload, "frame_base64")
+    _timestamp = Map.get(payload, "timestamp")
+
+    Logger.info("[VideoChannel] Refining note #{note_id} with GPT-4o Vision")
+
+    # Get current note
+    note = Videos.get_note!(note_id)
+
+    # Call GPT-4o Vision to refine note text
+    case Lossy.Inference.VisionAPI.refine_note(note.text, frame_base64) do
+      {:ok, refined_text} ->
+        Logger.info("[VideoChannel] Note refined successfully: #{note_id}")
+
+        # Update note with refined text
+        case Videos.update_note(note, %{
+               text: refined_text,
+               enrichment_source: "gpt4o_vision"
+             }) do
+          {:ok, updated_note} ->
+            # Broadcast updated note to all listeners
+            Phoenix.PubSub.broadcast(
+              Lossy.PubSub,
+              "video:#{note.video_id}",
+              {:note_updated, updated_note}
+            )
+
+            {:reply, {:ok, %{refined_text: refined_text}}, socket}
+
+          {:error, update_reason} ->
+            Logger.error("[VideoChannel] Failed to update note: #{inspect(update_reason)}")
+            {:reply, {:error, %{message: "Failed to update note"}}, socket}
+        end
+
+      {:error, reason} ->
+        Logger.error("[VideoChannel] Vision refinement failed: #{inspect(reason)}")
+        {:reply, {:error, %{message: "Vision refinement failed"}}, socket}
     end
   end
 end

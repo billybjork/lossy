@@ -4,6 +4,7 @@ import { AnchorChip } from './shared/anchor-chip.js';
 import { TimelineMarkers } from './shared/timeline-markers.js';
 import { VideoLifecycleManager } from './core/video-lifecycle-manager.js';
 import { NoteLoader } from './core/note-loader.js';
+import { FrameCapturer } from './core/frame-capturer.js'; // Sprint 08
 
 console.log('[Lossy] Universal content script loaded');
 
@@ -552,7 +553,7 @@ function listenForEvents() {
       console.log('[Lossy] Seeking to timestamp:', message.timestamp);
 
       videoController.seekTo(message.timestamp);
-      videoController.play();
+      videoController.pause();
 
       sendResponse({ success: true });
     }
@@ -688,6 +689,89 @@ function listenForEvents() {
           console.error('[Lossy] ❌ RE_INITIALIZE: Failed to re-initialize:', err);
           sendResponse({ success: false, error: err.message });
         });
+
+      return true; // Will respond asynchronously
+    }
+
+    // Sprint 08: Capture frame for visual intelligence
+    if (message.action === 'capture_frame') {
+      const requestedTimestamp = message.timestamp;
+      console.log('[Lossy] 🔍 CAPTURE_FRAME: Received request to capture frame at', requestedTimestamp);
+
+      (async () => {
+        try {
+          // Get video element via lifecycle manager
+          const videoElement = lifecycleManager?.getVideoElement();
+          if (!videoElement) {
+            throw new Error('No video element found');
+          }
+
+          // Seek to the requested timestamp if provided
+          if (requestedTimestamp != null) {
+            console.log('[Lossy] Seeking to timestamp:', requestedTimestamp);
+            videoElement.currentTime = requestedTimestamp;
+
+            // Wait for seek to complete
+            await new Promise((resolve) => {
+              const onSeeked = () => {
+                videoElement.removeEventListener('seeked', onSeeked);
+                resolve();
+              };
+              videoElement.addEventListener('seeked', onSeeked);
+
+              // Timeout after 2 seconds if seek doesn't complete
+              setTimeout(() => {
+                videoElement.removeEventListener('seeked', onSeeked);
+                resolve();
+              }, 2000);
+            });
+
+            console.log('[Lossy] Seek completed, current time:', videoElement.currentTime);
+
+            // Pause the video after seeking (for "Refine with Vision" workflow)
+            const videoController = lifecycleManager?.getVideoController();
+            if (videoController) {
+              videoController.pause();
+              console.log('[Lossy] Video paused after seek for frame capture');
+            }
+          }
+
+          // Create frame capturer with aspect ratio preservation for GPT-4o Vision
+          // Use native aspect ratio scaled to max 1024px width for quality + efficiency
+          const capturer = new FrameCapturer(videoElement, {
+            preserveAspectRatio: true,
+            maxWidth: 1024,
+          });
+          const { imageData, timestamp, dimensions } = await capturer.captureCurrentFrame();
+
+          console.log('[Lossy] ✅ Frame captured:', { timestamp, dimensions });
+
+          // Convert canvas to base64 JPEG for GPT-4o Vision
+          const base64 = await capturer.canvasToBase64(0.95);
+          console.log('[Lossy] ✅ Converted frame to base64 JPEG');
+
+          // Convert ImageData to serializable format (for backward compatibility with embeddings)
+          const serializableImageData = {
+            data: Array.from(imageData.data),
+            width: imageData.width,
+            height: imageData.height,
+          };
+
+          sendResponse({
+            success: true,
+            imageData: serializableImageData,
+            actualTimestamp: timestamp,
+            dimensions,
+            base64, // Sprint 08: Base64 JPEG for GPT-4o Vision (aspect ratio preserved)
+          });
+
+          // Clean up
+          capturer.destroy();
+        } catch (error) {
+          console.error('[Lossy] ❌ CAPTURE_FRAME: Failed to capture frame:', error);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
 
       return true; // Will respond asynchronously
     }

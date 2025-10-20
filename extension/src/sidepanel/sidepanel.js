@@ -714,6 +714,68 @@ function addTranscript(data, options = {}) {
   finalizeTranscriptRender();
 }
 
+// Sprint 08: Refine note with visual context using GPT-4o Vision
+async function refineNoteWithVision(noteId, timestamp, button, noteElement) {
+  console.log('[SidePanel] Refining note with vision', noteId, 'at timestamp', timestamp);
+
+  // Disable button and show progress
+  button.disabled = true;
+  button.textContent = 'Capturing...';
+  button.classList.add('is-loading');
+
+  try {
+    // Request frame capture and GPT-4o Vision refinement
+    const response = await chrome.runtime.sendMessage({
+      action: 'refine_note_with_vision',
+      noteId: noteId,
+      timestamp: timestamp,
+    });
+
+    if (response?.success) {
+      button.textContent = 'Refining...';
+
+      // Update note text in UI with refined version
+      if (response.refinedText) {
+        const noteTextEl = noteElement.querySelector('.note-text');
+        if (noteTextEl) {
+          // Remove confidence display if it exists
+          const confidenceEl = noteTextEl.querySelector('.note-confidence');
+          if (confidenceEl) {
+            confidenceEl.remove();
+          }
+          noteTextEl.textContent = response.refinedText;
+          console.log('[SidePanel] ✅ Updated note text in UI:', response.refinedText);
+        }
+      }
+
+      button.textContent = '✓ Refined';
+      button.classList.remove('is-loading');
+      button.classList.add('success');
+
+      // Reset after 2 seconds
+      setTimeout(() => {
+        button.textContent = 'Refine with Vision';
+        button.classList.remove('success');
+        button.disabled = false;
+      }, 2000);
+    } else {
+      throw new Error(response?.error || 'Failed to refine note');
+    }
+  } catch (error) {
+    console.error('[SidePanel] Failed to refine note:', error);
+    button.textContent = '✗ Failed';
+    button.classList.remove('is-loading');
+    button.classList.add('error');
+
+    // Reset after 3 seconds
+    setTimeout(() => {
+      button.textContent = 'Refine with Vision';
+      button.classList.remove('error');
+      button.disabled = false;
+    }, 3000);
+  }
+}
+
 function buildNoteElement(data) {
   const noteDiv = document.createElement('div');
   noteDiv.className = 'note-item';
@@ -731,6 +793,16 @@ function buildNoteElement(data) {
   deleteBtn.addEventListener('click', (e) => {
     e.stopPropagation(); // Prevent triggering note click
     deleteNote(data.id, data.video_id, noteDiv);
+  });
+
+  // Sprint 08: Add Refine with Vision button
+  const refineBtn = document.createElement('button');
+  refineBtn.className = 'note-clarify';
+  refineBtn.textContent = 'Refine with Vision';
+  refineBtn.title = 'Refine comment using GPT-4o Vision analysis of video frame';
+  refineBtn.addEventListener('click', (e) => {
+    e.stopPropagation(); // Prevent triggering note click
+    refineNoteWithVision(data.id, data.timestamp_seconds, refineBtn, noteDiv);
   });
 
   const categoryDiv = document.createElement('div');
@@ -756,6 +828,7 @@ function buildNoteElement(data) {
   }
 
   noteDiv.appendChild(deleteBtn);
+  noteDiv.appendChild(refineBtn);
   noteDiv.appendChild(categoryDiv);
   if (timestampDiv) {
     noteDiv.appendChild(timestampDiv);

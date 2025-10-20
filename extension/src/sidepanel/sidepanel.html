@@ -183,6 +183,56 @@
       color: #dc2626;
     }
 
+    /* Sprint 08: Clarify button */
+    .note-clarify {
+      position: absolute;
+      top: 8px;
+      right: 32px;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      border: 1px solid #d1d5db;
+      background: white;
+      color: #667eea;
+      cursor: pointer;
+      opacity: 0;
+      transition: opacity 0.2s, all 0.15s;
+      border-radius: 4px;
+    }
+
+    .note-item:hover .note-clarify:not(:disabled) {
+      opacity: 1;
+    }
+
+    .note-clarify:hover:not(:disabled) {
+      background: #667eea;
+      color: white;
+      border-color: #667eea;
+    }
+
+    .note-clarify:disabled {
+      cursor: not-allowed;
+      opacity: 0.8;
+    }
+
+    .note-clarify.is-loading {
+      background: #fbbf24;
+      border-color: #fbbf24;
+      color: #78350f;
+    }
+
+    .note-clarify.success {
+      background: #34d399;
+      border-color: #34d399;
+      color: #064e3b;
+    }
+
+    .note-clarify.error {
+      background: #f87171;
+      border-color: #f87171;
+      color: #7f1d1d;
+    }
+
     .note-item.deleting {
       opacity: 0;
       transform: translateX(-20px);

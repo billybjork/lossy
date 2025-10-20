@@ -17,6 +17,13 @@ defmodule Lossy.Videos.Note do
     field :external_permalink, :string
     field :error, :string
 
+    # Sprint 08: Visual intelligence
+    field :visual_context, :map
+
+    # Format: %{embedding: [768 floats], timestamp: float, source: "local" | "cloud", device: "webgpu" | "wasm"}
+    field :enrichment_source, :string, default: "none"
+    # Values: "none" | "siglip_local" | "siglip_cloud" | "gpt4o_vision" | "manual"
+
     # For Sprint 02, we'll use session_id as a virtual field until we integrate users
     field :session_id, :string, virtual: true
 
@@ -41,7 +48,9 @@ defmodule Lossy.Videos.Note do
       :platform_comment_id,
       :external_permalink,
       :error,
-      :session_id
+      :session_id,
+      :visual_context,
+      :enrichment_source
     ])
     |> validate_required([:text, :timestamp_seconds])
     |> validate_inclusion(
@@ -49,6 +58,10 @@ defmodule Lossy.Videos.Note do
       ~w(pacing audio visual editing general color graphics content other)
     )
     |> validate_inclusion(:status, ~w(ghost firmed pending_post posting posted failed cancelled))
+    |> validate_inclusion(
+      :enrichment_source,
+      ~w(none siglip_local siglip_cloud gpt4o_vision manual)
+    )
     |> validate_number(:confidence, greater_than_or_equal_to: 0.0, less_than_or_equal_to: 1.0)
     |> foreign_key_constraint(:video_id)
     |> foreign_key_constraint(:user_id)

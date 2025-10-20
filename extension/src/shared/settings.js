@@ -2,8 +2,9 @@
  * Shared settings helper for feature flags and user preferences.
  *
  * Sprint 07: Local STT feature flag
+ * Sprint 08: Local Vision (SigLIP) feature flag
  * - Stored in chrome.storage.local for persistence across sessions
- * - Supports "auto", "force_local", "force_cloud" modes
+ * - Supports "auto", "force_local", "force_cloud", "disabled" modes
  */
 
 /**
@@ -18,9 +19,24 @@ export const LOCAL_STT_MODES = {
   FORCE_CLOUD: 'force_cloud',
 };
 
+/**
+ * Local Vision (SigLIP image encoder) feature flag values:
+ * - "auto": Try local first, skip enrichment if unavailable (DEFAULT)
+ * - "force_local": Only use local vision, fail if unavailable
+ * - "force_cloud": Always use cloud vision API (bypass local)
+ * - "disabled": Skip visual enrichment entirely
+ */
+export const LOCAL_VISION_MODES = {
+  AUTO: 'auto',
+  FORCE_LOCAL: 'force_local',
+  FORCE_CLOUD: 'force_cloud',
+  DISABLED: 'disabled',
+};
+
 const DEFAULT_SETTINGS = {
   features: {
     localSttEnabled: LOCAL_STT_MODES.AUTO,
+    localVisionEnabled: LOCAL_VISION_MODES.AUTO,
   },
 };
 
@@ -137,4 +153,72 @@ export async function resetSettings() {
   await chrome.storage.local.set({ settings: DEFAULT_SETTINGS });
   console.log('[Settings] Reset to defaults:', DEFAULT_SETTINGS);
   return DEFAULT_SETTINGS;
+}
+
+// ========================================
+// Sprint 08: Local Vision Settings
+// ========================================
+
+/**
+ * Get the current local vision mode.
+ *
+ * @returns {Promise<string>} One of LOCAL_VISION_MODES values
+ */
+export async function getLocalVisionMode() {
+  const settings = await getSettings();
+  return settings.features.localVisionEnabled;
+}
+
+/**
+ * Set the local vision mode.
+ *
+ * @param {string} mode - One of LOCAL_VISION_MODES values
+ */
+export async function setLocalVisionMode(mode) {
+  if (!Object.values(LOCAL_VISION_MODES).includes(mode)) {
+    throw new Error(
+      `Invalid local vision mode: ${mode}. Must be one of: ${Object.values(LOCAL_VISION_MODES).join(', ')}`
+    );
+  }
+
+  return updateSettings({
+    features: {
+      localVisionEnabled: mode,
+    },
+  });
+}
+
+/**
+ * Check if local vision should be attempted based on current mode.
+ *
+ * @returns {Promise<boolean>} True if local vision should be attempted
+ */
+export async function shouldUseLocalVision() {
+  const mode = await getLocalVisionMode();
+
+  // Skip local vision if explicitly forced to cloud or disabled
+  return mode !== LOCAL_VISION_MODES.FORCE_CLOUD && mode !== LOCAL_VISION_MODES.DISABLED;
+}
+
+/**
+ * Check if vision is enabled at all (not disabled).
+ *
+ * @returns {Promise<boolean>} True if vision features are enabled
+ */
+export async function isVisionEnabled() {
+  const mode = await getLocalVisionMode();
+
+  return mode !== LOCAL_VISION_MODES.DISABLED;
+}
+
+/**
+ * Check if cloud vision fallback is allowed based on current mode.
+ *
+ * @returns {Promise<boolean>} True if cloud fallback is allowed
+ */
+export async function allowCloudVisionFallback() {
+  const mode = await getLocalVisionMode();
+
+  // Allow cloud fallback unless explicitly forced to local or disabled
+  return mode !== LOCAL_VISION_MODES.FORCE_LOCAL && mode !== LOCAL_VISION_MODES.DISABLED;
 }

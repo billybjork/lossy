@@ -48,6 +48,18 @@ defmodule Lossy.Videos do
     |> Repo.update()
   end
 
+  # Sprint 08: Update note with visual context
+  def update_note_visual_context(note_id, visual_context) do
+    note = Repo.get!(Note, note_id)
+
+    note
+    |> Note.changeset(%{
+      visual_context: visual_context,
+      enrichment_source: "siglip_#{visual_context.source}"
+    })
+    |> Repo.update()
+  end
+
   def delete_note(id) do
     case Repo.get(Note, id) do
       nil ->

@@ -74,12 +74,20 @@ export class VideoController {
   pause() {
     if (this.videoElement && !this.videoElement.paused) {
       this.videoElement.pause();
+
+      // Dispatch events to update platform UI
+      this.videoElement.dispatchEvent(new Event('pause'));
+      this.videoElement.dispatchEvent(new Event('paused'));
     }
   }
 
   play() {
     if (this.videoElement && this.videoElement.paused) {
       this.videoElement.play();
+
+      // Dispatch events to update platform UI
+      this.videoElement.dispatchEvent(new Event('play'));
+      this.videoElement.dispatchEvent(new Event('playing'));
     }
   }
 

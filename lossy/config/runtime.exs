@@ -27,6 +27,13 @@ config :lossy,
 config :lossy,
   local_stt_enabled: System.get_env("LOCAL_STT_ENABLED", "true") == "true"
 
+# Local Vision (SigLIP) Configuration
+# Sprint 08: Visual intelligence via browser-side SigLIP image encoder
+# When true (default), accepts client-supplied frame embeddings for visual enrichment
+# When false, skips visual enrichment or uses cloud vision API only
+config :lossy,
+  local_vision_enabled: System.get_env("LOCAL_VISION_ENABLED", "true") == "true"
+
 # ## Using releases
 #
 # If you use `mix release`, you need to explicitly enable the server
