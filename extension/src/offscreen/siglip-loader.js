@@ -172,10 +172,14 @@ async function _loadSigLIPModelInternal(onProgress) {
     progress_callback: onProgress,
   });
 
+  // logSeverityLevel: 4 = Fatal only (suppresses execution provider warnings)
   const model = await SiglipVisionModel.from_pretrained(MODEL_NAME, {
     device: capabilities.device,
     dtype: capabilities.dtype,
     progress_callback: onProgress,
+    session_options: {
+      logSeverityLevel: 4, // 0=Verbose, 1=Info, 2=Warning, 3=Error, 4=Fatal
+    },
   });
 
   const loadTime = performance.now() - startTime;

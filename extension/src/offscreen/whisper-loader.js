@@ -160,10 +160,14 @@ async function _loadWhisperModelInternal(onProgress) {
   const startTime = performance.now();
 
   // Create pipeline with progress callback
+  // logSeverityLevel: 4 = Fatal only (suppresses execution provider warnings)
   const transcriber = await pipeline('automatic-speech-recognition', MODEL_NAME, {
     device: capabilities.device,
     dtype: capabilities.dtype,
     progress_callback: onProgress || undefined,
+    session_options: {
+      logSeverityLevel: 4, // 0=Verbose, 1=Info, 2=Warning, 3=Error, 4=Fatal
+    },
   });
 
   const loadTime = performance.now() - startTime;
