@@ -135,8 +135,14 @@ defmodule Lossy.Videos do
 
   defp apply_video_filters(query, opts) do
     Enum.reduce(opts, query, fn
+      {:status, nil}, q -> q
       {:status, status}, q -> where(q, [v], v.status == ^status)
+
+      {:platform, nil}, q -> q
       {:platform, platform}, q -> where(q, [v], v.platform == ^platform)
+
+      {:search, nil}, q -> q
+      {:search, ""}, q -> q
       {:search, term}, q ->
         pattern = "%#{term}%"
         where(q, [v], ilike(v.title, ^pattern) or ilike(v.url, ^pattern))
