@@ -97,6 +97,19 @@ chrome.runtime.onConnect.addListener((port) => {
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('Voice Video Companion installed');
 
+  // Sprint 09 Phase 3: Create context menu for queueing videos
+  chrome.contextMenus.create({
+    id: 'queue-video',
+    title: 'Add to Lossy Queue',
+    contexts: ['page', 'link'],
+    documentUrlPatterns: [
+      '*://*.youtube.com/*',
+      '*://*.vimeo.com/*',
+      '*://*.frame.io/*',
+      '*://app.iconik.io/*'
+    ]
+  });
+
   // Warm cache on install or update
   if (details.reason === 'install' || details.reason === 'update') {
     console.log('[ServiceWorker] Preloading Whisper model...');
@@ -123,6 +136,104 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 chrome.action.onClicked.addListener(async (tab) => {
   await chrome.sidePanel.open({ windowId: tab.windowId });
 });
+
+// Sprint 09 Phase 3: Context menu click handler
+chrome.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === 'queue-video') {
+    queueCurrentVideo(tab);
+  }
+});
+
+/**
+ * Sprint 09 Phase 3: Queue video from context menu
+ */
+async function queueCurrentVideo(tab) {
+  try {
+    console.log('[ServiceWorker] 📋 Context menu: Queue video from tab', tab.id);
+
+    // Extract video metadata from tab
+    const videoData = await extractVideoMetadata(tab);
+
+    // Send to backend via channel
+    const response = await handleQueueVideo(videoData);
+
+    if (response.success) {
+      chrome.notifications.create({
+        type: 'basic',
+        iconUrl: 'icons/icon128.png',
+        title: 'Video Queued',
+        message: `Added "${videoData.title}" to your queue`
+      });
+    }
+  } catch (error) {
+    console.error('[ServiceWorker] Failed to queue video:', error);
+    chrome.notifications.create({
+      type: 'basic',
+      iconUrl: 'icons/icon128.png',
+      title: 'Queue Failed',
+      message: 'Failed to add video to queue'
+    });
+  }
+}
+
+/**
+ * Sprint 09 Phase 3: Extract video metadata from tab
+ */
+async function extractVideoMetadata(tab) {
+  console.log('[ServiceWorker] 📋 Extracting video metadata from tab:', tab.url);
+
+  // Try to inject content script and get metadata
+  let result = null;
+  try {
+    [result] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        const title = document.querySelector('h1')?.textContent || document.title;
+        const thumbnail = document.querySelector('meta[property="og:image"]')?.content;
+        return { title, thumbnail };
+      }
+    });
+  } catch (err) {
+    console.log('[ServiceWorker] Could not extract page metadata:', err.message);
+  }
+
+  const url = new URL(tab.url);
+  const platform = detectPlatform(url.hostname);
+  const external_id = extractExternalId(url, platform);
+
+  return {
+    platform,
+    external_id,
+    url: tab.url,
+    title: result?.result?.title || tab.title,
+    thumbnail_url: result?.result?.thumbnail
+  };
+}
+
+/**
+ * Sprint 09 Phase 3: Detect platform from hostname
+ */
+function detectPlatform(hostname) {
+  if (hostname.includes('youtube.com')) return 'youtube';
+  if (hostname.includes('vimeo.com')) return 'vimeo';
+  if (hostname.includes('frame.io')) return 'frame_io';
+  if (hostname.includes('iconik.io')) return 'iconik';
+  return 'generic';
+}
+
+/**
+ * Sprint 09 Phase 3: Extract external ID from URL
+ */
+function extractExternalId(url, platform) {
+  switch (platform) {
+    case 'youtube':
+      return url.searchParams.get('v') || url.pathname.split('/').pop();
+    case 'vimeo':
+      return url.pathname.split('/').filter(Boolean).pop();
+    default:
+      return url.pathname;
+  }
+}
 
 // Handle messages from extension pages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -572,6 +683,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     return true; // Keep channel open for async response
   }
+
+  // Sprint 09 Phase 3: List videos from library
+  if (message.type === 'list_videos') {
+    handleListVideos(message.filters)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ error: err.message }));
+    return true; // Keep channel open for async response
+  }
+
+  // Sprint 09 Phase 3: Update video status
+  if (message.type === 'update_video_status') {
+    handleUpdateVideoStatus(message.videoId, message.status)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ error: err.message }));
+    return true; // Keep channel open for async response
+  }
+
+  // Sprint 09 Phase 3: Queue video
+  if (message.type === 'queue_video') {
+    handleQueueVideo(message.videoData)
+      .then(sendResponse)
+      .catch((err) => sendResponse({ error: err.message }));
+    return true; // Keep channel open for async response
+  }
 });
 
 async function toggleRecording() {
@@ -863,6 +998,48 @@ async function hasOffscreenDocument() {
   return contexts.length > 0;
 }
 
+/**
+ * Sprint 09 Phase 3: Set up video channel broadcast listeners
+ * Forwards video updates to side panel for real-time UI updates
+ */
+let broadcastsSetUp = false;
+function setupVideoChannelBroadcasts() {
+  // Only set up once to avoid duplicate listeners
+  if (broadcastsSetUp || !videoChannel) {
+    return;
+  }
+
+  console.log('[ServiceWorker] 📡 Setting up video channel broadcasts');
+
+  // Listen for video_updated broadcasts
+  videoChannel.on('video_updated', (payload) => {
+    console.log('[ServiceWorker] 📡 Broadcast: video_updated', payload);
+    // Forward to side panel
+    chrome.runtime.sendMessage({
+      type: 'channel_broadcast',
+      event: 'video_updated',
+      data: payload,
+    }).catch(() => {
+      // Silently ignore if side panel not open
+    });
+  });
+
+  // Listen for video_queued broadcasts
+  videoChannel.on('video_queued', (payload) => {
+    console.log('[ServiceWorker] 📡 Broadcast: video_queued', payload);
+    // Forward to side panel
+    chrome.runtime.sendMessage({
+      type: 'channel_broadcast',
+      event: 'video_queued',
+      data: payload,
+    }).catch(() => {
+      // Silently ignore if side panel not open
+    });
+  });
+
+  broadcastsSetUp = true;
+}
+
 async function handleVideoDetected(videoData, tabId) {
   console.log('[Lossy] Handling video detected:', videoData);
 
@@ -882,6 +1059,9 @@ async function handleVideoDetected(videoData, tabId) {
       .join()
       .receive('ok', () => {
         console.log('[Lossy] Joined video channel');
+
+        // Set up broadcast listeners
+        setupVideoChannelBroadcasts();
 
         // Send video_detected event
         videoChannel
@@ -1298,4 +1478,142 @@ async function handleRefineNoteWithVision(noteId, timestamp) {
     console.error('[ServiceWorker] Error in vision refinement flow:', error);
     throw error;
   }
+}
+
+/**
+ * Sprint 09 Phase 3: Handle list videos request
+ */
+async function handleListVideos(filters) {
+  console.log('[ServiceWorker] 📚 LIST_VIDEOS with filters:', filters);
+
+  // Ensure we have a video channel connection
+  if (!socket || !socket.isConnected()) {
+    socket = new Socket('ws://localhost:4000/socket', {
+      params: {},
+    });
+    socket.connect();
+  }
+
+  // Reuse or create video channel
+  if (!videoChannel) {
+    videoChannel = socket.channel('video:meta', {});
+    await new Promise((resolve, reject) => {
+      videoChannel.join()
+        .receive('ok', () => {
+          // Set up broadcast listeners
+          setupVideoChannelBroadcasts();
+          resolve();
+        })
+        .receive('error', reject);
+    });
+  }
+
+  // Request videos
+  return new Promise((resolve, reject) => {
+    videoChannel
+      .push('list_videos', { filters })
+      .receive('ok', (response) => {
+        console.log('[ServiceWorker] 📚 Received', response.videos?.length || 0, 'videos');
+        resolve(response);
+      })
+      .receive('error', (err) => {
+        console.error('[ServiceWorker] Failed to list videos:', err);
+        reject(new Error('Failed to list videos'));
+      })
+      .receive('timeout', () => {
+        reject(new Error('List videos request timed out'));
+      });
+  });
+}
+
+/**
+ * Sprint 09 Phase 3: Handle update video status request
+ */
+async function handleUpdateVideoStatus(videoId, status) {
+  console.log('[ServiceWorker] 📝 UPDATE_VIDEO_STATUS:', videoId, '→', status);
+
+  // Ensure we have a video channel connection
+  if (!socket || !socket.isConnected()) {
+    socket = new Socket('ws://localhost:4000/socket', {
+      params: {},
+    });
+    socket.connect();
+  }
+
+  // Reuse or create video channel
+  if (!videoChannel) {
+    videoChannel = socket.channel('video:meta', {});
+    await new Promise((resolve, reject) => {
+      videoChannel.join()
+        .receive('ok', () => {
+          // Set up broadcast listeners
+          setupVideoChannelBroadcasts();
+          resolve();
+        })
+        .receive('error', reject);
+    });
+  }
+
+  // Update status
+  return new Promise((resolve, reject) => {
+    videoChannel
+      .push('update_video_status', { video_id: videoId, status })
+      .receive('ok', (response) => {
+        console.log('[ServiceWorker] ✅ Video status updated');
+        resolve({ success: true, video: response.video });
+      })
+      .receive('error', (err) => {
+        console.error('[ServiceWorker] Failed to update video status:', err);
+        reject(new Error('Failed to update video status'));
+      })
+      .receive('timeout', () => {
+        reject(new Error('Update video status timed out'));
+      });
+  });
+}
+
+/**
+ * Sprint 09 Phase 3: Handle queue video request
+ */
+async function handleQueueVideo(videoData) {
+  console.log('[ServiceWorker] ➕ QUEUE_VIDEO:', videoData);
+
+  // Ensure we have a video channel connection
+  if (!socket || !socket.isConnected()) {
+    socket = new Socket('ws://localhost:4000/socket', {
+      params: {},
+    });
+    socket.connect();
+  }
+
+  // Reuse or create video channel
+  if (!videoChannel) {
+    videoChannel = socket.channel('video:meta', {});
+    await new Promise((resolve, reject) => {
+      videoChannel.join()
+        .receive('ok', () => {
+          // Set up broadcast listeners
+          setupVideoChannelBroadcasts();
+          resolve();
+        })
+        .receive('error', reject);
+    });
+  }
+
+  // Queue video
+  return new Promise((resolve, reject) => {
+    videoChannel
+      .push('queue_video', videoData)
+      .receive('ok', (response) => {
+        console.log('[ServiceWorker] ✅ Video queued successfully');
+        resolve({ success: true, video: response.video });
+      })
+      .receive('error', (err) => {
+        console.error('[ServiceWorker] Failed to queue video:', err);
+        reject(new Error('Failed to queue video'));
+      })
+      .receive('timeout', () => {
+        reject(new Error('Queue video request timed out'));
+      });
+  });
 }

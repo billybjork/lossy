@@ -1163,73 +1163,26 @@ async function loadVideoLibrary() {
     search: videoSearch.value || undefined
   };
 
-  console.log('[Library] Loading videos with filters:', filters);
+  console.log('[Library] Loading videos from backend:', filters);
 
-  // TODO: Send via Phoenix Channel when backend integration is ready
-  // For now, use mock data for testing
-  const mockVideos = [
-    {
-      id: '1',
-      platform: 'youtube',
-      external_id: 'test123',
-      url: 'https://youtube.com/watch?v=test123',
-      title: 'Color Grading Tutorial - Advanced Techniques',
-      thumbnail_url: null,
-      duration_seconds: 1234,
-      status: 'in_progress',
-      last_viewed_at: new Date().toISOString(),
-      note_count: 5,
-      inserted_at: new Date().toISOString()
-    },
-    {
-      id: '2',
-      platform: 'vimeo',
-      external_id: 'test456',
-      url: 'https://vimeo.com/test456',
-      title: 'Audio Mixing Masterclass',
-      thumbnail_url: null,
-      duration_seconds: 2400,
-      status: 'queued',
-      last_viewed_at: new Date(Date.now() - 86400000).toISOString(),
-      note_count: 0,
-      inserted_at: new Date(Date.now() - 86400000).toISOString()
-    },
-    {
-      id: '3',
-      platform: 'youtube',
-      external_id: 'test789',
-      url: 'https://youtube.com/watch?v=test789',
-      title: 'Final Edit Review - Client Project',
-      thumbnail_url: null,
-      duration_seconds: 3600,
-      status: 'complete',
-      last_viewed_at: new Date(Date.now() - 172800000).toISOString(),
-      note_count: 12,
-      inserted_at: new Date(Date.now() - 172800000).toISOString()
+  try {
+    const response = await chrome.runtime.sendMessage({
+      type: 'list_videos',
+      filters
+    });
+
+    if (response.error) {
+      console.error('[Library] Failed to load videos:', response.error);
+      videoList.innerHTML = '<div class="empty-state">Failed to load videos</div>';
+      return;
     }
-  ];
 
-  // Apply filters to mock data
-  let filteredVideos = mockVideos;
-
-  if (filters.status) {
-    filteredVideos = filteredVideos.filter(v => v.status === filters.status);
+    videoLibraryCache = response.videos || [];
+    renderVideoLibrary(videoLibraryCache);
+  } catch (error) {
+    console.error('[Library] Error loading videos:', error);
+    videoList.innerHTML = '<div class="empty-state">Failed to load videos</div>';
   }
-
-  if (filters.platform) {
-    filteredVideos = filteredVideos.filter(v => v.platform === filters.platform);
-  }
-
-  if (filters.search) {
-    const searchLower = filters.search.toLowerCase();
-    filteredVideos = filteredVideos.filter(v =>
-      (v.title && v.title.toLowerCase().includes(searchLower)) ||
-      (v.url && v.url.toLowerCase().includes(searchLower))
-    );
-  }
-
-  videoLibraryCache = filteredVideos;
-  renderVideoLibrary(filteredVideos);
 }
 
 // Render video library list
