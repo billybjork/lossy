@@ -1,13 +1,14 @@
 # Sprint Roadmap
 
 **Project:** Lossy - Voice-First Video Companion
-**Last Updated:** 2025-10-20
+**Last Updated:** 2025-10-22
 
 ---
 
 ## Current Status
 
-🎉 **Latest:** Sprint 08 (GPT-4o Vision Integration) completed 2025-10-20
+🎉 **Latest:** Sprint 09 (Video Library & History Management) completed 2025-10-22
+📋 **Planned:** Sprint 10 (Always-On Agent)
 🔜 **Next:** To be determined
 
 ---
@@ -30,6 +31,7 @@
 
 | Sprint | Goal | Duration |
 |--------|------|----------|
+| [10 - Always-On Agent](./SPRINT_10_always_on_agent.md) | VAD-driven continuous recording + automated frame capture | 5-7 days |
 | [TBD - Emoji Chips](./planned/SPRINT_TBD_emoji_chips.md) | Text-based visual feedback tokens using transcription | 2-3 days |
 | [TBD - Auto Posting](./planned/SPRINT_TBD_auto_posting.md) | Browserbase automation + Oban workers | 3-5 days |
 | [TBD - Auth](./planned/SPRINT_TBD_auth.md) | User authentication & multi-user support | 2-3 days |
@@ -48,6 +50,7 @@
 | [06 - Platform Adapters](./archive/SPRINT_06_platform_adapters.md) | ✅ 2025-10-19 | Plugin-based adapter architecture for multi-platform support | 3 days |
 | [07 - Local Transcription](./archive/SPRINT_07_local_transcription.md) | ✅ 2025-10-20 | Browser-side Whisper Tiny with WebGPU/WASM + cloud fallback | 3 days |
 | [08 - GPT-4o Vision Integration](./archive/SPRINT_08_siglip_vision.md) | ✅ 2025-10-20 | Cloud-based visual context enrichment for notes | 2 days |
+| [09 - Video Library](./archive/SPRINT_09_video_library.md) | ✅ 2025-10-22 | Video history management, queue system, and auto-status transitions | 2 days |
 
 ---
 
