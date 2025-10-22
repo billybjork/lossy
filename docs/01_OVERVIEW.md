@@ -39,28 +39,27 @@ Speak naturally while watching. The system:
 | **UI - Side Panel** | Phoenix LiveView | Persistent note list with live updates |
 | **UI - Overlays** | Shadow DOM + Vanilla JS | On-video ghost comments, emoji chips |
 | **Voice Capture** | MediaRecorder + VAD | @ricky0123/vad-web for speech detection |
-| **Local STT** (Phase 6) | Transformers.js (Whisper) | WebGPU → WASM → Cloud fallback |
-| **Local Vision** (Phase 7) | Transformers.js (SigLIP) | WebGPU → WASM → Skip fallback |
+| **Local STT** | Transformers.js (Whisper) | WebGPU → WASM → Cloud fallback |
+| **Emoji Chips** (Planned) | Text classification | Keyword/embedding-based on transcription |
 | **Bundler** | Webpack 5 | Local bundling of phoenix.js |
 
 **Technology Fallback Hierarchy:**
 
 *Transcription (STT):*
-1. **Primary (MVP)**: OpenAI Whisper API (cloud)
-2. **Phase 6**: Local WASM Whisper with WebGPU acceleration
-3. **Fallback**: Auto-detect available RAM (<4GB → cloud, ≥4GB → local)
+1. **Best**: Local WASM Whisper with WebGPU acceleration (Sprint 07)
+2. **Good**: Local WASM Whisper with CPU (Sprint 07)
+3. **Fallback**: OpenAI Whisper API (cloud)
 4. **User preference**: Settings toggle for cloud vs local
 
-*Frame Analysis (CLIP/SigLIP for emoji chips):*
-1. **Best**: WebGPU-accelerated SigLIP (50-150ms, Phase 7)
-2. **Good**: WASM SigLIP (300-600ms, Phase 7)
-3. **Fallback**: Skip emoji chips (not critical for MVP)
-4. **Decision**: Check `navigator.gpu` support on init
+*Emoji Chips (Text-based, Planned):*
+1. **Best**: Keyword-based classification (<10ms, simple)
+2. **Good**: Lightweight text embeddings (~50ms, more accurate)
+3. **Fallback**: Skip emoji chips (not critical for core functionality)
+4. **Decision**: Based on transcription fragment availability
 
 *Memory Considerations:*
 - Local Whisper: ~300MB model + ~200MB runtime
-- Local SigLIP: ~100MB model
-- Auto-fallback to cloud if available memory <4GB
+- Emoji chips: No additional models needed (uses transcription text)
 
 ### Backend: Phoenix/Elixir
 
@@ -114,8 +113,8 @@ Speak naturally while watching. The system:
 
 ### Future Enhancements
 
-- **Emoji Reasoning Tokens** (CLIP + late fusion)
-- **Frame Analysis** (shot change detection, visual context)
+- **Text-based Emoji Chips** (sentiment/feedback visualization from transcription)
+- **Semantic Search** (pgvector + text embeddings for note retrieval)
 - **Multi-note Merging** (consolidate nearby similar notes)
 - **Voice Commands** ("scratch that", "post all", "undo")
 - **Wake Word** (continuous listening mode)

@@ -9,7 +9,7 @@
 **Related Sprints:**
 - ✅ Sprint 06 – Platform Adapters (video detection + health checks)
 - ✅ Sprint 07 – Local Transcription (model loading patterns, offscreen infrastructure)
-- 🔜 Sprint 09 – Emoji Chips (will use local SigLIP embeddings)
+- 📋 Sprint TBD – Emoji Chips (text-based feedback tokens using transcription)
 - 🔜 Sprint 10 – Semantic Search (pgvector + embeddings)
 
 ---
@@ -23,7 +23,7 @@
 **Key Architectural Pivot:** Discovered that standard LLM APIs (GPT-4o, Claude, Gemini) **cannot accept pre-computed embeddings** as input. They require the actual image. This led us to:
 
 1. Send full-quality video frames (base64 JPEG) to GPT-4o Vision API
-2. Defer local SigLIP embeddings to Sprint 09 (emoji chips)
+2. Defer emoji chips to Sprint TBD (using text-based approach instead of visual)
 3. Build "Refine with Vision" feature - explicit user action to enrich notes with visual context
 
 **Result:** A working visual intelligence feature that meaningfully improves video feedback quality by adding visual context to voice-generated notes.
@@ -110,7 +110,7 @@ We tested:
 
 **Implications:**
 1. **Sprint 08 (this):** GPT-4o Vision for note refinement (cloud, explicit)
-2. **Sprint 09 (next):** Local SigLIP embeddings for emoji chips (local, automatic)
+2. **Sprint TBD (planned):** Text-based emoji chips using transcription (local, automatic)
 
 Two separate features with different use cases!
 
@@ -150,10 +150,8 @@ Original plan used 224x224 (SigLIP input size), which squashed 9:16 videos into 
 
 ### Deferred to Future Sprints
 
-- [ ] SigLIP local embeddings → **Sprint 09** (emoji chips)
-- [ ] Embedding storage in database → **Sprint 09**
-- [ ] GPU job queue integration → **Sprint 09**
-- [ ] Cloud vision fallback logic → **Sprint 09**
+- [ ] Text-based emoji chips → **Sprint TBD** (using transcription, not visual embeddings)
+- [ ] Embedding storage in database → **Sprint 10** (semantic search)
 - [ ] Semantic search → **Sprint 10** (pgvector)
 
 ---
@@ -212,23 +210,23 @@ Original plan used 224x224 (SigLIP input size), which squashed 9:16 videos into 
 - `lossy/lib/lossy/videos.ex` - `update_note_visual_context/2` function
 
 ### Documentation
-- `docs/sprints/SPRINT_09_emoji_chips.md` - Created (rough plan for local embeddings)
+- `docs/sprints/planned/SPRINT_TBD_emoji_chips.md` - Created (text-based approach)
 
 ---
 
-## Sprint 08 vs Sprint 09 Comparison
+## Sprint 08 vs Sprint TBD Comparison
 
-| Aspect | Sprint 08 (GPT-4o Vision) | Sprint 09 (SigLIP Embeddings) |
-|--------|--------------------------|------------------------------|
-| **Purpose** | Note text refinement | Visual categorization (emoji chips) |
-| **Trigger** | Manual (user clicks button) | Automatic (background during recording) |
-| **Processing** | Cloud API (OpenAI) | Local browser (WebGPU/WASM) |
-| **Input** | Full-quality frame (1024px, 95% JPEG) | Resized frame (224x224 for model) |
-| **Output** | Refined text from LLM | 768-dim embedding vector |
-| **Latency** | 1-2s (network + API) | 50-150ms (WebGPU) |
+| Aspect | Sprint 08 (GPT-4o Vision) | Sprint TBD (Text-based Emoji Chips) |
+|--------|--------------------------|-------------------------------------|
+| **Purpose** | Note text refinement | Sentiment/feedback visualization |
+| **Trigger** | Manual (user clicks button) | Automatic (during recording) |
+| **Processing** | Cloud API (OpenAI) | Local browser (text classification) |
+| **Input** | Full-quality video frame | Transcription text fragments |
+| **Output** | Refined text from LLM | Emoji based on sentiment/keywords |
+| **Latency** | 1-2s (network + API) | <50ms (keyword matching) |
 | **Cost** | ~$0.01-0.03 per frame | Free (local compute) |
-| **Privacy** | ⚠️ Sends to cloud | ✅ Fully local |
-| **Use Case** | Specific, detailed feedback | Quick visual categorization |
+| **Privacy** | ⚠️ Sends frames to cloud | ✅ Fully local (uses existing transcription) |
+| **Use Case** | Specific, detailed visual feedback | Quick sentiment/intent confirmation |
 
 **Key Insight:** These are complementary features, not alternatives!
 
@@ -280,19 +278,19 @@ Original plan used 224x224 (SigLIP input size), which squashed 9:16 videos into 
 - [ ] Add cost tracking / rate limiting (noted in TODO)
 - [ ] Test across more platforms (YouTube, Vimeo, Frame.io)
 
-### Sprint 09: Emoji Chips
+### Sprint TBD: Emoji Chips
 
-**Goal:** Use local SigLIP embeddings for real-time visual categorization during recording.
+**Goal:** Use text-based classification of transcription fragments for real-time sentiment/feedback visualization.
 
 **Key Features:**
-- Background frame capture every 2s during recording
-- Local SigLIP embedding generation (WebGPU)
-- Cosine similarity matching to predefined emoji categories
-- Real-time emoji chips overlay (🎨 color grading, 📊 charts, 💬 text)
+- Listen to Whisper Tiny transcription fragments during recording
+- Simple text classification (keyword-based or lightweight embeddings)
+- Real-time emoji chips overlay (👍 positive, 😂 funny, 🤔 questioning, ✂️ cut suggestion)
 - Fully local, privacy-preserving
 - Non-blocking (never interferes with voice recording)
+- No visual processing required - uses existing transcription text
 
-See: `docs/sprints/SPRINT_09_emoji_chips.md`
+See: `docs/sprints/planned/SPRINT_TBD_emoji_chips.md`
 
 ---
 
@@ -302,7 +300,7 @@ See: `docs/sprints/SPRINT_09_emoji_chips.md`
 - ✅ Meaningfully improves note quality with visual context
 - ✅ Non-blocking UX (doesn't interfere with voice flow)
 - ✅ Database schema ready for future features
-- ✅ Frame capture infrastructure reusable for Sprint 09
+- ✅ Frame capture infrastructure available for future visual features
 - ✅ Privacy-conscious design (explicit user opt-in)
 - ✅ Performance meets expectations (< 2s total latency)
 
@@ -329,7 +327,7 @@ See: `docs/sprints/SPRINT_09_emoji_chips.md`
 ## Documentation TODO
 
 - [x] Update Sprint 08 doc to reflect actual implementation
-- [x] Create Sprint 09 doc for emoji chips
+- [x] Create Sprint TBD doc for emoji chips (text-based approach)
 - [ ] Update TECHNICAL_REFERENCES.md with frame capture patterns
 - [ ] Add GPT-4o Vision setup to README (OPENAI_API_KEY requirement)
 - [ ] Document "Refine with Vision" feature in user guide

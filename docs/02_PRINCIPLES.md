@@ -27,7 +27,7 @@ This document outlines the core development principles that guide architectural 
 | Component | Enhancement Layers | Degradation Path |
 |-----------|-------------------|------------------|
 | **Transcription** | WebGPU-accelerated WASM Whisper → CPU-based WASM → Cloud API | Always functional, performance varies |
-| **Frame Analysis** | WebGPU SigLIP (50-150ms) → WASM SigLIP (300-600ms) → Skip emoji chips | Core note-taking unaffected |
+| **Emoji Chips** | Text classification on transcription → Skip if processing slow | Core note-taking unaffected |
 | **Video Detection** | Platform-specific adapter → Generic heuristics → Manual fallback | Works on any site, reliability varies |
 | **Network** | Real-time LiveView → Offline queue → Sync on reconnect | User never loses work |
 

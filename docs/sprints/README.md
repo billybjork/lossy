@@ -7,8 +7,8 @@
 
 ## Current Status
 
-🎉 **Latest:** Sprint 07 (Local Transcription) completed 2025-10-20
-🔜 **Next:** Ready for Sprint 08 (SigLIP Frame Embeddings) - GPU job queue infrastructure in place
+🎉 **Latest:** Sprint 08 (GPT-4o Vision Integration) completed 2025-10-20
+🔜 **Next:** To be determined
 
 ---
 
@@ -24,12 +24,13 @@
 
 | Sprint | Status | Goal | Duration |
 |--------|--------|------|----------|
-| 08 - SigLIP Frame Embeddings | 🔜 Ready | Visual context via browser-side SigLIP inference | 3-4 days |
+| None scheduled | - | - | - |
 
 ### Planned Sprints (Not Yet Scheduled)
 
 | Sprint | Goal | Duration |
 |--------|------|----------|
+| [TBD - Emoji Chips](./planned/SPRINT_TBD_emoji_chips.md) | Text-based visual feedback tokens using transcription | 2-3 days |
 | [TBD - Auto Posting](./planned/SPRINT_TBD_auto_posting.md) | Browserbase automation + Oban workers | 3-5 days |
 | [TBD - Auth](./planned/SPRINT_TBD_auth.md) | User authentication & multi-user support | 2-3 days |
 | [TBD - Polish](./planned/SPRINT_TBD_polish.md) | UX polish & animations | 3-4 days |
@@ -46,6 +47,7 @@
 | [05 - Reliability](./archive/SPRINT_05_reliability_improvements.md) | ✅ 2025-10-16 | Self-healing architecture + 95%+ reliability | 6 days |
 | [06 - Platform Adapters](./archive/SPRINT_06_platform_adapters.md) | ✅ 2025-10-19 | Plugin-based adapter architecture for multi-platform support | 3 days |
 | [07 - Local Transcription](./archive/SPRINT_07_local_transcription.md) | ✅ 2025-10-20 | Browser-side Whisper Tiny with WebGPU/WASM + cloud fallback | 3 days |
+| [08 - GPT-4o Vision Integration](./archive/SPRINT_08_siglip_vision.md) | ✅ 2025-10-20 | Cloud-based visual context enrichment for notes | 2 days |
 
 ---
 
@@ -117,7 +119,8 @@ Each sprint file contains:
 **Outcome:** Full UX, auth system, ready for real users
 
 ### Future Enhancements
-- CLIP emoji tokens / SigLIP frame embeddings (visual context)
+- Text-based emoji chips (sentiment feedback visualization)
+- Semantic search with embeddings
 - Multi-note merging
 - Platform-specific optimizations
 - Advanced diarization / multi-speaker separation
