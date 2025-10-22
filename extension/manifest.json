@@ -4,7 +4,7 @@
   "version": "0.3.0",
   "description": "Voice-first video companion with cloud transcription",
 
-  "permissions": ["sidePanel", "storage", "tabs", "offscreen", "scripting"],
+  "permissions": ["sidePanel", "storage", "tabs", "offscreen", "scripting", "contextMenus", "notifications"],
 
   "host_permissions": [
     "*://*/*"
