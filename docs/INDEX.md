@@ -2,7 +2,7 @@
 
 **Voice-First Video Companion - Complete Technical Documentation**
 
-Last Updated: 2025-10-17
+Last Updated: 2025-10-22
 
 ---
 
@@ -17,10 +17,11 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 | **[01_OVERVIEW.md](./01_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
 | **[02_PRINCIPLES.md](./02_PRINCIPLES.md)** | Development principles guiding architectural decisions | Understand the "why" behind design choices |
 | **[03_ARCHITECTURE.md](./03_ARCHITECTURE.md)** | System design, components, data flow, architectural boundaries | Understand how everything fits together + integration rules |
-| **[sprints/](./sprints/)** | Sprint-based implementation roadmap (6 focused sprints) | Ready to implement - follow sprint-by-sprint |
 | **[04_LIVEVIEW_PATTERNS.md](./04_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
-| **[05_BROWSERBASE_INTEGRATION.md](./05_BROWSERBASE_INTEGRATION.md)** | Automated note posting via Browserbase | Setting up automation system |
+| **[05_AGENTIC_PRINCIPLES.md](./05_AGENTIC_PRINCIPLES.md)** | Agentic architecture, diffusion refinement, continuous observation | Understand intelligent agent behavior patterns |
+| **[sprints/](./sprints/)** | Sprint-based implementation roadmap | Ready to implement - follow sprint-by-sprint |
 | **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Future implementation (WASM Whisper, CLIP) |
+| **[advanced/BROWSERBASE_FALLBACK.md](./advanced/BROWSERBASE_FALLBACK.md)** | Automated note posting via Browserbase | Optional cloud fallback for automation |
 
 ---
 
@@ -85,6 +86,27 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - Automated posting flow
 - AgentSession state machine
 - **Architectural Boundaries & Integration Rules**
+
+---
+
+### 05_AGENTIC_PRINCIPLES.md
+**What it covers:**
+- Transition from manual tools to intelligent companions
+- Context-aware passive observation patterns
+- Progressive evidence accumulation (speech, vision, user actions)
+- Diffusion-style iterative refinement (global coherence)
+- Frame capture rules and adaptive bandwidth management
+- Holistic session reasoning across all notes
+- Latency-budgeted work scheduling for UI responsiveness
+
+**Key sections:**
+- 6 core agentic principles with implementation patterns
+- Diffusion vs autoregressive note generation
+- Review state data structures (notes, relations, evidence)
+- Energy function for quality optimization
+- Controller policy for operation scheduling
+- Agent lifecycle (activation → observation → refinement)
+- Engineering implications (performance budgets, cost governors)
 
 ---
 
