@@ -75,14 +75,16 @@ Speak naturally while watching. The system:
 | **LLM** | OpenAI GPT-4o-mini | Note structuring, intent extraction |
 | **Optional Local** | Rustler NIFs | whisper.cpp/llama.cpp acceleration |
 
-### Automation: Browserbase
+### Computer Use: Local Browser Agent
 
 | Component | Technology | Why |
 |-----------|-----------|-----|
-| **Computer Use** | Browserbase API | Persistent browser sessions |
-| **Automation** | Playwright + Stagehand | Traditional selectors + AI navigation |
-| **Auth Management** | Browserbase Contexts | Persistent login state |
-| **Language** | Python (existing) → Elixir | Port existing agents, gradual migration |
+| **Primary** | Local Chrome (dedicated profile) | Already authenticated, zero latency |
+| **Automation** | Playwright via CDP | Proven reliability, platform-specific selectors |
+| **AI Fallback** | Gemini 2.5 Computer Use API | Vision-based navigation for complex/unknown UIs |
+| **Auth Management** | Persistent Chrome profile | Cookies/localStorage persist across sessions |
+| **Fallback** | Browserbase (optional) | Cloud posting when machine offline |
+| **Platform Adapters** | Existing video/timeline finders | Reusable for selector discovery |
 
 ---
 
@@ -108,8 +110,9 @@ Speak naturally while watching. The system:
 
 4. **Automated Posting**
    - Queue high-confidence notes
-   - Browserbase automation
-   - Status feedback in side panel
+   - Local browser agent with dedicated Chrome profile
+   - Real-time status updates in side panel ("Logging in...", "Posted ✓")
+   - "Summon" feature for MFA/user intervention
 
 ### Future Enhancements
 
@@ -155,9 +158,9 @@ Based on blueprint and research:
    - Do nothing → auto-firms after 3s
    - Click "post" → queues for automation
    ↓
-7. Background: Browserbase posts to video platform
+7. Background: Local browser agent posts to video platform
    ↓
-8. Side panel updates: "Posted ✅"
+8. Side panel updates in real-time: "🔒 Logging in" → "📤 Posting" → "✅ Posted"
 ```
 
 ---
@@ -196,7 +199,9 @@ lossy/
 │   ├── 03_ARCHITECTURE.md        # System design
 │   ├── sprints/                  # Sprint-based roadmap
 │   ├── 04_LIVEVIEW_PATTERNS.md
-│   └── 05_BROWSERBASE_INTEGRATION.md
+│   ├── 06_COMPUTER_USE.md        # Local-first browser automation
+│   └── advanced/
+│       └── BROWSERBASE_FALLBACK.md  # Optional cloud fallback
 │
 ├── lossy/                         # 🔥 Elixir/Phoenix application (@lossy namespace)
 │   ├── lib/lossy/
@@ -254,13 +259,14 @@ lossy/
 
 From research and prototype:
 
-1. **WASM-first, not cloud-first** - Privacy + speed
-2. **LiveView for extension UI** - Real-time streaming perfect for agent progress
-3. **Chained architecture** - OpenAI guidance, easier than realtime voice
-4. **Browserbase Contexts** - Persistent auth, no credential storage
-5. **Stagehand > selectors** - AI navigation more robust than brittle CSS
-6. **Phoenix Channels for binary** - Efficient audio streaming
-7. **Side Panel > Popup** - Persistent UI for note list
+1. **Local-first computer use** - User's authenticated browser, zero latency
+2. **WASM-first transcription** - Privacy + speed (vs. cloud STT)
+3. **LiveView for extension UI** - Real-time streaming perfect for agent progress
+4. **Chained architecture** - OpenAI guidance, easier than realtime voice
+5. **Persistent Chrome profile** - Auth persists, no credential management
+6. **Platform adapters** - Reusable video/timeline element finders
+7. **Phoenix Channels for binary** - Efficient audio streaming
+8. **Side Panel > Popup** - Persistent UI for note list with status updates
 
 ---
 

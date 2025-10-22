@@ -101,9 +101,9 @@ npm run dev
 # The built extension will be in dist/
 ```
 
-### Automation (Optional)
+### Local Browser Agent (Optional)
 
-For automated note posting to video platforms:
+For automated note posting to video platforms using a local Chrome agent:
 
 ```bash
 cd lossy/priv/node
@@ -115,11 +115,11 @@ npm install
 npx playwright install chromium
 
 # Verify setup
-node playwright_server.js
+node playwright_agent.js
 # (Should wait for input - press Ctrl+C to exit)
 ```
 
-**Note:** Requires Browserbase API key set in `.env` (see Environment Variables section).
+**Note:** The agent uses a dedicated Chrome profile at `~/.config/lossy/agent-profile` that persists login sessions. Optional: Set `BROWSERBASE_API_KEY` in `.env` for cloud fallback (see Environment Variables section).
 
 ## 🎯 Development Workflow
 
@@ -187,7 +187,8 @@ See `docs/` directory for detailed guides:
 - `03_ARCHITECTURE.md` - System design and data flow
 - `sprints/` - Sprint-by-sprint implementation roadmap
 - `04_LIVEVIEW_PATTERNS.md` - LiveView in extensions
-- `05_BROWSERBASE_INTEGRATION.md` - Automation setup
+- `06_COMPUTER_USE.md` - Local-first browser automation
+- `advanced/BROWSERBASE_FALLBACK.md` - Cloud fallback (optional)
 - `TECHNICAL_REFERENCES.md` - WASM, WebGPU, model caching
 
 ## 📦 Production Build
@@ -234,7 +235,10 @@ OPENAI_API_KEY=sk-proj-...
 # Optional: Set to "true" to enable server mode
 # PHX_SERVER=true
 
-# Optional: Browserbase Integration (for automated posting)
+# Optional: Gemini Computer Use API (for AI-powered browser navigation)
+# GEMINI_API_KEY=...
+
+# Optional: Browserbase Integration (cloud fallback for automated posting)
 # BROWSERBASE_API_KEY=...
 # BROWSERBASE_PROJECT_ID=...
 ```

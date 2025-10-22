@@ -1,19 +1,31 @@
-# Browserbase Integration Guide
+# Browserbase Fallback Integration (Optional)
 
-**Last Updated:** 2025-10-14
-**Status:** Pre-Implementation
+**Last Updated:** 2025-10-22
+**Status:** Optional/Fallback
+**Primary Approach:** See [docs/06_COMPUTER_USE.md](../06_COMPUTER_USE.md) for local-first browser automation
 
 ---
 
 ## 🎯 Overview
 
-This guide covers integrating **Browserbase** for automated video platform interactions - specifically posting structured notes as comments on Air, YouTube, Vimeo, etc.
+This guide covers integrating **Browserbase** as a **fallback option** for automated note posting when local browser agents are unavailable or unsuitable.
 
-### Why Browserbase?
+**⚠️ Note**: This is NOT the primary approach. Use local browser agents first (see main Computer Use doc).
 
-- **Persistent Sessions**: Long-lived browser contexts maintain login state
+### When to Use Browserbase (Fallback Only)
+
+- **User machine offline** - Can't run local Chrome
+- **Long-running batch jobs** - Posting 100+ notes, user wants to close browser
+- **User preference** - Explicitly prefers cloud-based posting
+- **Local agent failures** - 3+ consecutive failures on local approach
+
+### Why Browserbase (When Used)?
+
+- **Persistent Sessions**: Long-lived browser contexts maintain login state (30 days)
+- **1Password Integration**: Native support for password management (Browserbase feature)
 - **No Credential Storage**: Users log in once via hosted browser, contexts persist
 - **Stealth Mode**: Realistic browser fingerprints, headful option for debugging
+- **Background Operation**: True headless mode when user's machine is offline
 - **AI Navigation**: Stagehand handles dynamic selectors better than brittle CSS
 - **Production-Ready**: Handles proxy rotation, CAPTCHA challenges, session management
 

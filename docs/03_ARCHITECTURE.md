@@ -102,22 +102,26 @@
 │  └──────┬───────────────────────────┬────────────────────────┘│
 │         │                           │                           │
 │  ┌──────▼──────────┐  ┌─────────────▼──────────────────────┐  │
-│  │ Inference       │  │ Automation                          │  │
+│  │ Inference       │  │ Computer Use Automation             │  │
 │  │ Router          │  │                                     │  │
-│  │                 │  │ - NoteApplicator                    │  │
-│  │ - STT           │  │ - BrowserbaseClient                 │  │
-│  │   • WASM (ext)  │  │ - PythonBridge (call existing)      │  │
-│  │   • Cloud API   │  │ - StagehandClient                   │  │
+│  │                 │  │ - LocalAgent (GenServer)            │  │
+│  │ - STT           │  │   • Playwright via CDP              │  │
+│  │   • WASM (ext)  │  │   • Gemini Computer Use (fallback) │  │
+│  │   • Cloud API   │  │   • Node.js Port communication     │  │
 │  │   • Rustler NIF │  │                                     │  │
-│  │                 │  │ Queued via Oban for reliability     │  │
-│  │ - Vision        │  └─────────────────────────────────────┘  │
-│  │   • CLIP (ext)  │                                           │
-│  │   • Cloud API   │                                           │
-│  │                 │                                           │
-│  │ - LLM           │                                           │
-│  │   • OpenAI API  │                                           │
-│  │   • Local llama │                                           │
-│  └─────────────────┘                                           │
+│  │                 │  │ - ProfileSetup                      │  │
+│  │ - Vision        │  │   • Manages agent Chrome profile    │  │
+│  │   • CLIP (ext)  │  │   • Persistent cookies/localStorage│  │
+│  │   • Cloud API   │  │                                     │  │
+│  │                 │  │ - Platform Adapters (reusable)      │  │
+│  │ - LLM           │  │   • Video/timeline element finders │  │
+│  │   • OpenAI API  │  │   • Selector discovery helpers     │  │
+│  │   • Local llama │  │                                     │  │
+│  └─────────────────┘  │ Queued via Oban for reliability     │  │
+│                       │                                     │  │
+│                       │ Optional: BrowserbaseAgent          │  │
+│                       │ (fallback for offline/batch mode)   │  │
+│                       └─────────────────────────────────────┘  │
 │                                                                 │
 │  ┌──────────────────────────────────────────────────────────┐ │
 │  │ Storage (PostgreSQL)                                      │ │
@@ -135,13 +139,17 @@
                          │ HTTPS API calls
                          │
 ┌────────────────────────▼────────────────────────────────────────┐
-│  Browserbase (Computer Use)                                     │
+│  Local Browser Agent (Primary)                                  │
 │                                                                  │
-│  - Create session with auth context                             │
-│  - Connect via Playwright CDP                                   │
+│  - Dedicated Chrome profile (~/.config/lossy/agent-profile)    │
+│  - Playwright via CDP or Gemini Computer Use API               │
 │  - Navigate to video platform                                   │
-│  - Apply note at timestamp                                      │
+│  - Post note as comment at timestamp                           │
+│  - Real-time status updates via PubSub                         │
+│  - "Summon" feature for MFA/user intervention                  │
 │  - Return permalink                                             │
+│                                                                  │
+│  Fallback: Browserbase (optional, when machine offline)        │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -577,35 +585,40 @@ end
 2. Checks confidence threshold
    if confidence > 0.7, queue for posting
    ↓
-3. Creates note in database with status: :pending_post
+3. Creates note in database with status: :ghost
    note = Videos.create_note(structured_note)
    ↓
 4. Enqueues Oban job
-   ApplyNoteWorker.new(%{note_id: note.id}) |> Oban.insert()
+   PostNoteWorker.new(%{note_id: note.id}) |> Oban.insert()
    ↓
 5. Oban worker picks up job (within seconds)
    ↓
-6. Worker calls Browserbase via Python bridge
-   PythonBridge.apply_note_playwright(url, time, text)
+6. Worker calls LocalAgent via GenServer
+   LocalAgent.post_note(note_id, platform, url, timestamp, text)
    ↓
-7. Python agent:
-   - Creates Browserbase session with auth context
-   - Connects via Playwright
-   - Navigates to video URL
-   - Seeks to timestamp
-   - Uses Stagehand AI to post comment
+7. LocalAgent:
+   - Sends request to Node.js Playwright agent via Port
+   - Broadcasts status: "🚀 Launching browser"
+   ↓
+8. Node.js agent:
+   - Launches Chrome with persistent profile (~/.config/lossy/agent-profile)
+   - Checks if logged in via platform adapter selectors
+   - Broadcasts status: "✓ Logged in"
+   - Navigates to video URL at timestamp
+   - Broadcasts status: "📤 Posting comment"
+   - Posts comment using platform-specific selectors
    - Returns permalink
    ↓
-8. Worker updates note in database
-   Videos.update_note(note, %{status: :posted, permalink: result})
+9. LocalAgent broadcasts final status
+   PubSub.broadcast("note:#{note_id}", {:agent_status, "✅ Posted"})
    ↓
-9. Broadcasts update to PubSub
-   PubSub.broadcast("video:#{video_id}", {:note_posted, note})
-   ↓
-10. SidePanelLive receives and updates UI
-    stream_insert(socket, :notes, note)
+10. Worker updates note in database
+    Videos.update_note(note, %{status: :posted, permalink: result})
     ↓
-11. User sees "Posted ✅" status in side panel
+11. NotesLive receives status updates in real-time
+    handle_info({:agent_status, status}) -> updates note card
+    ↓
+12. User sees live progress: "🔒" → "📤" → "✅ Posted"
 ```
 
 ---
