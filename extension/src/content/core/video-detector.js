@@ -1,3 +1,8 @@
+import { createLogger } from '../utils/logger.js';
+
+// Smart logger that only outputs during verbose mode (side panel open or DevTools visible)
+const log = createLogger('[VideoDetector]');
+
 /**
  * Universal video detector - works on any website with <video> elements.
  * Uses heuristics to find and select the "primary" video on the page.
@@ -8,6 +13,10 @@
  * - Shadow DOM support
  * - Continuous monitoring (polling watchdog + IntersectionObserver)
  * - Proper cleanup tracking
+ *
+ * LOGGING STRATEGY:
+ * - Uses smart logging to avoid console spam during casual browsing
+ * - This runs on ALL pages, so most logging is verbose-mode only
  */
 export class VideoDetector {
   constructor(options = {}) {
@@ -27,7 +36,7 @@ export class VideoDetector {
     // Setup AbortSignal listener if provided
     if (this.options.signal) {
       this.options.signal.addEventListener('abort', () => {
-        console.log('[VideoDetector] AbortSignal received, destroying...');
+        log.debug('AbortSignal received, destroying...');
         this.destroy();
       });
     }
@@ -37,7 +46,7 @@ export class VideoDetector {
    * Detect video with multi-strategy approach.
    */
   async detect() {
-    console.log('[VideoDetector] Starting enhanced detection...');
+    log.debug('Starting enhanced detection...');
 
     // Strategy 1: Immediate DOM query
     this.videoElements = this.findAllVideos();
@@ -115,7 +124,7 @@ export class VideoDetector {
           entries.forEach((entry) => {
             if (entry.target === this.primaryVideo) {
               if (!entry.isIntersecting) {
-                console.log('[VideoDetector] Primary video left viewport, re-scoring...');
+                log.debug('Primary video left viewport, re-scoring...');
                 this.revalidatePrimaryVideo();
               }
             }
@@ -134,7 +143,7 @@ export class VideoDetector {
       });
     }
 
-    console.log('[VideoDetector] Continuous monitoring started');
+    log.debug('Continuous monitoring started');
   }
 
   /**
@@ -145,12 +154,12 @@ export class VideoDetector {
 
     // Check if primary video is still valid
     if (!document.contains(this.primaryVideo) || currentScore < -50) {
-      console.log('[VideoDetector] Primary video invalid, re-selecting...');
+      log.debug('Primary video invalid, re-selecting...');
       this.videoElements = this.findAllVideos();
       const newPrimary = this.selectPrimaryVideo(this.videoElements);
 
       if (newPrimary !== this.primaryVideo) {
-        console.log('[VideoDetector] Primary video changed');
+        log.info('Primary video changed');
         this.primaryVideo = newPrimary;
         this.onVideoChanged?.(this.primaryVideo);
       }
@@ -169,7 +178,7 @@ export class VideoDetector {
     if (allScored.length > 0 && allScored[0].video !== this.primaryVideo) {
       // Only swap if new candidate is significantly better
       if (allScored[0].score > currentScore + 30) {
-        console.log('[VideoDetector] Found better video candidate, swapping...');
+        log.info('Found better video candidate, swapping...');
         this.primaryVideo = allScored[0].video;
         this.onVideoChanged?.(this.primaryVideo);
       }
@@ -188,7 +197,7 @@ export class VideoDetector {
         if (iframeDoc) {
           const videos = iframeDoc.querySelectorAll('video');
           if (videos.length > 0) {
-            console.log('[VideoDetector] Found video in iframe');
+            log.debug('Found video in iframe');
             return this.selectPrimaryVideo(Array.from(videos));
           }
         }
@@ -261,8 +270,8 @@ export class VideoDetector {
       .map((v) => ({ video: v, score: this.scoreVideo(v) }))
       .sort((a, b) => b.score - a.score);
 
-    console.log(
-      '[VideoDetector] Scored videos:',
+    log.debug(
+      'Scored videos:',
       scored.map((s) => s.score)
     );
     return scored[0].video;
@@ -299,12 +308,13 @@ export class VideoDetector {
   }
 
   destroy() {
-    console.log('[VideoDetector] Destroying, cleaning up', this.observers.length, 'observers');
+    log.debug('Destroying, cleaning up', this.observers.length, 'observers');
     this.observers.forEach((cleanup) => {
       try {
         cleanup();
       } catch (err) {
-        console.warn('[VideoDetector] Cleanup error:', err);
+        // Cleanup errors should always be visible as they indicate real bugs
+        log.error('Cleanup error:', err);
       }
     });
     this.observers = [];

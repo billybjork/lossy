@@ -1,3 +1,9 @@
+import { createLogger } from '../utils/logger.js';
+
+// Smart logger that only outputs during verbose mode (side panel open or DevTools visible)
+// to avoid console noise during casual browsing on non-video pages
+const log = createLogger('[VideoLifecycle]');
+
 /**
  * Video Lifecycle Manager - State machine for video detection health and persistence.
  *
@@ -7,6 +13,12 @@
  * - Periodic health checks (video validity, adapter health)
  * - Persistent detection (retry until found)
  * - State change callbacks for event notification
+ *
+ * LOGGING STRATEGY:
+ * - Uses smart logging to avoid console spam during casual browsing
+ * - Extension runs on ALL pages (*\/*\/*), so "no video found" is EXPECTED behavior
+ * - Verbose logging only when side panel is open or DevTools console is visible
+ * - Critical errors (exceptions, callback failures) always logged via console.error
  */
 export class VideoLifecycleManager {
   constructor(adapter, options = {}) {
@@ -27,7 +39,7 @@ export class VideoLifecycleManager {
     // Setup AbortSignal listener if provided
     if (this.options.signal) {
       this.options.signal.addEventListener('abort', () => {
-        console.log('[VideoLifecycle] AbortSignal received, stopping...');
+        log.debug('AbortSignal received, stopping...');
         this.stop();
       });
     }
@@ -38,7 +50,7 @@ export class VideoLifecycleManager {
    */
   async start() {
     if (this.state !== 'idle') {
-      console.log('[VideoLifecycle] Already started, state:', this.state);
+      log.debug('Already started, state:', this.state);
       return;
     }
 
@@ -48,19 +60,22 @@ export class VideoLifecycleManager {
       this.videoElement = await this.adapter.detectVideo();
 
       if (this.videoElement) {
-        console.log('[VideoLifecycle] Video detected, starting health checks');
+        log.info('Video detected, starting health checks');
         this.setState('ready');
         this.startHealthChecks();
 
         // CRITICAL FIX: Notify listeners when video is found immediately
         this.notifyStateChange('video_detected', { videoElement: this.videoElement });
       } else {
-        console.warn('[VideoLifecycle] No video found, starting persistent detection');
+        // This is EXPECTED on non-video pages during casual browsing
+        // Only log in verbose mode to avoid console spam
+        log.warn('No video found, starting persistent detection');
         this.setState('error');
         this.startPersistentDetection();
       }
     } catch (error) {
-      console.error('[VideoLifecycle] Detection failed:', error);
+      // Real errors (exceptions) should always be visible
+      log.error('Detection failed:', error);
       this.setState('error');
       this.startPersistentDetection();
     }
@@ -72,7 +87,7 @@ export class VideoLifecycleManager {
   startHealthChecks() {
     this.healthCheckInterval = setInterval(() => {
       if (!this.videoElement || !document.contains(this.videoElement)) {
-        console.log('[VideoLifecycle] 🏥 Video element replaced, recovering...');
+        log.info('🏥 Video element replaced, recovering...');
         this.setState('error');
         this.stop();
         this.start(); // Re-initialize
@@ -81,7 +96,7 @@ export class VideoLifecycleManager {
 
       // Check if video is playable
       if (this.videoElement.error) {
-        console.log('[VideoLifecycle] 🏥 Video error detected, recovering...');
+        log.info('🏥 Video error detected, recovering...');
         this.setState('error');
         this.stop();
         this.start();
@@ -90,7 +105,7 @@ export class VideoLifecycleManager {
 
       // Check adapter health
       if (this.adapter.isHealthy && !this.adapter.isHealthy()) {
-        console.log('[VideoLifecycle] 🏥 Adapter unhealthy, recovering...');
+        log.info('🏥 Adapter unhealthy, recovering...');
         this.setState('error');
         this.stop();
         this.start();
@@ -99,26 +114,32 @@ export class VideoLifecycleManager {
 
       // All checks passed (only log occasionally to reduce noise)
       if (Math.random() < 0.1) {
-        // Log 10% of the time
-        console.log('[VideoLifecycle] 🏥 Health check passed');
+        // Log 10% of the time (and only in verbose mode)
+        log.debug('🏥 Health check passed');
       }
     }, this.options.healthCheckInterval);
   }
 
   /**
    * Persistent detection (retry until video found).
+   *
+   * NOTE: This runs on ALL pages during casual browsing when no initial video is found.
+   * It's EXPECTED to fail on non-video pages (news sites, search engines, etc.).
+   * Logging is suppressed unless verbose mode is active to avoid console spam.
    */
   startPersistentDetection() {
     let attempts = 0;
 
     this.persistentDetectionInterval = setInterval(async () => {
       attempts++;
-      console.log(
-        `[VideoLifecycle] 🔄 Persistent detection attempt ${attempts}/${this.options.persistentDetectionMaxAttempts}`
+      log.debug(
+        `🔄 Persistent detection attempt ${attempts}/${this.options.persistentDetectionMaxAttempts}`
       );
 
       if (attempts >= this.options.persistentDetectionMaxAttempts) {
-        console.error('[VideoLifecycle] ❌ Persistent detection failed after max attempts');
+        // This is EXPECTED on non-video pages - not an error
+        // Only log in verbose mode to avoid console noise during casual browsing
+        log.warn('❌ Persistent detection failed after max attempts');
         clearInterval(this.persistentDetectionInterval);
         this.persistentDetectionInterval = null;
         return;
@@ -128,7 +149,7 @@ export class VideoLifecycleManager {
         this.videoElement = await this.adapter.detectVideo();
 
         if (this.videoElement) {
-          console.log('[VideoLifecycle] ✅ Persistent detection succeeded!');
+          log.info('✅ Persistent detection succeeded!');
           clearInterval(this.persistentDetectionInterval);
           this.persistentDetectionInterval = null;
           this.setState('ready');
@@ -138,7 +159,8 @@ export class VideoLifecycleManager {
           this.notifyStateChange('video_detected', { videoElement: this.videoElement });
         }
       } catch (error) {
-        console.error('[VideoLifecycle] Persistent detection error:', error);
+        // Real errors (exceptions) should always be visible
+        log.error('Persistent detection error:', error);
       }
     }, this.options.persistentDetectionInterval);
   }
@@ -168,7 +190,7 @@ export class VideoLifecycleManager {
 
     const oldState = this.state;
     this.state = newState;
-    console.log(`[VideoLifecycle] State: ${oldState} → ${newState}`);
+    log.debug(`State: ${oldState} → ${newState}`);
     this.notifyStateChange('state_changed', { oldState, newState });
   }
 
@@ -184,7 +206,8 @@ export class VideoLifecycleManager {
       try {
         cb(event, data);
       } catch (err) {
-        console.error('[VideoLifecycle] Callback error:', err);
+        // Callback errors are real bugs that should always be visible
+        log.error('Callback error:', err);
       }
     });
   }

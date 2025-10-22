@@ -2,6 +2,11 @@ import { BasePlatformAdapter } from '../base-adapter.js';
 import { VideoDetector } from '../../core/video-detector.js';
 import { ProgressBarFinder } from '../../core/progress-bar-finder.js';
 import { VideoIdGenerator } from '../../core/video-id-generator.js';
+import { createLogger } from '../../utils/logger.js';
+
+// Smart logger that only outputs during verbose mode (side panel open or DevTools visible)
+// to avoid console noise during casual browsing on non-video pages
+const log = createLogger('[GenericAdapter]');
 
 /**
  * Generic fallback adapter - works on any video site.
@@ -43,19 +48,25 @@ export class GenericAdapter extends BasePlatformAdapter {
 
   /**
    * Detect video using generic heuristics.
+   *
+   * NOTE: This runs on ALL pages, including non-video sites during casual browsing.
+   * Logging is suppressed unless verbose mode is active (side panel open or DevTools visible)
+   * to avoid console noise. This is expected behavior, not an error.
    */
   async detectVideo() {
-    console.log('[GenericAdapter] Detecting video...');
+    log.debug('Detecting video...');
 
     this.detector = new VideoDetector();
     this.videoElement = await this.detector.detect();
 
     if (!this.videoElement) {
-      console.warn('[GenericAdapter] No video element found');
+      // This is EXPECTED on non-video pages - not an error
+      // Only log in verbose mode to avoid console spam during casual browsing
+      log.warn('No video element found');
       return null;
     }
 
-    console.log('[GenericAdapter] Video detected:', this.videoElement);
+    log.info('Video detected:', this.videoElement);
     return this.videoElement;
   }
 
@@ -74,7 +85,9 @@ export class GenericAdapter extends BasePlatformAdapter {
     this.progressBar = finder.find();
 
     if (!this.progressBar) {
-      console.warn('[GenericAdapter] Could not find progress bar');
+      // Progress bar not found - common on some video players
+      // Only log in verbose mode
+      log.warn('Could not find progress bar');
     }
 
     return this.progressBar;

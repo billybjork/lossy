@@ -5,6 +5,10 @@ import { TimelineMarkers } from './shared/timeline-markers.js';
 import { VideoLifecycleManager } from './core/video-lifecycle-manager.js';
 import { NoteLoader } from './core/note-loader.js';
 import { FrameCapturer } from './core/frame-capturer.js'; // Sprint 08
+import { setVerboseLogging, createLogger } from './utils/logger.js';
+
+// Smart logger for initialization and state change events
+const log = createLogger('[Lossy]');
 
 console.log('[Lossy] Universal content script loaded');
 
@@ -69,12 +73,12 @@ let lastClearedVideoId = null; // Track last video ID we cleared UI for
 async function init() {
   // Prevent multiple simultaneous initializations
   if (isInitializing) {
-    console.log('[Lossy] ⚠️ INIT: Already initializing, skipping...');
+    log.debug('⚠️ INIT: Already initializing, skipping...');
     return;
   }
 
   isInitializing = true;
-  console.log('[Lossy] 🔵 INIT: Starting initialization for URL:', window.location.href);
+  log.debug('🔵 INIT: Starting initialization for URL:', window.location.href);
 
   // Create new AbortController for this initialization
   abortController = new AbortController();
@@ -88,8 +92,9 @@ async function init() {
   // Get appropriate adapter for current page
   try {
     adapter = await PlatformRegistry.getAdapter();
-    console.log('[Lossy] 🔵 INIT: Using adapter:', adapter.constructor.platformId);
+    log.debug('🔵 INIT: Using adapter:', adapter.constructor.platformId);
   } catch (error) {
+    // Real errors should always be visible
     console.error('[Lossy] ❌ INIT: Failed to get adapter:', error);
     isInitializing = false;
     return;
@@ -105,23 +110,23 @@ async function init() {
     if (lastClearedVideoId !== detectedVideoId) {
       shouldClearUI = true;
       lastClearedVideoId = detectedVideoId;
-      console.log('[Lossy] 🔵 INIT: Video changed to', detectedVideoId, '- will clear UI');
+      log.debug('🔵 INIT: Video changed to', detectedVideoId, '- will clear UI');
     } else {
-      console.log('[Lossy] 🔵 INIT: Same video', detectedVideoId, '- skipping clear UI');
+      log.debug('🔵 INIT: Same video', detectedVideoId, '- skipping clear UI');
     }
   } catch (error) {
     // If we can't extract video ID, clear to be safe
-    console.warn('[Lossy] ⚠️ INIT: Could not extract video ID, will clear UI to be safe');
+    log.warn('⚠️ INIT: Could not extract video ID, will clear UI to be safe');
     shouldClearUI = true;
   }
 
   // Tell side panel to clear old notes only if switching to different video
   if (shouldClearUI) {
-    console.log('[Lossy] 🔵 INIT: Sending clear_ui to side panel');
+    log.debug('🔵 INIT: Sending clear_ui to side panel');
     safeRuntimeSendMessage({
       action: 'clear_ui',
     }).catch(() => {
-      console.log('[Lossy] 🔵 INIT: Side panel not available for clear_ui');
+      log.debug('🔵 INIT: Side panel not available for clear_ui');
     });
   }
 
@@ -135,10 +140,11 @@ async function init() {
   // Set up callback for when video is detected
   lifecycleManager.onStateChange((event, data) => {
     if (event === 'video_detected') {
-      console.log('[Lossy] 🔵 Video detected via lifecycle manager');
+      log.info('🔵 Video detected via lifecycle manager');
       onVideoReady(data.videoElement);
     } else if (event === 'state_changed' && data.newState === 'error') {
-      console.warn('[Lossy] ⚠️ Lifecycle manager in error state');
+      // This is EXPECTED on non-video pages - only log in verbose mode
+      log.warn('⚠️ Lifecycle manager in error state');
     }
   });
 
@@ -152,7 +158,7 @@ async function init() {
   await lifecycleManager.start();
 
   isInitializing = false;
-  console.log('[Lossy] 🔵 INIT: Initialization complete');
+  log.debug('🔵 INIT: Initialization complete');
 }
 
 /**
@@ -648,18 +654,29 @@ function listenForEvents() {
       return true; // Will respond asynchronously
     }
 
-    // Side panel opened - show timeline markers
+    // Side panel opened - show timeline markers and enable verbose logging
     if (message.action === 'panel_opened') {
       console.log('[Lossy] 👁️ Side panel opened - showing timeline markers');
+
+      // Enable verbose logging while side panel is active
+      // This allows debugging of video detection and other operations
+      // while keeping the console clean during casual browsing
+      setVerboseLogging(true);
+
       if (timelineMarkers) {
         timelineMarkers.show();
       }
       return false;
     }
 
-    // Side panel closed - hide timeline markers
+    // Side panel closed - hide timeline markers and disable verbose logging
     if (message.action === 'panel_closed') {
       console.log('[Lossy] 🙈 Side panel closed - hiding timeline markers');
+
+      // Disable verbose logging to avoid console noise during casual browsing
+      // Extension continues working silently in background for instant activation
+      setVerboseLogging(false);
+
       if (timelineMarkers) {
         timelineMarkers.hide();
       }
