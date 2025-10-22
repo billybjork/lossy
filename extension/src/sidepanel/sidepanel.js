@@ -1116,3 +1116,209 @@ function updateTranscriptionStatus(status) {
 
 // Initialize transcription mode on load
 initTranscriptionMode();
+
+// ============================================================================
+// Sprint 09: Video Library Management
+// ============================================================================
+
+let currentSection = 'notes';
+let videoLibraryCache = [];
+
+// Get DOM elements for library
+const tabNotesBtn = document.getElementById('tabNotes');
+const tabLibraryBtn = document.getElementById('tabLibrary');
+const notesSection = document.getElementById('notesSection');
+const librarySection = document.getElementById('librarySection');
+const videoSearch = document.getElementById('videoSearch');
+const statusFilter = document.getElementById('statusFilter');
+const platformFilter = document.getElementById('platformFilter');
+const videoList = document.getElementById('videoList');
+
+// Tab switching
+tabNotesBtn.addEventListener('click', () => switchSection('notes'));
+tabLibraryBtn.addEventListener('click', () => switchSection('library'));
+
+function switchSection(section) {
+  currentSection = section;
+
+  // Update tab buttons
+  tabNotesBtn.classList.toggle('active', section === 'notes');
+  tabLibraryBtn.classList.toggle('active', section === 'library');
+
+  // Update section visibility
+  notesSection.classList.toggle('hidden', section !== 'notes');
+  librarySection.classList.toggle('hidden', section !== 'library');
+
+  // Load library data if switching to library
+  if (section === 'library') {
+    loadVideoLibrary();
+  }
+}
+
+// Load video library from backend
+async function loadVideoLibrary() {
+  const filters = {
+    status: statusFilter.value || undefined,
+    platform: platformFilter.value || undefined,
+    search: videoSearch.value || undefined
+  };
+
+  console.log('[Library] Loading videos with filters:', filters);
+
+  // TODO: Send via Phoenix Channel when backend integration is ready
+  // For now, use mock data for testing
+  const mockVideos = [
+    {
+      id: '1',
+      platform: 'youtube',
+      external_id: 'test123',
+      url: 'https://youtube.com/watch?v=test123',
+      title: 'Color Grading Tutorial - Advanced Techniques',
+      thumbnail_url: null,
+      duration_seconds: 1234,
+      status: 'in_progress',
+      last_viewed_at: new Date().toISOString(),
+      note_count: 5,
+      inserted_at: new Date().toISOString()
+    },
+    {
+      id: '2',
+      platform: 'vimeo',
+      external_id: 'test456',
+      url: 'https://vimeo.com/test456',
+      title: 'Audio Mixing Masterclass',
+      thumbnail_url: null,
+      duration_seconds: 2400,
+      status: 'queued',
+      last_viewed_at: new Date(Date.now() - 86400000).toISOString(),
+      note_count: 0,
+      inserted_at: new Date(Date.now() - 86400000).toISOString()
+    },
+    {
+      id: '3',
+      platform: 'youtube',
+      external_id: 'test789',
+      url: 'https://youtube.com/watch?v=test789',
+      title: 'Final Edit Review - Client Project',
+      thumbnail_url: null,
+      duration_seconds: 3600,
+      status: 'complete',
+      last_viewed_at: new Date(Date.now() - 172800000).toISOString(),
+      note_count: 12,
+      inserted_at: new Date(Date.now() - 172800000).toISOString()
+    }
+  ];
+
+  // Apply filters to mock data
+  let filteredVideos = mockVideos;
+
+  if (filters.status) {
+    filteredVideos = filteredVideos.filter(v => v.status === filters.status);
+  }
+
+  if (filters.platform) {
+    filteredVideos = filteredVideos.filter(v => v.platform === filters.platform);
+  }
+
+  if (filters.search) {
+    const searchLower = filters.search.toLowerCase();
+    filteredVideos = filteredVideos.filter(v =>
+      (v.title && v.title.toLowerCase().includes(searchLower)) ||
+      (v.url && v.url.toLowerCase().includes(searchLower))
+    );
+  }
+
+  videoLibraryCache = filteredVideos;
+  renderVideoLibrary(filteredVideos);
+}
+
+// Render video library list
+function renderVideoLibrary(videos) {
+  if (videos.length === 0) {
+    videoList.innerHTML = '<div class="empty-state">No videos found</div>';
+    return;
+  }
+
+  videoList.innerHTML = videos.map(video => {
+    const statusClass = video.status.replace('_', '-');
+    const statusLabel = video.status.replace('_', ' ');
+
+    return `
+      <div class="video-item"
+           data-video-id="${video.id}"
+           data-status="${video.status}"
+           data-url="${video.url}">
+        <div class="video-thumbnail" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; color: white; font-size: 24px;">
+          ${getPlatformIcon(video.platform)}
+        </div>
+        <div class="video-info">
+          <div class="video-title">${escapeHtml(video.title || 'Untitled Video')}</div>
+          <div class="video-meta">
+            <span class="video-platform">${escapeHtml(video.platform)}</span>
+            ${video.note_count > 0 ? `<span class="video-notes-count">${video.note_count} note${video.note_count !== 1 ? 's' : ''}</span>` : ''}
+            <span class="video-status-badge ${statusClass}">${statusLabel}</span>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // Attach click handlers
+  videoList.querySelectorAll('.video-item').forEach(item => {
+    item.addEventListener('click', (e) => {
+      const url = e.currentTarget.dataset.url;
+      console.log('[Library] Opening video:', url);
+      chrome.tabs.create({ url });
+    });
+  });
+}
+
+// Get platform icon emoji
+function getPlatformIcon(platform) {
+  const icons = {
+    'youtube': '▶️',
+    'vimeo': '🎬',
+    'frame_io': '🎞️',
+    'iconik': '📹'
+  };
+  return icons[platform] || '🎥';
+}
+
+// HTML escape helper
+function escapeHtml(unsafe) {
+  if (!unsafe) return '';
+  return unsafe
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+// Filter event listeners
+statusFilter.addEventListener('change', loadVideoLibrary);
+platformFilter.addEventListener('change', loadVideoLibrary);
+
+// Search with debounce
+let searchTimeout;
+videoSearch.addEventListener('input', (e) => {
+  clearTimeout(searchTimeout);
+  searchTimeout = setTimeout(() => {
+    loadVideoLibrary();
+  }, 300);
+});
+
+// Listen for video updates from service worker
+// (Assuming service worker forwards channel broadcasts to side panel)
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.type === 'channel_broadcast') {
+    if (message.event === 'video_updated' || message.event === 'video_queued') {
+      // Refresh library if currently viewing
+      if (currentSection === 'library') {
+        loadVideoLibrary();
+      }
+    }
+  }
+});
+
+console.log('[Library] Video library UI initialized');

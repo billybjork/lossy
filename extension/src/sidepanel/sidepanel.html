@@ -429,13 +429,222 @@
       color: white;
       border-color: #3b82f6;
     }
+
+    /* Sprint 09: Tabbed interface */
+    .section-tabs {
+      display: flex;
+      gap: 4px;
+      margin-bottom: 16px;
+      border-bottom: 2px solid #e5e7eb;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 10px 16px;
+      font-size: 14px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: #6b7280;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+    }
+
+    .tab-btn:hover {
+      color: #374151;
+    }
+
+    .tab-btn.active {
+      color: #3b82f6;
+      border-bottom-color: #3b82f6;
+    }
+
+    .section-content {
+      display: block;
+    }
+
+    .section-content.hidden {
+      display: none;
+    }
+
+    /* Sprint 09: Video Library styles */
+    .library-header {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .search-input {
+      padding: 10px 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 14px;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .search-input:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .library-filters {
+      display: flex;
+      gap: 8px;
+    }
+
+    .filter-select {
+      flex: 1;
+      padding: 8px 10px;
+      border: 1px solid #d1d5db;
+      border-radius: 6px;
+      font-size: 13px;
+      background: white;
+      cursor: pointer;
+      font-family: system-ui, -apple-system, sans-serif;
+    }
+
+    .filter-select:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .video-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .video-item {
+      display: flex;
+      gap: 12px;
+      padding: 12px;
+      background: #f9fafb;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-left: 4px solid transparent;
+    }
+
+    .video-item:hover {
+      background: #f3f4f6;
+      transform: translateX(4px);
+    }
+
+    .video-item[data-status="queued"] {
+      border-left-color: #fbbf24;
+    }
+
+    .video-item[data-status="in_progress"] {
+      border-left-color: #3b82f6;
+    }
+
+    .video-item[data-status="complete"] {
+      border-left-color: #10b981;
+    }
+
+    .video-item[data-status="archived"] {
+      border-left-color: #6b7280;
+    }
+
+    .video-thumbnail {
+      width: 80px;
+      height: 45px;
+      border-radius: 4px;
+      object-fit: cover;
+      background: #e5e7eb;
+      flex-shrink: 0;
+    }
+
+    .video-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .video-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
+      margin-bottom: 4px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .video-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 12px;
+      color: #6b7280;
+    }
+
+    .video-platform {
+      text-transform: capitalize;
+    }
+
+    .video-notes-count {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 6px;
+      background: #dbeafe;
+      color: #1e40af;
+      border-radius: 4px;
+      font-weight: 600;
+    }
+
+    .video-status-badge {
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .video-status-badge.queued {
+      background: #fef3c7;
+      color: #92400e;
+    }
+
+    .video-status-badge.in_progress {
+      background: #dbeafe;
+      color: #1e40af;
+    }
+
+    .video-status-badge.complete {
+      background: #d1fae5;
+      color: #065f46;
+    }
+
+    .video-status-badge.archived {
+      background: #f3f4f6;
+      color: #6b7280;
+    }
+
+    .empty-state {
+      padding: 40px 20px;
+      text-align: center;
+      color: #6b7280;
+      font-size: 14px;
+    }
   </style>
 </head>
 <body>
-  <div class="header">
-    <h1 style="margin: 0;">Voice Notes</h1>
-    <div class="status" id="status">Loading...</div>
-    <div class="video-timestamp" id="videoTimestamp">Video: --:--</div>
+  <!-- Sprint 09: Tabbed navigation -->
+  <div class="section-tabs">
+    <button class="tab-btn active" data-section="notes" id="tabNotes">Notes</button>
+    <button class="tab-btn" data-section="library" id="tabLibrary">Library</button>
+  </div>
+
+  <!-- Notes Section (existing content) -->
+  <div class="section-content" id="notesSection">
+    <div class="header">
+      <div class="status" id="status">Loading...</div>
+      <div class="video-timestamp" id="videoTimestamp">Video: --:--</div>
 
     <!-- Transcription Status (Sprint 07) -->
     <div class="transcription-status" id="transcriptionStatus">
@@ -451,15 +660,50 @@
       </div>
     </div>
 
-    <!-- Waveform visualization -->
-    <div class="waveform-container" id="waveformContainer">
-      <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
-      <button id="recordBtn" class="waveform-start-button">🎤 Start Listening</button>
-      <button id="pauseBtn" class="waveform-pause-button">⏸️ Pause</button>
+      <!-- Waveform visualization -->
+      <div class="waveform-container" id="waveformContainer">
+        <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
+        <button id="recordBtn" class="waveform-start-button">🎤 Start Listening</button>
+        <button id="pauseBtn" class="waveform-pause-button">⏸️ Pause</button>
+      </div>
     </div>
+
+    <div class="transcripts" id="transcripts"></div>
   </div>
 
-  <div class="transcripts" id="transcripts"></div>
+  <!-- Sprint 09: Library Section (hidden by default) -->
+  <div class="section-content hidden" id="librarySection">
+    <div class="library-header">
+      <input
+        type="text"
+        id="videoSearch"
+        placeholder="Search videos..."
+        class="search-input"
+      />
+
+      <div class="library-filters">
+        <select id="statusFilter" class="filter-select">
+          <option value="">All Videos</option>
+          <option value="queued">Queued</option>
+          <option value="in_progress">In Progress</option>
+          <option value="complete">Complete</option>
+          <option value="archived">Archived</option>
+        </select>
+
+        <select id="platformFilter" class="filter-select">
+          <option value="">All Platforms</option>
+          <option value="youtube">YouTube</option>
+          <option value="vimeo">Vimeo</option>
+          <option value="frame_io">Frame.io</option>
+          <option value="iconik">Iconik</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="video-list" id="videoList">
+      <!-- Populated dynamically via JS -->
+    </div>
+  </div>
 
   <script src="sidepanel/sidepanel.js"></script>
 </body>

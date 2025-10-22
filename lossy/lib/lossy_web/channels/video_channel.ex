@@ -156,4 +156,103 @@ defmodule LossyWeb.VideoChannel do
         {:reply, {:error, %{message: "Vision refinement failed"}}, socket}
     end
   end
+
+  # Sprint 09: Video library management
+  @impl true
+  def handle_in("list_videos", %{"filters" => filters}, socket) do
+    # TODO: Get user_id from socket.assigns once authentication is implemented
+    # For now, use the user_id from the first video or default to nil
+    user_id = Map.get(socket.assigns, :user_id)
+
+    Logger.info("[VideoChannel] Listing videos for user: #{inspect(user_id)} with filters: #{inspect(filters)}")
+
+    videos =
+      Videos.list_user_videos(user_id,
+        status: filters["status"],
+        platform: filters["platform"],
+        search: filters["search"],
+        limit: Map.get(filters, "limit", 100)
+      )
+
+    {:reply, {:ok, %{videos: serialize_videos(videos)}}, socket}
+  end
+
+  @impl true
+  def handle_in("update_video_status", %{"video_id" => video_id, "status" => status}, socket) do
+    Logger.info("[VideoChannel] Updating video #{video_id} status to: #{status}")
+
+    case Videos.update_video_status(video_id, status) do
+      {:ok, video} ->
+        # Broadcast to all connected clients for this user
+        if video.user_id do
+          Phoenix.PubSub.broadcast(
+            Lossy.PubSub,
+            "user:#{video.user_id}",
+            {:video_updated, serialize_video(video)}
+          )
+        end
+
+        {:reply, :ok, socket}
+
+      {:error, _changeset} ->
+        Logger.error("[VideoChannel] Failed to update video status")
+        {:reply, {:error, %{reason: "Invalid status transition"}}, socket}
+    end
+  end
+
+  @impl true
+  def handle_in("queue_video", video_attrs, socket) do
+    # TODO: Get user_id from socket.assigns once authentication is implemented
+    user_id = Map.get(socket.assigns, :user_id)
+
+    Logger.info("[VideoChannel] Queueing video for user: #{inspect(user_id)}")
+
+    # Convert string keys to atoms for consistency
+    video_attrs_normalized = %{
+      platform: video_attrs["platform"],
+      external_id: video_attrs["external_id"],
+      url: video_attrs["url"],
+      title: video_attrs["title"],
+      thumbnail_url: video_attrs["thumbnail_url"]
+    }
+
+    case Videos.queue_video(user_id, video_attrs_normalized) do
+      {:ok, video} ->
+        # Broadcast to all connected clients for this user
+        if user_id do
+          Phoenix.PubSub.broadcast(
+            Lossy.PubSub,
+            "user:#{user_id}",
+            {:video_queued, serialize_video(video)}
+          )
+        end
+
+        {:reply, {:ok, serialize_video(video)}, socket}
+
+      {:error, changeset} ->
+        Logger.error("[VideoChannel] Failed to queue video: #{inspect(changeset)}")
+        {:reply, {:error, %{reason: "Failed to queue video"}}, socket}
+    end
+  end
+
+  # Serialization helpers
+  defp serialize_videos(videos) do
+    Enum.map(videos, &serialize_video/1)
+  end
+
+  defp serialize_video(video) do
+    %{
+      id: video.id,
+      platform: video.platform,
+      external_id: video.external_id,
+      url: video.url,
+      title: video.title,
+      thumbnail_url: video.thumbnail_url,
+      duration_seconds: video.duration_seconds,
+      status: video.status,
+      last_viewed_at: video.last_viewed_at,
+      note_count: Map.get(video, :note_count, 0),
+      inserted_at: video.inserted_at
+    }
+  end
 end
