@@ -243,6 +243,12 @@ defmodule Lossy.Agent.Session do
             session_id: state.session_id
           })
 
+        # Sprint 09: Update video's last_viewed_at and auto-transition status
+        # (queued → in_progress when first note is created)
+        if state.video_id do
+          Videos.touch_video(state.video_id)
+        end
+
         # Broadcast final result
         broadcast_event(state.session_id, %{
           type: :note_created,
