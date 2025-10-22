@@ -1222,6 +1222,9 @@ function renderVideoLibrary(videos) {
       const url = e.currentTarget.dataset.url;
       console.log('[Library] Opening video:', url);
       chrome.tabs.create({ url });
+
+      // Switch to Notes tab to show the video's notes
+      switchSection('notes');
     });
   });
 }
