@@ -15,11 +15,11 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 | **[01_OVERVIEW.md](./01_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
 | **[02_PRINCIPLES.md](./02_PRINCIPLES.md)** | Development principles guiding architectural decisions | Understand the "why" behind design choices |
 | **[03_ARCHITECTURE.md](./03_ARCHITECTURE.md)** | System design, components, data flow, architectural boundaries | Understand how everything fits together + integration rules |
-| **[04_LIVEVIEW_PATTERNS.md](./04_LIVEVIEW_PATTERNS.md)** | Phoenix LiveView in browser extensions | Implementing real-time UI components |
 | **[05_AGENTIC_PRINCIPLES.md](./05_AGENTIC_PRINCIPLES.md)** | Agentic architecture, diffusion refinement, continuous observation | Understand intelligent agent behavior patterns |
+| **[06_COMPUTER_USE.md](./06_COMPUTER_USE.md)** | Local browser automation with Playwright + Gemini Computer Use | Automated note posting via local agent |
 | **[sprints/](./sprints/)** | Sprint-based implementation roadmap | Ready to implement - follow sprint-by-sprint |
-| **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Future implementation (WASM Whisper, CLIP) |
-| **[advanced/BROWSERBASE_FALLBACK.md](./advanced/BROWSERBASE_FALLBACK.md)** | Automated note posting via Browserbase | Optional cloud fallback for automation |
+| **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Implementation references for local ML |
+| **[advanced/BROWSERBASE_FALLBACK.md](./advanced/BROWSERBASE_FALLBACK.md)** | Cloud automation fallback via Browserbase | Optional when local agent unavailable |
 
 ---
 
@@ -126,49 +126,6 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 - **[Sprint TBD](./sprints/planned/SPRINT_TBD_polish.md)**: ⏳ UX polish (Planned)
 
 **See:** [sprints/README.md](./sprints/README.md) for current status and sprint system overview
-
----
-
-### 04_LIVEVIEW_PATTERNS.md
-**What it covers:**
-- How to use Phoenix LiveView in Chrome extensions
-- Complete setup requirements (CSP, check_origin, auth)
-- Side panel implementation with hooks
-- Streaming patterns for efficient updates
-- Context-aware rendering (current video)
-- Bidirectional actions (click note → seek video)
-- Service worker coordination
-- Offline handling & reconnection
-- Debugging tips
-
-**Key sections:**
-- Setup requirements checklist
-- Complete side panel implementation (Elixir + JavaScript)
-- Real-time streaming with `stream_insert/3`
-- Phoenix hooks for client-side interactivity
-- Connection state management
-- Common patterns and gotchas
-
----
-
-### 05_BROWSERBASE_INTEGRATION.md
-**What it covers:**
-- Three-phase integration strategy (Python bridge → Port → Pure Elixir)
-- Oban worker setup for reliable posting
-- Session management and auth flow
-- Error handling and retry strategies
-- Monitoring and observability
-- Testing approach
-- Production checklist
-
-**Key sections:**
-- Architecture overview (AgentSession → Oban → Python/Browserbase)
-- Phase 1: `System.cmd()` bridge (fastest implementation)
-- Phase 2: Port communication (better performance)
-- Phase 3: Pure Elixir (future migration)
-- Session management (create, reuse, expiry)
-- Common errors and solutions
-- Telemetry and monitoring
 
 ---
 

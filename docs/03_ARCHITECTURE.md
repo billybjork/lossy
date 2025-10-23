@@ -10,7 +10,7 @@
 │                                                                  │
 │  ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐   │
 │  │ Side Panel   │  │ Popup        │  │ Content Script     │   │
-│  │ (LiveView)   │  │ (LiveView)   │  │ (Shadow DOM)       │   │
+│  │ (Vanilla JS) │  │ (Vanilla JS) │  │ (Shadow DOM)       │   │
 │  │              │  │              │  │                    │   │
 │  │ - Note list  │  │ - Controls   │  │ - Overlays        │   │
 │  │ - Filters    │  │ - Agent UI   │  │ - Anchor chip     │   │
@@ -43,9 +43,9 @@
 └────────────────────────┬────────────────────────────────────────┘
                          │
                          │ WebSocket (wss://)
-                         │ - Audio binary frames
+                         │ - Phoenix Channels (notes, audio)
                          │ - Control messages
-                         │ - LiveView connection
+                         │ - Real-time note updates
                          │
 ┌────────────────────────▼────────────────────────────────────────┐
 │  Backend (Elixir)                                               │
@@ -53,24 +53,23 @@
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │ Phoenix Endpoint                                          │  │
 │  │                                                           │  │
-│  │ - WebSocket /live (LiveView)                             │  │
-│  │ - WebSocket /socket (Channels)                           │  │
+│  │ - WebSocket /socket (Channels - extension uses this)    │  │
+│  │ - WebSocket /live (LiveView - test/debug pages only)    │  │
 │  │ - REST API /api/* (auth, config)                         │  │
 │  │ - check_origin: ["chrome-extension://..."]              │  │
-│  └──────────┬───────────────────────┬───────────────────────┘  │
-│             │                       │                           │
-│  ┌──────────▼──────────┐  ┌─────────▼──────────────────────┐  │
-│  │ LiveView            │  │ Phoenix Channels               │  │
-│  │                     │  │                                │  │
-│  │ - SidePanelLive    │  │ - AudioChannel                 │  │
-│  │ - AgentPopupLive   │  │   (binary audio streaming)     │  │
-│  │                     │  │ - VideoChannel                 │  │
-│  │ Subscribes to:      │  │   (frame data, metadata)       │  │
-│  │ - PubSub topics     │  │ - UserChannel                  │  │
-│  │ - stream_insert/3   │  │   (global events)              │  │
-│  └──────────┬──────────┘  └─────────┬──────────────────────┘  │
-│             │                       │                           │
-│             └───────────┬───────────┘                           │
+│  └──────────┬────────────────────────────────────────────────┘│
+│             │                                                   │
+│  ┌──────────▼──────────────────────────────────────────────┐  │
+│  │ Phoenix Channels (Extension UI)                         │  │
+│  │                                                           │  │
+│  │ - NotesChannel (real-time note updates)                 │  │
+│  │ - AudioChannel (binary audio streaming, metadata)       │  │
+│  │ - VideoChannel (frame data, playback sync)              │  │
+│  │ - UserChannel (global events, presence)                 │  │
+│  │                                                           │  │
+│  │ Broadcasts via PubSub when notes change                  │  │
+│  └──────────┬────────────────────────────────────────────────┘│
+│             │                                                   │
 │                         │                                       │
 │  ┌──────────────────────▼──────────────────────────────────┐  │
 │  │ Phoenix.PubSub                                           │  │
@@ -274,32 +273,34 @@ abortController.abort(); // Triggers destroy() on all components
 - Persistent note loading with retry (handles backend unavailability)
 - Graceful degradation with clear console logging (reduced noise, no false alerts)
 
-#### Side Panel (LiveView Client)
+#### Side Panel (Vanilla JS + Phoenix Channels)
 
 **Purpose:** Persistent note list and controls
 
 **Responsibilities:**
 - Load local `sidepanel.html`
-- Bundle and initialize `phoenix.js` + LiveView client
+- Bundle and initialize `phoenix.js` for Channels
 - Connect to Phoenix via WebSocket with token auth
-- Subscribe to PubSub topics for real-time updates
+- Subscribe to NotesChannel for real-time note updates
 - Handle user interactions (filter, seek, post)
 
 **Pattern:**
 ```javascript
-// Local HTML → Bundled JS → LiveView connection
-const liveSocket = new LiveSocket("wss://...", Socket, {
-  params: { auth_token, session_id, video_id }
+// Local HTML → Bundled JS → Phoenix Channels connection
+const socket = new Socket("wss://...", {
+  params: { auth_token, session_id }
 });
+const notesChannel = socket.channel("notes:user_123", {});
+notesChannel.on("note_created", (note) => renderNote(note));
 ```
 
-#### Popup (LiveView Client)
+#### Popup (Vanilla JS + Phoenix Channels)
 
 **Purpose:** Quick controls and agent progress
 
 **Responsibilities:**
 - Same pattern as side panel
-- More focused on agent status
+- More focused on agent status and controls
 - Mic toggle, session info
 - Ephemeral (closes frequently)
 
@@ -319,22 +320,17 @@ config :lossy, LossyWeb.Endpoint,
   ]
 
 # Two sockets
-socket "/live", Phoenix.LiveView.Socket  # LiveView
-socket "/socket", LossyWeb.UserSocket    # Channels
+socket "/live", Phoenix.LiveView.Socket  # Test/debug pages only
+socket "/socket", LossyWeb.UserSocket    # Extension uses this
 ```
 
-#### LiveView Modules
+#### LiveView (Test/Debug Pages Only)
 
-**SidePanelLive:**
-- Mounts with `{auth_token, session_id, video_id}`
-- Subscribes to `"session:#{session_id}"` and `"video:#{video_id}"`
-- Uses `stream/3` for efficient note list rendering
-- Handles filter changes, video context switches
-
-**AgentPopupLive:**
-- Similar to SidePanelLive but focused on agent events
-- Timeline of `:asr_partial`, `:tool_start`, etc.
-- Mic control via JS hook
+**NotesLive:**
+- Browser-based test page for viewing notes
+- Subscribes to PubSub for real-time updates
+- Uses `stream/3` for efficient note rendering
+- NOT used by extension UI (extension uses Vanilla JS + Channels)
 
 #### Phoenix Channels
 
@@ -534,12 +530,13 @@ end
 9. Broadcast event to PubSub
    {:agent_event, %{type: :asr_final, text: "..."}}
    ↓
-10. SidePanelLive receives via PubSub subscription
+10. NotesChannel receives via PubSub subscription
     ↓
-11. LiveView stream_insert adds to UI
-    {:noreply, stream_insert(socket, :events, event)}
+11. Channel pushes event to connected client
+    push(socket, "note_created", note)
     ↓
-12. Browser renders new event (zero flicker)
+12. Side panel JS renders new note
+    notesChannel.on("note_created", (note) => renderNote(note))
 ```
 
 ### Example 2: Video Context Change
@@ -553,21 +550,20 @@ end
    ↓
 4. Sends to side panel via postMessage
    ↓
-5. Side panel's LiveView pushes event
-   liveSocket.pushEvent("video_changed", {video_id: newId})
+5. Side panel's JS sends message to NotesChannel
+   notesChannel.push("video_changed", {video_id: newId})
    ↓
-6. Phoenix SidePanelLive receives
-   def handle_event("video_changed", %{"video_id" => vid}, socket)
+6. NotesChannel receives and handles
+   def handle_in("video_changed", %{"video_id" => vid}, socket)
    ↓
-7. Unsubscribe from old video topic, subscribe to new
-   PubSub.unsubscribe("video:#{old_id}")
-   PubSub.subscribe("video:#{new_id}")
-   ↓
-8. Reload notes for new video
+7. Update channel assigns and reload notes
    notes = Videos.list_notes(new_video_id)
    ↓
-9. Reset stream
-   {:noreply, stream(socket, :notes, notes, reset: true)}
+8. Push notes to client
+   push(socket, "notes_list", %{notes: notes})
+   ↓
+9. Side panel JS receives and re-renders
+   notesChannel.on("notes_list", ({notes}) => renderNotesList(notes))
    ↓
 10. Browser re-renders note list
 ```

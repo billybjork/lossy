@@ -31,16 +31,16 @@ Speak naturally while watching. The system:
 
 ### Frontend: Browser Extension (MV3)
 
-| Component                 | Technology                    | Why                                      |
-| ------------------------- | ----------------------------- | ---------------------------------------- |
-| **Extension Framework**   | Chrome MV3                    | Side Panel API, modern security          |
-| **UI - Popup**            | Vanilla JS                    | Simple controls, Chrome extension APIs   |
+| Component                 | Technology                    | Why                                               |
+| ------------------------- | ----------------------------- | ------------------------------------------------- |
+| **Extension Framework**   | Chrome MV3                    | Side Panel API, modern security                   |
+| **UI - Popup**            | Vanilla JS                    | Simple controls, Chrome extension APIs            |
 | **UI - Side Panel**       | Vanilla JS + Phoenix Channels | Real-time notes via direct WebSocket subscription |
-| **UI - Overlays**         | Shadow DOM + Vanilla JS       | On-video ghost comments, emoji chips     |
-| **Voice Capture**         | MediaRecorder + VAD           | Silero VAD (onnxruntime-web, Sprint 12)  |
-| **Local STT**             | Transformers.js (Whisper)     | WebGPU → WASM (local-only)               |
-| **Emoji Chips** (Planned) | Text classification           | Keyword/embedding-based on transcription |
-| **Bundler**               | Webpack 5                     | Bundles phoenix.js for WebSocket client  |
+| **UI - Overlays**         | Shadow DOM + Vanilla JS       | On-video ghost comments, emoji chips              |
+| **Voice Capture**         | MediaRecorder + VAD           | Silero VAD (onnxruntime-web, Sprint 12)           |
+| **Local STT**             | Transformers.js (Whisper)     | WebGPU → WASM (local-only)                        |
+| **Emoji Chips** (Planned) | Text classification           | Keyword/embedding-based on transcription          |
+| **Bundler**               | Webpack 5                     | Bundles phoenix.js for WebSocket client           |
 
 **Technology Fallback Hierarchy:**
 
@@ -64,16 +64,16 @@ _Memory Considerations:_
 
 ### Backend: Phoenix/Elixir
 
-| Component           | Technology         | Why                                   |
-| ------------------- | ------------------ | ------------------------------------- |
+| Component           | Technology         | Why                                     |
+| ------------------- | ------------------ | --------------------------------------- |
 | **Web Framework**   | Phoenix 1.7        | Channels, PubSub, LiveView (test pages) |
-| **Real-time**       | Phoenix Channels   | WebSocket for audio streaming + notes |
-| **UI Framework**    | Phoenix LiveView   | Test/debug pages (not extension UI)  |
-| **Agent State**     | GenServer + PubSub | Supervised, observable sessions       |
-| **Database**        | PostgreSQL         | Structured storage, vector embeddings |
-| **Background Jobs** | Oban               | Note posting queue                    |
-| **LLM**             | OpenAI GPT-4o-mini | Note structuring, intent extraction   |
-| **Optional Local**  | Rustler NIFs       | whisper.cpp/llama.cpp acceleration    |
+| **Real-time**       | Phoenix Channels   | WebSocket for audio streaming + notes   |
+| **UI Framework**    | Phoenix LiveView   | Test/debug pages (not extension UI)     |
+| **Agent State**     | GenServer + PubSub | Supervised, observable sessions         |
+| **Database**        | PostgreSQL         | Structured storage, vector embeddings   |
+| **Background Jobs** | Oban               | Note posting queue                      |
+| **LLM**             | OpenAI GPT-4o-mini | Note structuring, intent extraction     |
+| **Optional Local**  | Rustler NIFs       | whisper.cpp/llama.cpp acceleration      |
 
 ### Computer Use: Local Browser Agent
 
@@ -220,29 +220,15 @@ From research and prototype:
 
 1. **Local-first computer use** - User's authenticated browser, zero latency
 2. **Local-only transcription** - WebGPU-first (70%), WASM fallback (30%), 100% private
-3. **LiveView for extension UI** - Real-time streaming perfect for agent progress
+3. **Phoenix Channels for extension** - Direct WebSocket subscription, simpler than LiveView for single-user UI
 4. **Chained architecture** - OpenAI guidance, easier than realtime voice
 5. **Persistent Chrome profile** - Auth persists, no credential management
 6. **Platform adapters** - Reusable video/timeline element finders
-7. **Phoenix Channels for binary** - Efficient audio streaming
-8. **Side Panel > Popup** - Persistent UI for note list with status updates
+7. **Vanilla JS for extension UI** - Chrome APIs don't need LiveView complexity
+8. **Side Panel > Popup** - Persistent UI for note list with real-time updates
 
 ---
 
-## ⚡ Quick Start
-
-```bash
-# Backend
-cd lossy
-mix deps.get
-mix ecto.setup
-mix phx.server
-
-# Extension
-cd extension
-npm install
-npm run build
-# Load unpacked extension from extension/dist/
-```
-
-See `sprints/` for sprint-by-sprint implementation plan.
+> **🚀 Quick Start**: See [README.md](../README.md#quick-start) for setup and installation instructions.
+>
+> **📋 Implementation Plan**: See [sprints/](./sprints/) for sprint-by-sprint roadmap.

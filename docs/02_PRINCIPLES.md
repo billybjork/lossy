@@ -136,7 +136,7 @@ const model = await loadModel('whisper-base');
 **Code Example:**
 ```elixir
 # Show simple status by default, detailed info in debug mode
-defmodule LossyWeb.SidePanelLive do
+defmodule LossyWeb.NotesLive do
   def render(assigns) do
     ~H"""
     <div class="note-card">
