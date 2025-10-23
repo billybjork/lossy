@@ -36,6 +36,11 @@ module.exports = (env, argv) => {
           { from: 'public', to: '', noErrorOnMissing: true, globOptions: { dot: true, ignore: ['**/.gitkeep'] } },
           { from: 'src/sidepanel/sidepanel.html', to: 'sidepanel.html' },
           { from: 'src/offscreen/offscreen.html', to: 'offscreen.html' },
+          {
+            from: 'public/models/silero_vad_v5.onnx',
+            to: 'models/silero_vad_v5.onnx',
+            noErrorOnMissing: false,
+          },
           // Copy ONNX Runtime WASM files for local bundling (Chrome MV3 requirement)
           // Chrome extensions cannot load remotely hosted code from CDNs
           {

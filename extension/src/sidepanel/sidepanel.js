@@ -188,6 +188,13 @@ const telemetrySpeech = document.getElementById('telemetrySpeech');
 const telemetryShort = document.getElementById('telemetryShort');
 const telemetryCooldown = document.getElementById('telemetryCooldown');
 const telemetryLatency = document.getElementById('telemetryLatency');
+const telemetryConfidence = document.getElementById('telemetryConfidence');
+const telemetryRestarts = document.getElementById('telemetryRestarts');
+const telemetryNotes = document.getElementById('telemetryNotes');
+const telemetryUptime = document.getElementById('telemetryUptime');
+
+const retryVADBtn = document.getElementById('retryVADBtn');
+const disablePassiveBtn = document.getElementById('disablePassiveBtn');
 
 // Initialize LiveWaveform
 const waveformCanvas = document.getElementById('waveformCanvas');
@@ -505,6 +512,43 @@ passiveModeToggleMain.addEventListener('click', async () => {
   }
 });
 
+if (retryVADBtn) {
+  retryVADBtn.addEventListener('click', async () => {
+    retryVADBtn.disabled = true;
+    const originalText = retryVADBtn.textContent;
+    retryVADBtn.textContent = 'Retrying…';
+
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'retry_passive_vad' });
+      if (!response?.success) {
+        console.warn('[Passive] Retry VAD reported failure:', response?.error);
+      }
+    } catch (error) {
+      console.error('[Passive] Retry VAD command failed:', error);
+    } finally {
+      retryVADBtn.disabled = false;
+      retryVADBtn.textContent = originalText;
+    }
+  });
+}
+
+if (disablePassiveBtn) {
+  disablePassiveBtn.addEventListener('click', async () => {
+    disablePassiveBtn.disabled = true;
+
+    try {
+      await chrome.runtime.sendMessage({ action: 'stop_passive_session' });
+      passiveModeToggleMain.classList.remove('active');
+      await setPassiveModeEnabled(false);
+      updatePassiveStatus('idle');
+    } catch (error) {
+      console.error('[Passive] Failed to disable passive mode:', error);
+    } finally {
+      disablePassiveBtn.disabled = false;
+    }
+  });
+}
+
 // Sprint 10: Toggle debug drawer visibility
 function toggleDebugDrawer() {
   const isVisible = debugDrawer.classList.contains('visible');
@@ -528,6 +572,10 @@ function updatePassiveStatus(status, telemetry = null, errorMessage = null) {
     telemetryShort.textContent = telemetry.ignoredShort || 0;
     telemetryCooldown.textContent = telemetry.ignoredCooldown || 0;
     telemetryLatency.textContent = `${Math.round(telemetry.avgLatencyMs || 0)}ms`;
+    telemetryConfidence.textContent = Number.parseFloat(telemetry.lastConfidence ?? 0).toFixed(2);
+    telemetryRestarts.textContent = telemetry.restartAttempts || 0;
+    telemetryNotes.textContent = telemetry.notesCreated || 0;
+    telemetryUptime.textContent = telemetry.uptime || '0s';
   }
 
   // Sprint 10: Show/hide error message
@@ -1386,17 +1434,25 @@ function updateTranscriptionStatus(status) {
 }
 
 // Sprint 10: Initialize passive mode on load
-// Auto-start behavior: Always start when sidepanel opens, with 10-second timeout if no speech
+// Auto-start only if user previously enabled passive mode in settings
 async function initPassiveMode() {
-  console.log('[Passive] Auto-starting passive mode on sidepanel open');
+  console.log('[Passive] Checking persisted passive mode preference');
 
   try {
-    // Always start passive mode when sidepanel opens
-    await chrome.runtime.sendMessage({ action: 'start_passive_session' });
+    const isEnabled = await getPassiveModeEnabled();
+
+    if (!isEnabled) {
+      console.log('[Passive] Passive mode disabled in storage – leaving idle');
+      passiveModeToggleMain.classList.remove('active');
+      updatePassiveStatus('idle');
+      await setPassiveModeEnabled(false);
+      return;
+    }
+
+    console.log('[Passive] Passive mode previously enabled – awaiting user confirmation to start');
     passiveModeToggleMain.classList.add('active');
-    updatePassiveStatus('observing');
-    await setPassiveModeEnabled(true);
-    console.log('[Passive] Auto-started passive mode (will stop after 10s if no speech)');
+    updatePassiveStatus('idle');
+    // Previous setting remains true so the toggle reflects state; user must click to actually start.
   } catch (err) {
     console.error('[Passive] Failed to auto-start passive session:', err);
     passiveModeToggleMain.classList.remove('active');

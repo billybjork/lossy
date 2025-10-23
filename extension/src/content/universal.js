@@ -526,6 +526,34 @@ function listenForEvents() {
       return true; // Keep channel open for async response
     }
 
+    if (message.action === 'passive_pause_video') {
+      const isPaused =
+        !videoController || !videoController.videoElement
+          ? true
+          : videoController.videoElement.paused || videoController.videoElement.ended;
+
+      if (!isPaused) {
+        videoController.pause();
+      }
+
+      sendResponse({ success: true, wasPlaying: !isPaused });
+      return false;
+    }
+
+    if (message.action === 'passive_resume_video') {
+      let resumed = false;
+
+      if (videoController && videoController.videoElement) {
+        if (videoController.videoElement.paused && !videoController.videoElement.ended) {
+          videoController.play();
+          resumed = true;
+        }
+      }
+
+      sendResponse({ success: true, resumed });
+      return false;
+    }
+
     if (message.action === 'recording_stopped') {
       console.log('[Lossy] Recording stopped');
 

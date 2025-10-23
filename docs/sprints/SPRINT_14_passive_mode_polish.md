@@ -26,51 +26,42 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 ### Primary Deliverables
 
 1. **Silero VAD Integration**
-   - Replace energy-based VAD with ML-based Silero ONNX model
-   - WebAssembly inference in offscreen document
-   - No fallback (WebAssembly is universally supported in modern Chrome)
-   - Target: <5% false positive rate (down from 10-20%)
+   - Ship a single, always-on Silero v5 pipeline backed by `onnxruntime-web`
+   - Run inference from the offscreen document using WASM with 512-sample frames
+   - Surface clear errors + auto-retries when Silero cannot initialize (graceful degradation)
+   - Target: <5% false positive rate (down from 10-20%) and reliable `speech_end` detection
 
-2. **Visual Status Indicators**
-   - Status badge showing current VAD state
-   - Real-time state indicator (observing, recording, cooldown, error)
-   - Browser action badge for extension icon
-   - Optional video overlay during recording
+2. **Passive Mode Feedback & Telemetry**
+   - Reuse the existing passive status chip and waveform, wiring them to live Silero telemetry
+   - Add Chrome action badge updates (recording state + note count)
+   - Surface initialization / error states in the side panel and debug drawer
+   - Optional lightweight video overlay remains deferred unless needed
 
 3. **Auto-Pause Video During Speech** *(Proactive Agent Behavior)*
    - Automatically pause video when VAD detects speech start
    - Resume playback after speech ends (with configurable delay)
-   - Prevents video audio from contaminating transcription
-   - Keeps video from progressing while user is speaking
+   - Prevent video audio from contaminating transcription and keep the timeline in sync
    - User can disable this behavior in settings (default: ON)
    - First-time users see brief explanation: "Video will auto-pause when you speak"
 
-4. **Waveform Visualizer**
-   - Real-time audio waveform in debug drawer
-   - Visual confirmation that mic is working
-   - Debugging tool for VAD issues
-   - Shows when audio crosses detection threshold
+4. **Reliability Guardrails**
+   - Auto-restart Silero on heartbeat failures with exponential backoff
+   - Circuit breaker pattern (max restarts, cool-down window)
+   - Clear status + user notification when VAD fails permanently
+   - Telemetry for restart attempts and uptime
 
-5. **Automatic VAD Restart & Circuit Breaker**
-   - Auto-restart VAD on heartbeat failure
-   - Circuit breaker pattern (max restarts, backoff)
-   - User notification when VAD fails permanently
-   - Telemetry for reliability metrics
-
-6. **Debug Drawer Improvements**
-   - Fix non-functional indicators in current debug drawer
-   - Show real-time VAD metrics (latency, detection count)
-   - Display current session statistics
-   - Logging for troubleshooting
+5. **Debug Drawer Instrumentation**
+   - Wire the existing debug drawer elements to real metrics (latency, detections, errors)
+   - Display current session statistics and last Silero confidence score
+   - Provide quick actions for manual recovery when passive mode has failed
 
 ### Success Criteria
 
-- [ ] Silero VAD reduces false positive rate to <5% (measured in controlled environment)
-- [ ] Status badge clearly shows current VAD state at all times
-- [ ] Video automatically pauses/resumes during speech with <100ms latency
-- [ ] Waveform visualizer helps users debug mic/VAD issues
-- [ ] Automatic restart recovers from 95% of VAD failures
-- [ ] Debug drawer shows accurate real-time metrics
+- [ ] Silero initializes successfully on supported Chrome builds and reduces false positives to <5%
+- [ ] Passive status chip, waveform, and Chrome action badge reflect real VAD state within 100 ms
+- [ ] Video automatically pauses/resumes during speech with <100 ms latency and respects manual pauses
+- [ ] Auto-retry + circuit breaker recover from 95% of transient failures and surface errors clearly
+- [ ] Debug drawer shows accurate real-time metrics (detections, latency, last confidence, restart count)
 
 ---
 
@@ -88,72 +79,53 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 - Fast (<5ms per frame) but not very accurate
 
 **Proposed Solution:**
-- Silero VAD ONNX model (~2MB, silero_vad.onnx v5)
-- Use `onnxruntime-web` directly (note: `@ricky0123/vad-web` is deprecated)
-- WebAssembly-only (no WebGPU - unnecessary for VAD's <1ms inference time)
-- Inference in offscreen document (AudioWorklet can't run ONNX)
+- Bundle the Silero v5 ONNX model (~2 MB) with the extension and run it via `onnxruntime-web`
+- Keep inference inside the offscreen document, using a dedicated `AudioContext` + `ScriptProcessor` to feed frames
+- Maintain a lightweight frame buffer (160-sample chunks → 512-sample tensors) and persist Silero LSTM state between calls
+- Treat Silero as the single source of truth; if initialization fails, surface the error, stop passive mode, and offer retry guidance
 
 **Why This Fixes the Bug:**
 - **ML-trained speech/silence discrimination:** Silero distinguishes actual speech from background noise
 - **Proper speech boundaries:** Returns confidence scores that clearly indicate speech vs silence
 - **No energy threshold ambiguity:** ML model trained on thousands of hours of real-world audio
-- **Result:** Reliable `speech_start` AND `speech_end` events, recordings stop properly
+- **Result:** Reliable `speech_start` AND `speech_end` events, recordings stop properly while staying simple to reason about
 
 **Architecture:**
 ```
-AudioWorklet (in offscreen.js)
+Offscreen AudioContext (ScriptProcessor, 16 kHz, bufferSize 1024)
     │
-    ├─ Capture audio frames (128 samples, 8ms @ 16kHz)
-    ├─ Send to offscreen document via postMessage
+    ├─ Capture audio frames (1024 samples ≈ 64 ms)
+    ├─ Slice into 160-sample chunks, push into ring buffer
     │
     ▼
-Offscreen Document - SileroVAD
+SileroVAD (onnxruntime-web, WASM)
     │
-    ├─ Buffer audio until 512 samples available (32ms @ 16kHz)
-    ├─ Run ONNX inference (<1ms per 512-sample frame)
-    ├─ Maintain LSTM states (h, c) between frames
+    ├─ Pull 512-sample tensors from buffer (≈32 ms of audio)
+    ├─ Run inference (<1 ms per frame)
+    ├─ Maintain LSTM (h, c) state between frames
     ├─ Speech probability > 0.5? ──► speech_start event
-    ├─ Speech probability < 0.35 for 500ms? ──► speech_end event
-    │
-    ▼
-Service Worker (passive event handler)
-    │
-    ├─ On speech_start: Start recording, pause video
-    ├─ On speech_end: Stop recording, resume video
-    └─ Send audio to backend for transcription
+    ├─ Speech probability < 0.35 for 500 ms? ──► speech_end event
+    └─ Report inference time + confidence back to telemetry stream
 ```
 
 **Implementation Steps:**
-1. **Install dependencies:**
-   - `npm install onnxruntime-web@1.22.0` - ONNX Runtime for WebAssembly
-   - `npm install @ricky0123/vad-web@0.0.28` - For Silero v5 model file
-
-2. **Configure webpack:**
-   - Add CopyWebpackPlugin to copy `silero_vad_v5.onnx` to `dist/models/`
-   - Copy ONNX Runtime WASM files to `dist/wasm/`
-   - See "Research Findings" section for webpack config example
-
-3. **Update manifest.json:**
-   - Add `models/silero_vad_v5.onnx` and `wasm/*.wasm` to `web_accessible_resources`
-   - Ensure CSP allows `wasm-unsafe-eval` if needed
-
-4. **Implement SileroVAD class in vad-detector.js:**
-   - `loadModel()` - Initialize ONNX Runtime with WebAssembly backend
-   - `processAudio()` - Buffer 128-sample chunks until 512 samples available
-   - `processFrame()` - Run inference on 512-sample frames with LSTM state management
-   - `resetState()` - Reset LSTM h/c states to zeros
-   - See "Research Findings" for complete code example
-
-5. **Update HybridVAD:**
-   - Remove energy-based fallback (per Sprint 14 goals)
-   - Use Silero as primary VAD (no hybrid mode)
-   - Handle model loading failures with clear error message
-
+1. **Install dependency:** `npm install onnxruntime-web@1.22.0` (already copying WASM via webpack).
+2. **Vendor model:** Check in `silero_vad_v5.onnx` under `extension/public/models/` and extend CopyPlugin so the model ships in `dist/models/`.
+3. **Update manifest.json:** Include `models/silero_vad_v5.onnx` and `onnx/*.wasm` in `web_accessible_resources`. MV3 already allows WASM; no CSP update needed beyond existing config.
+4. **Implement SileroVAD:** Replace the placeholder class with real loading/inference logic, including:
+   - `loadModel()` with WASM env configuration (`numThreads = 1`, custom `wasmPaths`)
+   - Frame buffering utilities (160 → 512 samples)
+   - LSTM state lifecycle + reset on silence or explicit stop
+   - Confidence/latency reporting hooks for telemetry
+   - Adjust the passive `ScriptProcessor` to `bufferSize = 1024` and feed the frame buffer continuously
+5. **Retire HybridVAD:** Replace the current hybrid orchestrator with a single Silero-backed controller. On load failure:
+   - Emit a `passive_event` error to the service worker
+   - Stop passive mode, show actionable UI, and wait for user retry or automatic restart policy
 6. **Test and validate:**
-   - Verify model loads successfully in offscreen document
-   - Test speech detection with background noise (keyboard, breathing)
-   - Confirm speech_end fires within 500ms of silence (fixes infinite recording bug)
-   - Measure inference latency (<5ms target)
+   - Confirm model loads in the offscreen document and respects MV3 sandboxing
+   - Measure detection quality in quiet vs noisy environments (<5% false positives)
+   - Verify `speech_end` fires within 500 ms of silence and prevents infinite recordings
+   - Record inference latency (<5 ms target) and expose it in debug telemetry
 
 **Acceptance Criteria:**
 - Silero loads successfully on Chrome 57+ (100% of potential extension users)
@@ -165,49 +137,40 @@ Service Worker (passive event handler)
 
 ---
 
-### 2. Visual Status Indicators
+### 2. Passive Mode Feedback & Telemetry
 
 **Current State:**
-- Text status in sidepanel: "🎤 Passive mode enabled"
-- No indication of VAD state (observing vs recording)
-- No browser-level indicator
+- Main side panel already shows a passive status chip + waveform container
+- Waveform component runs locally but is not connected to real VAD telemetry
+- Chrome action badge is unused, and debug drawer values are static placeholders
 
 **Proposed Solution:**
 
-**A. Sidepanel Status Badge:**
-```html
-<div class="vad-status-badge" data-state="observing">
-  <div class="indicator"></div>
-  <span class="label">Observing</span>
-</div>
-```
+**A. Wire existing UI to live data**
+- Drive the passive status chip (`idle | observing | recording | cooldown | error`) directly from service-worker telemetry events
+- Toggle the waveform container based on Silero state and update styling when recording
+- Display last inference latency and Silero confidence under the debug drawer telemetry rows
 
-States:
-- `disabled` (gray) - Passive mode off
-- `observing` (green) - Listening for speech
-- `recording` (red, pulsing) - Currently recording
-- `cooldown` (yellow) - Cooldown period after recording
-- `error` (red) - VAD failed
+**B. Chrome action badge**
+- Show active recording count on the extension icon
+- Highlight recording state (e.g., red badge background) while speech is in progress
+- Clear badge when passive mode is idle or disabled
 
-**B. Browser Action Badge:**
-- Show recording count on extension icon
-- Example: "3" (3 notes created this session)
-- Red background when recording
-
-**C. Optional Video Overlay:**
-- Subtle indicator in video player during recording
-- User can disable in settings
+**C. Error surfacing**
+- Reuse `passiveErrorMessage` element to show actionable Silero initialization failures
+- Provide “Retry” / “Disable passive mode” quick actions inside the debug drawer
+- Log failures with timestamps for easier debugging
 
 **Implementation Steps:**
-1. Add CSS for status badge (colors, animations)
-2. Update sidepanel.js to listen for passive_status_update events
-3. Implement chrome.action.setBadgeText() for extension icon
-4. Add optional canvas overlay in content script
+1. Extend `passive_status_update` payloads to include state, last latency, confidence, and note count.
+2. Update `sidepanel.js` to hydrate the status chip, waveform, telemetry rows, and error area with those values.
+3. Hook `chrome.action.setBadgeText()` / `setBadgeBackgroundColor()` into the service worker whenever passive state changes.
+4. Add debug drawer buttons for “Retry VAD” and “Disable passive mode”, wiring them to service-worker commands.
 
 **Acceptance Criteria:**
-- Status badge updates in real-time (< 100ms latency)
-- Browser badge shows current note count
-- Overlay is non-intrusive and can be disabled
+- Status chip, waveform, and badge update within 100 ms of state changes
+- Users can see last Silero latency + confidence in the debug drawer
+- Error states provide clear remediation without digging into console logs
 
 ---
 
@@ -270,56 +233,7 @@ Content script (video control)
 
 ---
 
-### 4. Waveform Visualizer
-
-**Current State:**
-- No visual feedback of audio input
-- Difficult to debug VAD sensitivity issues
-
-**Proposed Solution:**
-
-**Canvas-based waveform display:**
-- Real-time audio amplitude visualization
-- Energy threshold line overlay
-- Detected speech segments highlighted (green)
-- 5-10 second history window
-
-**Architecture:**
-```
-AudioWorklet
-    │
-    ├─ Sample audio every 100ms
-    ├─ Send to offscreen via postMessage
-    │
-    ▼
-Offscreen document
-    │
-    ├─ Forward to sidepanel via chrome.runtime.sendMessage
-    │
-    ▼
-Sidepanel (Canvas rendering)
-    │
-    ├─ Draw waveform (requestAnimationFrame)
-    ├─ Overlay threshold line
-    └─ Highlight speech segments
-```
-
-**Implementation Steps:**
-1. Add canvas element to sidepanel
-2. Sample audio in AudioWorklet (downsampled to ~10Hz)
-3. Broadcast samples to sidepanel
-4. Render waveform with Canvas API
-5. Add controls: zoom, pause, clear
-
-**Acceptance Criteria:**
-- Waveform updates at 10fps minimum
-- Clearly shows when audio crosses threshold
-- Helps users tune VAD sensitivity
-- Performance: <5% CPU usage for rendering
-
----
-
-### 5. Automatic VAD Restart & Circuit Breaker
+### 4. Reliability Guardrails
 
 **Current State:**
 - Heartbeat detects VAD failures (logged to console)
@@ -396,7 +310,7 @@ async function handleHeartbeatFailure() {
 
 ---
 
-### 6. Debug Drawer Improvements
+### 5. Debug Drawer Instrumentation
 
 **Current State:**
 - Debug drawer exists in sidepanel but indicators are non-functional
@@ -408,9 +322,9 @@ async function handleHeartbeatFailure() {
 **Fix and enhance debug drawer:**
 - Display current VAD state (observing, recording, cooldown, error)
 - Show real-time detection metrics (latency, confidence scores)
-- Session statistics (notes created, detection count, uptime)
-- Error logging with timestamps
-- Manual controls for fallback when needed
+- Session statistics (notes created, detection count, uptime, restart attempts)
+- Error logging with timestamps + remediation shortcuts
+- Manual controls for retrying Silero or disabling passive mode
 
 **Debug Metrics to Display:**
 ```javascript
@@ -421,6 +335,7 @@ async function handleHeartbeatFailure() {
   sessionsCreated: 12,               // Notes created this session
   detectionCount: 15,                // Total speech detections
   uptime: "45min",                   // How long passive mode running
+  restartAttempts: 1,                // Auto-restart count during session
   errors: [                          // Recent errors with timestamps
     { time: "14:32:15", msg: "Model load failed" }
   ]
@@ -430,9 +345,9 @@ async function handleHeartbeatFailure() {
 **Implementation Steps:**
 1. Fix broken indicators in current debug drawer
 2. Add real-time VAD metrics display
-3. Wire up Silero confidence scores to debug UI
-4. Add session statistics tracking
-5. Implement error log display with copy button
+3. Wire up Silero confidence and latency to debug UI
+4. Add session statistics tracking (detections, notes, restart attempts, uptime)
+5. Implement error log display with copy button + remediation actions
 
 **Acceptance Criteria:**
 - All debug drawer indicators functional and updating in real-time
@@ -444,49 +359,32 @@ async function handleHeartbeatFailure() {
 
 ## Implementation Phases
 
-### Phase 1: Silero VAD Integration (1-2 weeks)
+### Phase 1: Silero VAD Integration (1 week)
+- Install `onnxruntime-web`, vendor Silero model, update webpack/manifest
+- Implement SileroVAD load/inference pipeline + frame buffering
+- Replace HybridVAD with Silero-only controller and expose telemetry hooks
+- Smoke-test across quiet/noisy environments, record latency + confidence
 
-**Week 1: Foundation Setup**
-- Day 1-2: Install dependencies, configure webpack, update manifest.json
-- Day 3-4: Implement SileroVAD.loadModel() with ONNX Runtime Web initialization
-- Day 5: Implement audio buffering (128 → 512 samples) and LSTM state management
+### Phase 2: Passive Feedback & Telemetry (0.5 week)
+- Extend service-worker telemetry payloads (state, latency, confidence, counts)
+- Hook side panel status chip, waveform, and debug drawer to live data
+- Add Chrome action badge + error UI wiring
 
-**Week 2: Integration & Testing**
-- Day 1-2: Implement SileroVAD.processFrame() with inference pipeline
-- Day 3: Integrate with existing AudioWorklet in offscreen.js
-- Day 4: Update HybridVAD to use Silero (remove energy fallback)
-- Day 5: Testing and performance tuning (measure latency, test background noise handling)
+### Phase 3: Auto-Pause Video (0.5 week)
+- Add playback state capture + pause/resume helpers to platform adapters
+- Integrate with passive event handler (500 ms resume debounce, respect manual pauses)
+- Provide user setting + onboarding tip
 
-**Key Deliverables:**
-- ✅ Model loads from bundled extension file
-- ✅ 512-sample frame buffering working
-- ✅ LSTM states maintained between frames, reset on silence
-- ✅ Infinite recording bug fixed (proper speech_end detection)
-- ✅ Inference latency <5ms per frame
+### Phase 4: Reliability Guardrails (0.5 week)
+- Implement heartbeat auto-retry with exponential backoff
+- Add circuit breaker with user notification when threshold exceeded
+- Capture restart telemetry + surface in debug drawer
 
-### Phase 2: Visual Indicators & Auto-Pause (1 week)
-- Status badge in sidepanel
-- Browser action badge for extension icon
-- Optional video overlay during recording
-- Auto-pause/resume video on speech detection
-- Playback state tracking
+### Phase 5: Debug Drawer Instrumentation (0.5 week)
+- Wire metrics to UI, add restart/error logs, expose remediation actions
+- Polish copy/styling and validate toggle performance
 
-### Phase 3: Waveform Visualizer (1 week)
-- Canvas-based waveform in debug drawer
-- Real-time audio amplitude visualization
-- Threshold overlay for debugging
-
-### Phase 4: Reliability & Circuit Breaker (1 week)
-- Automatic VAD restart on failure
-- Circuit breaker pattern with exponential backoff
-- User notifications for permanent failures
-
-### Phase 5: Debug Drawer Improvements (0.5 weeks)
-- Fix broken indicators
-- Wire up real-time metrics
-- Add error logging
-
-**Total Estimated Time:** 4-5 weeks
+**Total Estimated Time:** ~3 weeks
 
 ---
 
@@ -529,7 +427,7 @@ async function handleHeartbeatFailure() {
 | **Silero inference slower than expected** | Increased latency, missed speech | Profile in real-world conditions, optimize sample rate conversion |
 | **Auto-pause annoys users** | Users disable feature, poor UX | Make configurable (default ON), 500ms debounce, respect manual pause state |
 | **Platform adapter pause/play fails** | Auto-pause doesn't work on some sites | Graceful degradation, test across all platforms, log failures |
-| **Waveform rendering perf** | High CPU usage, battery drain | Throttle frame rate, use requestAnimationFrame, render in debug drawer only |
+| **Telemetry UI perf** | High CPU usage, battery drain | Throttle waveform updates, reuse existing canvas, only render when passive mode active |
 | **Circuit breaker too aggressive** | VAD disabled when it could work | Conservative limits (3 restarts, 1min window), user can override |
 | **WebAssembly compatibility** | Model won't run | Extremely low risk (99% browser support), but detect and show error if needed |
 
@@ -547,7 +445,7 @@ async function handleHeartbeatFailure() {
 ### User Experience
 - Auto-pause prevents video audio contamination in transcripts
 - Users can speak freely without manually pausing video
-- Waveform visualizer reduces "VAD not working" support requests by 50%
+- Passive telemetry + error surfacing reduce "VAD not working" support requests by 50%
 - Status badge improves user confidence in system state
 - Debug drawer provides actionable troubleshooting information
 
@@ -589,7 +487,7 @@ async function handleHeartbeatFailure() {
 
 6. **✅ Frame size:** 512 samples (32ms at 16kHz)
    - Silero v5 requires exactly 512-sample frames (vs 1536 for legacy model)
-   - AudioWorklet produces 128-sample chunks → buffer until 512 samples available
+   - ScriptProcessor (bufferSize 1024) slices into 160-sample chunks → buffer until 512 samples available
    - Processing ~31 frames/second at 16kHz
 
 7. **✅ Confidence threshold:** 0.5 (recommended for v5)
@@ -654,15 +552,17 @@ const session = await ort.InferenceSession.create(modelPath, {
 
 **Audio Processing Flow:**
 ```
-AudioWorklet (128 samples @ 16kHz, 8ms chunks)
+ScriptProcessor (bufferSize 1024, 16 kHz mono)
     ↓
-Buffer accumulator (until 512 samples available)
+Slice to 160-sample Float32 frames
     ↓
-Silero inference (512 samples → confidence score)
+Ring buffer (collect 3 x 160 frames → 512-sample tensor)
+    ↓
+Silero inference (512 samples → confidence score, <1 ms)
     ↓
 State machine (silence → speech → maybe_silence → silence)
     ↓
-Events: speech_start / speech_end
+Events + telemetry: speech_start / speech_end / error
 ```
 
 **Webpack Configuration:**
@@ -671,12 +571,16 @@ Events: speech_start / speech_end
 new CopyWebpackPlugin({
   patterns: [
     {
-      from: 'node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx',
+      from: 'public/models/silero_vad_v5.onnx',
       to: 'models/silero_vad_v5.onnx'
     },
     {
       from: 'node_modules/onnxruntime-web/dist/*.wasm',
-      to: 'wasm/[name][ext]'
+      to: 'onnx/[name][ext]'
+    },
+    {
+      from: 'node_modules/onnxruntime-web/dist/*.mjs',
+      to: 'onnx/[name][ext]'
     }
   ]
 })
@@ -689,7 +593,7 @@ new CopyWebpackPlugin({
     {
       "resources": [
         "models/silero_vad_v5.onnx",
-        "wasm/*.wasm"
+        "onnx/*.wasm"
       ],
       "matches": ["<all_urls>"]
     }
@@ -705,10 +609,9 @@ new CopyWebpackPlugin({
 - Source available for reference
 
 **Model URLs (for reference):**
-- npm package: `@ricky0123/vad-web@0.0.28/dist/silero_vad_v5.onnx`
-- CDN: `https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.28/dist/silero_vad_v5.onnx`
-- GitHub: `https://github.com/ricky0123/vad/blob/master/silero_vad_v5.onnx`
-- Official: `https://github.com/snakers4/silero-vad` (original source)
+- Primary source: `https://github.com/snakers4/silero-vad` (official releases)
+- Mirror: `https://github.com/ricky0123/vad/blob/master/silero_vad_v5.onnx`
+- npm mirror: `@ricky0123/vad-web@0.0.28/dist/silero_vad_v5.onnx` (use for verification only)
 
 ### Chrome Extension Challenges & Solutions
 
@@ -728,7 +631,7 @@ new CopyWebpackPlugin({
 
 1. **✅ Silero confidence threshold:** 0.5 (default for v5, can tune later)
 2. **✅ Model caching:** Browser cache (automatic, no IndexedDB)
-3. **✅ Sample rate conversion:** Not needed (AudioWorklet already at 16kHz)
+3. **✅ Sample rate conversion:** Not needed (offscreen AudioContext already runs at 16 kHz)
 4. **✅ False positive threshold:** <5% is achievable with Silero v5
 5. **✅ Model hosting:** Self-host bundled with extension (NOT CDN)
 

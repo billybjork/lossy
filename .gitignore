@@ -44,3 +44,6 @@ cover/
 # Temporary files
 tmp/
 temp/
+
+# Bundled models (download locally)
+extension/public/models/silero_vad_v5.onnx

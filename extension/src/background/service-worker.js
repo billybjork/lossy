@@ -21,12 +21,16 @@ const openPanels = new Map();
 // Sprint 10: Passive session coordinator
 const MIN_DURATION_MS = 500;
 const COOLDOWN_MS = 500;
+const AUTO_RESUME_DELAY_MS = 500;
+const AUTO_PAUSE_DEFAULT = true;
+const HEARTBEAT_INTERVAL_MS = 5000;
 
 const passiveSession = {
   tabId: null,
   status: 'idle', // 'idle' | 'observing' | 'recording' | 'cooldown' | 'error'
   vadEnabled: false, // Default OFF per Sprint 10 spec
   lastStartAt: 0,
+  vadConfig: null,
 
   // Sprint 10 Fix: Persistent audio channel for passive mode
   socket: null,
@@ -41,6 +45,7 @@ const passiveSession = {
 
   // Auto-start behavior: Stop passive session if no speech detected within 10 seconds
   firstSpeechTimeout: null,
+  resumeTimeout: null,
 
   // Telemetry (console only)
   telemetry: {
@@ -48,8 +53,29 @@ const passiveSession = {
     ignoredShort: 0,
     ignoredCooldown: 0,
     ignoredPendingNote: 0, // NEW: Count speech ignored while waiting for previous note
+    ignoredNoContext: 0,
     avgLatencyMs: 0,
+    lastConfidence: 0,
+    lastLatencyMs: 0,
+    restartAttempts: 0,
+    notesCreated: 0,
+    startedAt: null,
   },
+
+  settings: {
+    autoPauseVideo: AUTO_PAUSE_DEFAULT,
+    autoResumeDelayMs: AUTO_RESUME_DELAY_MS,
+  },
+
+  circuitBreaker: {
+    state: 'closed',
+    restartCount: 0,
+    lastRestartAt: 0,
+    maxRestarts: 3,
+    resetWindowMs: 60000,
+  },
+
+  heartbeatFailures: 0,
 };
 
 let heartbeatInterval = null;
@@ -76,6 +102,216 @@ function sendMessageToTab(tabId, message) {
       console.log('[ServiceWorker] Failed to send message to tab:', err.message);
     }
   });
+}
+
+function resetPassiveTelemetry() {
+  passiveSession.telemetry.speechDetections = 0;
+  passiveSession.telemetry.ignoredShort = 0;
+  passiveSession.telemetry.ignoredCooldown = 0;
+  passiveSession.telemetry.ignoredPendingNote = 0;
+  passiveSession.telemetry.avgLatencyMs = 0;
+  passiveSession.telemetry.lastConfidence = 0;
+  passiveSession.telemetry.lastLatencyMs = 0;
+  passiveSession.telemetry.restartAttempts = 0;
+  passiveSession.telemetry.notesCreated = 0;
+  passiveSession.telemetry.startedAt = Date.now();
+}
+
+function formatUptime(startedAt) {
+  if (!startedAt) return '0s';
+  const deltaMs = Date.now() - startedAt;
+  const totalSeconds = Math.floor(deltaMs / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
+function updateActionBadge() {
+  if (!chrome?.action?.setBadgeText) {
+    return;
+  }
+
+  const noteCount = passiveSession.telemetry.notesCreated || 0;
+  const text = noteCount > 0 ? `${noteCount}` : '';
+  chrome.action.setBadgeText({ text }).catch(() => {});
+
+  let color = '#4b5563';
+  if (passiveSession.status === 'recording') {
+    color = '#dc2626';
+  } else if (passiveSession.status === 'error') {
+    color = '#b91c1c';
+  } else if (passiveSession.status === 'observing') {
+    color = '#22c55e';
+  }
+
+  chrome.action.setBadgeBackgroundColor({ color }).catch(() => {});
+}
+
+function broadcastPassiveStatus({ errorMessage } = {}) {
+  updateActionBadge();
+
+  const telemetryPayload = {
+    speechDetections: passiveSession.telemetry.speechDetections,
+    ignoredShort: passiveSession.telemetry.ignoredShort,
+    ignoredCooldown: passiveSession.telemetry.ignoredCooldown,
+    ignoredPendingNote: passiveSession.telemetry.ignoredPendingNote,
+    ignoredNoContext: passiveSession.telemetry.ignoredNoContext,
+    avgLatencyMs: Math.round(passiveSession.telemetry.avgLatencyMs || 0),
+    lastConfidence: passiveSession.telemetry.lastConfidence,
+    lastLatencyMs: passiveSession.telemetry.lastLatencyMs,
+    restartAttempts: passiveSession.telemetry.restartAttempts,
+    notesCreated: passiveSession.telemetry.notesCreated,
+    uptime: formatUptime(passiveSession.telemetry.startedAt),
+  };
+
+  chrome.runtime
+    .sendMessage({
+      action: 'passive_status_update',
+      status: passiveSession.status,
+      telemetry: telemetryPayload,
+      errorMessage,
+    })
+    .catch(() => {
+      // Sidepanel may not be open; ignore
+    });
+}
+
+async function requestPassivePause(tabId) {
+  if (!passiveSession.settings.autoPauseVideo || !tabId) {
+    return { wasPlaying: false };
+  }
+
+  try {
+    const response = await chrome.tabs.sendMessage(tabId, {
+      action: 'passive_pause_video',
+    });
+    return {
+      wasPlaying: Boolean(response?.wasPlaying),
+    };
+  } catch (error) {
+    console.warn('[Passive] Failed to auto-pause video:', error.message);
+    return { wasPlaying: false };
+  }
+}
+
+function schedulePassiveResume(tabId, wasPlaying) {
+  if (!passiveSession.settings.autoPauseVideo || !wasPlaying || !tabId) {
+    return;
+  }
+
+  if (passiveSession.resumeTimeout) {
+    clearTimeout(passiveSession.resumeTimeout);
+    passiveSession.resumeTimeout = null;
+  }
+
+  passiveSession.resumeTimeout = setTimeout(async () => {
+    try {
+      await chrome.tabs.sendMessage(tabId, {
+        action: 'passive_resume_video',
+      });
+      console.log('[Passive] Auto-resumed video after speech');
+    } catch (error) {
+      console.warn('[Passive] Failed to auto-resume video:', error.message);
+    } finally {
+      passiveSession.resumeTimeout = null;
+    }
+  }, passiveSession.settings.autoResumeDelayMs);
+}
+
+function clearPassiveResumeTimer() {
+  if (passiveSession.resumeTimeout) {
+    clearTimeout(passiveSession.resumeTimeout);
+    passiveSession.resumeTimeout = null;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function restartVADWithBackoff() {
+  const breaker = passiveSession.circuitBreaker;
+  if (breaker.state === 'open') {
+    console.warn('[Passive] Circuit breaker open, skipping VAD restart');
+    return;
+  }
+
+  if (!passiveSession.vadConfig) {
+    console.warn('[Passive] VAD restart requested but no configuration available');
+    return;
+  }
+
+  const now = Date.now();
+  if (now - breaker.lastRestartAt > breaker.resetWindowMs) {
+    breaker.restartCount = 0;
+    breaker.state = 'closed';
+  }
+
+  if (breaker.restartCount >= breaker.maxRestarts) {
+    breaker.state = 'open';
+    passiveSession.status = 'error';
+    passiveSession.vadEnabled = false;
+    broadcastPassiveStatus({
+      errorMessage:
+        'VAD failed after multiple restart attempts. Please reload the extension or disable passive mode.',
+    });
+    return;
+  }
+
+  breaker.restartCount += 1;
+  breaker.lastRestartAt = now;
+  passiveSession.telemetry.restartAttempts = breaker.restartCount;
+
+  const backoffMs = 1000 * breaker.restartCount;
+  console.warn(
+    `[Passive] Attempting VAD restart (${breaker.restartCount}/${breaker.maxRestarts}) in ${backoffMs}ms`
+  );
+  await sleep(backoffMs);
+
+  try {
+    await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'stop_vad',
+    });
+  } catch (error) {
+    console.warn('[Passive] stop_vad during restart failed:', error.message);
+  }
+
+  try {
+    await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'start_vad',
+      config: passiveSession.vadConfig,
+    });
+    breaker.state = 'half-open';
+    passiveSession.heartbeatFailures = 0;
+    passiveSession.vadEnabled = true;
+    passiveSession.status = 'observing';
+    broadcastPassiveStatus();
+    console.log('[Passive] VAD restarted successfully');
+  } catch (error) {
+    console.error('[Passive] VAD restart failed:', error);
+  }
+}
+
+async function handleHeartbeatFailure(error) {
+  passiveSession.heartbeatFailures += 1;
+  console.warn(`[Passive] Heartbeat failure #${passiveSession.heartbeatFailures}:`, error);
+  await restartVADWithBackoff();
+}
+
+function acknowledgeHeartbeatSuccess() {
+  passiveSession.heartbeatFailures = 0;
+  if (passiveSession.circuitBreaker.state === 'half-open') {
+    passiveSession.circuitBreaker.state = 'closed';
+  }
 }
 
 // Initialize TabManager and MessageRouter
@@ -106,6 +342,17 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
   // If passive mode is observing (not recording), update the video context
   // so the next speech segment will use the current tab's context
   if (passiveSession.status === 'observing' && passiveSession.audioChannel) {
+    // Reset VAD state when tab switches to prevent cross-tab audio confusion
+    console.log('[Passive] Tab switch detected - resetting VAD state');
+    try {
+      await chrome.runtime.sendMessage({
+        target: 'offscreen',
+        action: 'reset_vad',
+      });
+    } catch (err) {
+      console.warn('[Passive] Failed to reset VAD on tab switch:', err.message);
+    }
+
     const newVideoContext = tabManager ? tabManager.getVideoContext(activeInfo.tabId) : null;
 
     if (newVideoContext?.videoDbId) {
@@ -363,6 +610,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open
+  }
+
+  if (message.action === 'retry_passive_vad') {
+    const executor = passiveSession.status === 'idle' ? startPassiveSession : restartVADWithBackoff;
+
+    executor()
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[Passive] Retry VAD failed:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true;
   }
 
   // Handle messages from sidepanel
@@ -1042,6 +1303,23 @@ async function handlePassiveEvent(event) {
     return;
   }
 
+  if (event.type === 'metrics') {
+    const m = event.data || {};
+    console.log(
+      '[Passive] VAD:',
+      `state=${m.state || '?'}`,
+      `conf=${(m.confidence ?? 0).toFixed(3)}`,
+      `speech=${Math.round(m.speechDurationMs || 0)}ms`,
+      `silence=${Math.round(m.silenceDurationMs || 0)}ms`,
+      `lat=${(m.latencyMs ?? 0).toFixed(1)}ms`
+    );
+    passiveSession.telemetry.lastConfidence = m.confidence ?? 0;
+    passiveSession.telemetry.lastLatencyMs = m.latencyMs ?? 0;
+    acknowledgeHeartbeatSuccess();
+    broadcastPassiveStatus();
+    return;
+  }
+
   const now = Date.now();
 
   if (event.type === 'speech_start' && passiveSession.status !== 'recording') {
@@ -1052,31 +1330,53 @@ async function handlePassiveEvent(event) {
       return;
     }
 
-    // CRITICAL FIX: Block new recordings if previous note hasn't arrived yet
-    // This prevents overwriting recordingContext and misrouting notes
+    // FIX: More permissive blocking - only block if context is very recent (< 2s)
     if (passiveSession.recordingContext) {
-      passiveSession.telemetry.ignoredPendingNote++;
-      console.log('[Passive] Ignored speech - still waiting for previous note to arrive');
-      console.log(
-        '[Passive] Context age:',
-        Date.now() - passiveSession.recordingContext.startedAt,
-        'ms'
-      );
-      return;
+      const contextAge = Date.now() - passiveSession.recordingContext.startedAt;
+
+      // If context is older than 2s, assume backend is stuck - clear and proceed
+      if (contextAge > 2000) {
+        console.warn('[Passive] Stale recording context (', contextAge, 'ms) - clearing and proceeding');
+        passiveSession.recordingContext = null;
+        if (passiveSession.recordingContextTimeout) {
+          clearTimeout(passiveSession.recordingContextTimeout);
+          passiveSession.recordingContextTimeout = null;
+        }
+      } else {
+        // Still fresh, block to prevent context corruption
+        passiveSession.telemetry.ignoredPendingNote++;
+        console.log('[Passive] Ignored speech - context age:', contextAge, 'ms (< 2s threshold)');
+        return;
+      }
     }
 
-    console.log('[Passive] Speech detected (latency:', event.data?.timestamp || 'unknown', 'ms)');
+    const confidence = event.data?.confidence ?? 0;
+    const latencyMs = event.data?.latencyMs ?? 0;
+    console.log(
+      '[Passive] Speech detected (confidence:',
+      confidence.toFixed(3),
+      'latency:',
+      latencyMs.toFixed(1),
+      'ms)'
+    );
+
+    clearPassiveResumeTimer();
 
     // CRITICAL: Capture recording context atomically at speech_start
     // This ensures notes/timestamps always route to the correct tab/video,
     // even if the user switches tabs during recording
     const currentTabId = passiveSession.tabId;
-    const currentVideoContext = tabManager ? tabManager.getVideoContext(currentTabId) : null;
+    let currentVideoContext = tabManager ? tabManager.getVideoContext(currentTabId) : null;
 
-    // Validate we have a video context - if not, skip this speech segment
+    // Validate we have a video context - if not, try to hydrate it on the fly
     if (!currentVideoContext || !currentVideoContext.videoDbId) {
-      console.log('[Passive] No video context for current tab, skipping speech segment');
-      passiveSession.telemetry.ignoredShort++;
+      console.log('[Passive] No video context for current tab, attempting refresh');
+      currentVideoContext = await ensureVideoContextForTab(currentTabId);
+    }
+
+    if (!currentVideoContext || !currentVideoContext.videoDbId) {
+      console.log('[Passive] Still no video context after refresh, skipping speech segment');
+      passiveSession.telemetry.ignoredNoContext++;
       return;
     }
 
@@ -1118,11 +1418,19 @@ async function handlePassiveEvent(event) {
       videoContext: currentVideoContext,
       timestamp: capturedTimestamp,
       startedAt: now,
+      autoPause: { wasPlaying: false },
     };
 
     passiveSession.status = 'recording';
     passiveSession.lastStartAt = now;
     passiveSession.telemetry.speechDetections++;
+    passiveSession.telemetry.lastConfidence = confidence;
+    passiveSession.telemetry.lastLatencyMs = latencyMs;
+
+    if (passiveSession.settings.autoPauseVideo) {
+      const pauseResult = await requestPassivePause(currentTabId);
+      passiveSession.recordingContext.autoPause = pauseResult;
+    }
 
     // Clear first speech timeout on first detection (auto-start behavior)
     if (passiveSession.firstSpeechTimeout) {
@@ -1152,11 +1460,22 @@ async function handlePassiveEvent(event) {
       console.log('[Passive] Recording started successfully');
     } catch (error) {
       console.error('[Passive] Failed to start recording:', error);
+      if (passiveSession.recordingContext?.autoPause?.wasPlaying) {
+        schedulePassiveResume(currentTabId, true);
+      }
       passiveSession.status = 'observing';
       passiveSession.recordingContext = null; // Clear context on error
     }
+
+    broadcastPassiveStatus();
   } else if (event.type === 'speech_end' && passiveSession.status === 'recording') {
     const duration = now - passiveSession.lastStartAt;
+    const confidence = event.data?.confidence ?? passiveSession.telemetry.lastConfidence;
+    const latencyMs = event.data?.latencyMs ?? passiveSession.telemetry.lastLatencyMs;
+    const resumeInfo = {
+      tabId: passiveSession.recordingContext?.tabId,
+      wasPlaying: passiveSession.recordingContext?.autoPause?.wasPlaying,
+    };
 
     if (duration >= MIN_DURATION_MS) {
       console.log('[Passive] Speech ended, duration:', duration, 'ms');
@@ -1175,10 +1494,11 @@ async function handlePassiveEvent(event) {
       passiveSession.status = 'cooldown';
 
       // Log latency
-      const latency = event.data?.timestamp || 0;
       const count = passiveSession.telemetry.speechDetections;
       passiveSession.telemetry.avgLatencyMs =
-        (passiveSession.telemetry.avgLatencyMs * (count - 1) + latency) / count;
+        (passiveSession.telemetry.avgLatencyMs * (count - 1) + latencyMs) / count;
+      passiveSession.telemetry.lastConfidence = confidence;
+      passiveSession.telemetry.lastLatencyMs = latencyMs;
 
       // Enter cooldown - recording context is PRESERVED until note arrives
       // FIX: Don't clear context after cooldown, wait for note_created or timeout
@@ -1186,21 +1506,25 @@ async function handlePassiveEvent(event) {
         if (passiveSession.status === 'cooldown') {
           passiveSession.status = 'observing';
           console.log('[Passive] Cooldown complete, resuming observation');
+          broadcastPassiveStatus();
         }
       }, COOLDOWN_MS);
 
-      // Set a safety timeout to clear stale context (10 seconds)
+      // Set a safety timeout to clear stale context (5 seconds)
       // This handles cases where note_created never arrives (backend errors, etc.)
       if (passiveSession.recordingContextTimeout) {
         clearTimeout(passiveSession.recordingContextTimeout);
       }
       passiveSession.recordingContextTimeout = setTimeout(() => {
         if (passiveSession.recordingContext) {
-          console.warn('[Passive] Recording context timeout - clearing stale context');
+          const age = Date.now() - passiveSession.recordingContext.startedAt;
+          console.warn('[Passive] Recording context timeout after', age, 'ms - clearing');
           passiveSession.recordingContext = null;
           passiveSession.recordingContextTimeout = null;
         }
-      }, 10000); // 10 seconds safety timeout
+      }, 5000); // 5 seconds safety timeout
+
+      schedulePassiveResume(resumeInfo.tabId, resumeInfo.wasPlaying);
     } else {
       passiveSession.telemetry.ignoredShort++;
       console.log('[Passive] Ignored short speech segment:', duration, 'ms');
@@ -1211,11 +1535,16 @@ async function handlePassiveEvent(event) {
         clearTimeout(passiveSession.recordingContextTimeout);
         passiveSession.recordingContextTimeout = null;
       }
+
+      schedulePassiveResume(resumeInfo.tabId, resumeInfo.wasPlaying);
     }
+
+    broadcastPassiveStatus();
   } else if (event.type === 'error') {
     console.error('[Passive] VAD error:', event.data);
     passiveSession.vadEnabled = false;
     passiveSession.status = 'error';
+    passiveSession.circuitBreaker.state = 'open';
 
     // FIX #3: Clear recording context on error
     if (passiveSession.recordingContext) {
@@ -1226,18 +1555,8 @@ async function handlePassiveEvent(event) {
       passiveSession.recordingContextTimeout = null;
     }
 
-    // Sprint 10: Notify sidepanel of error
-    chrome.runtime
-      .sendMessage({
-        action: 'passive_status_update',
-        status: 'error',
-        errorMessage: event.data?.message || 'VAD initialization failed',
-      })
-      .catch(() => {
-        // Sidepanel may not be open, ignore
-      });
-
     stopPassiveSession();
+    broadcastPassiveStatus({ errorMessage: event.data?.message });
   }
 }
 
@@ -1286,6 +1605,7 @@ async function startPassiveSession() {
     // Sprint 12: Sidepanel subscribes directly via NotesChannel
     passiveSession.audioChannel.on('note_created', (payload) => {
       console.log('[Passive] Received structured note:', payload.id);
+      passiveSession.telemetry.notesCreated += 1;
 
       // CRITICAL FIX: Route timeline marker to the tab where recording started,
       // not the currently active tab. Use recordingContext if available.
@@ -1319,6 +1639,8 @@ async function startPassiveSession() {
           passiveSession.recordingContextTimeout = null;
         }
       }
+
+      broadcastPassiveStatus();
     });
 
     // Join the persistent channel
@@ -1335,32 +1657,44 @@ async function startPassiveSession() {
         });
     });
 
+    passiveSession.vadConfig = {
+      minSpeechDurationMs: 250, // Faster reaction - capture first second of speech
+      minSilenceDurationMs: 2000, // 2 seconds tolerance for natural pauses
+      sileroConfidence: 0.45, // More sensitive to speech onset
+      sileroNegativeThreshold: 0.40, // Raised from 0.35 - cleaner end detection
+    };
+
     // Start VAD in offscreen
     await chrome.runtime.sendMessage({
       target: 'offscreen',
       action: 'start_vad',
-      config: {
-        energyThreshold: 0.02,
-        sileroConfidence: 0.5,
-        useSilero: false, // Start with energy-only for Sprint 10
-      },
+      config: passiveSession.vadConfig,
     });
+
+    if (heartbeatInterval) {
+      clearInterval(heartbeatInterval);
+      heartbeatInterval = null;
+    }
 
     // Start heartbeat
     heartbeatInterval = setInterval(async () => {
       try {
-        await chrome.runtime.sendMessage({
+        const response = await chrome.runtime.sendMessage({
           target: 'offscreen',
           action: 'heartbeat',
         });
+        if (response?.alive) {
+          acknowledgeHeartbeatSuccess();
+        }
       } catch (err) {
-        console.error('[Passive] Heartbeat failed:', err);
-        // Note: No automatic restart in Sprint 10
+        await handleHeartbeatFailure(err);
       }
-    }, 5000);
+    }, HEARTBEAT_INTERVAL_MS);
 
     passiveSession.vadEnabled = true;
     passiveSession.status = 'observing';
+    resetPassiveTelemetry();
+    broadcastPassiveStatus();
     console.log('[Passive] Session active with persistent audio channel');
 
     // Auto-start behavior: Stop session if no speech detected within 10 seconds
@@ -1441,10 +1775,17 @@ async function stopPassiveSession() {
     passiveSession.firstSpeechTimeout = null;
   }
 
+  clearPassiveResumeTimer();
+
   passiveSession.vadEnabled = false;
   passiveSession.status = 'idle';
   passiveSession.tabId = null;
   passiveSession.sessionId = null;
+  passiveSession.circuitBreaker.state = 'closed';
+  passiveSession.circuitBreaker.restartCount = 0;
+  passiveSession.heartbeatFailures = 0;
+  passiveSession.vadConfig = null;
+  broadcastPassiveStatus();
   console.log('[Passive] Session stopped and cleaned up');
 }
 
@@ -1730,6 +2071,51 @@ async function ensureContentScriptInjected(tabId) {
       throw err;
     }
   }
+}
+
+async function ensureVideoContextForTab(tabId, timeoutMs = 2000) {
+  if (!tabManager) {
+    return null;
+  }
+
+  let context = tabManager.getVideoContext(tabId);
+  if (context?.videoDbId) {
+    return context;
+  }
+
+  let tab;
+  try {
+    tab = await chrome.tabs.get(tabId);
+  } catch (err) {
+    console.warn('[ServiceWorker] Failed to get tab for context refresh:', err.message);
+    return null;
+  }
+
+  if (!tab?.url || tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) {
+    console.log('[ServiceWorker] Tab URL not eligible for video detection:', tab?.url);
+    return null;
+  }
+
+  try {
+    await ensureContentScriptInjected(tabId);
+    await chrome.tabs.sendMessage(tabId, { action: 're_initialize' }).catch((err) => {
+      console.log('[ServiceWorker] re_initialize failed (will continue waiting):', err.message);
+    });
+  } catch (err) {
+    console.warn('[ServiceWorker] Failed to refresh video context for tab:', err.message);
+    return null;
+  }
+
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    context = tabManager.getVideoContext(tabId);
+    if (context?.videoDbId) {
+      return context;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+
+  return null;
 }
 
 /**

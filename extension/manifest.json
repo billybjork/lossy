@@ -36,7 +36,7 @@
 
   "web_accessible_resources": [
     {
-      "resources": ["dist/*", "onnx/*"],
+      "resources": ["dist/*", "onnx/*", "models/silero_vad_v5.onnx"],
       "matches": ["<all_urls>"]
     }
   ]

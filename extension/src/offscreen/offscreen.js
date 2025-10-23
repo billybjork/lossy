@@ -15,7 +15,9 @@
 
 import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './whisper-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
-import { HybridVAD } from './vad-detector.js';
+import { SileroVAD } from './vad-detector.js';
+
+const TARGET_SAMPLE_RATE = 16000;
 
 let mediaRecorder = null;
 let audioContext = null;
@@ -100,6 +102,18 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open for async response
+  }
+
+  // Sprint 10: Reset VAD (clear state without stopping)
+  if (message.action === 'reset_vad') {
+    if (vadInstance) {
+      vadInstance.reset();
+      console.log('[VAD] State reset on demand');
+      sendResponse({ success: true });
+    } else {
+      sendResponse({ success: false, error: 'VAD not running' });
+    }
+    return true;
   }
 
   // Sprint 10: Heartbeat
@@ -368,19 +382,24 @@ async function startVAD(config = {}) {
     const source = vadAudioContext.createMediaStreamSource(vadAudioStream);
 
     // Initialize HybridVAD with callbacks
-    vadInstance = new HybridVAD({
-      energyThreshold: config?.energyThreshold || 0.02,
-      useSilero: config?.useSilero || false,
+    let lastMetricsSentAt = 0;
+    const METRICS_INTERVAL_MS = 250;
+
+    vadInstance = new SileroVAD({
+      minSpeechDurationMs: config?.minSpeechDurationMs || 500,
+      minSilenceDurationMs: config?.minSilenceDurationMs || 500,
+      startThreshold: config?.sileroConfidence || 0.5,
+      endThreshold: config?.sileroNegativeThreshold || 0.35,
       onSpeechStart: (event) => {
-        console.log('[VAD] Speech detected, energy:', event.energy.toFixed(4));
-        // Send to service worker
+        console.log('[VAD] Speech detected (confidence:', event.confidence.toFixed(3), ')');
         chrome.runtime.sendMessage({
           target: 'background',
           action: 'passive_event',
           type: 'speech_start',
           data: {
             timestamp: event.timestamp,
-            energy: event.energy,
+            confidence: event.confidence,
+            latencyMs: event.latencyMs,
             source: event.source,
           },
         });
@@ -389,10 +408,9 @@ async function startVAD(config = {}) {
         console.log(
           '[VAD] Speech ended, duration:',
           event.duration.toFixed(0),
-          'ms, energy:',
-          event.energy.toFixed(4)
+          'ms, confidence:',
+          event.confidence.toFixed(3)
         );
-        // Send to service worker
         chrome.runtime.sendMessage({
           target: 'background',
           action: 'passive_event',
@@ -400,26 +418,64 @@ async function startVAD(config = {}) {
           data: {
             timestamp: event.timestamp,
             duration: event.duration,
-            energy: event.energy,
+            confidence: event.confidence,
+            latencyMs: event.latencyMs,
             source: event.source,
+          },
+        });
+      },
+      onMetrics: (metrics) => {
+        const now = performance.now();
+        if (now - lastMetricsSentAt < METRICS_INTERVAL_MS) {
+          return;
+        }
+        lastMetricsSentAt = now;
+        console.log(
+          '[VAD] Metrics',
+          metrics.confidence.toFixed(3),
+          `${metrics.latencyMs.toFixed(2)}ms`
+        );
+        chrome.runtime.sendMessage({
+          target: 'background',
+          action: 'passive_event',
+          type: 'metrics',
+          data: {
+            confidence: metrics.confidence,
+            latencyMs: metrics.latencyMs,
+          },
+        });
+      },
+      onError: (error) => {
+        chrome.runtime.sendMessage({
+          target: 'background',
+          action: 'passive_event',
+          type: 'error',
+          data: {
+            message: error.message,
+            name: error.name || 'VADError',
           },
         });
       },
     });
 
-    // Initialize VAD (loads Silero if requested)
-    await vadInstance.init();
+    await vadInstance.loadModel();
 
     // Create ScriptProcessor to feed audio to VAD
-    const bufferSize = 4096;
+    const bufferSize = 1024;
     const processor = vadAudioContext.createScriptProcessor(bufferSize, 1, 1);
 
     processor.onaudioprocess = (event) => {
       if (!vadInstance) return;
 
-      // Feed audio to VAD
       const inputData = event.inputBuffer.getChannelData(0);
-      vadInstance.processAudio(inputData);
+      const copy = new Float32Array(inputData.length);
+      copy.set(inputData);
+
+      const sourceSampleRate = vadAudioContext.sampleRate || TARGET_SAMPLE_RATE;
+      const processed = resampleIfNeeded(copy, sourceSampleRate, TARGET_SAMPLE_RATE);
+      if (processed && processed.length > 0) {
+        vadInstance.enqueueAudio(processed);
+      }
     };
 
     source.connect(processor);
@@ -430,7 +486,7 @@ async function startVAD(config = {}) {
     vadInstance._audioSource = source;
 
     vadEnabled = true;
-    console.log('[VAD] Passive detection active (mode:', vadInstance.getMode(), ')');
+    console.log('[VAD] Passive detection active (mode: silero)');
   } catch (error) {
     console.error('[VAD] Failed to start:', error);
 
@@ -492,7 +548,11 @@ async function stopVAD() {
 
   // Reset VAD instance
   if (vadInstance) {
-    vadInstance.reset();
+    try {
+      vadInstance.destroy();
+    } catch (err) {
+      console.warn('[VAD] Error during destroy:', err);
+    }
     vadInstance = null;
   }
 
@@ -508,3 +568,54 @@ document.addEventListener('visibilitychange', () => {
     stopVAD(); // VAD cleanup
   }
 });
+
+function resampleIfNeeded(samples, fromRate, toRate) {
+  if (!fromRate || !toRate || fromRate === toRate) {
+    return samples;
+  }
+
+  if (fromRate < toRate) {
+    // We avoid upsampling; fall back to original samples
+    return samples;
+  }
+
+  return downsampleLinear(samples, fromRate, toRate);
+}
+
+function downsampleLinear(samples, fromRate, toRate) {
+  const sampleRateRatio = fromRate / toRate;
+  const newLength = Math.floor(samples.length / sampleRateRatio);
+  if (!isFinite(sampleRateRatio) || newLength <= 0) {
+    return samples;
+  }
+
+  const result = new Float32Array(newLength);
+  let offsetResult = 0;
+  let offsetSource = 0;
+
+  while (offsetResult < newLength) {
+    const nextOffsetSource = (offsetResult + 1) * sampleRateRatio;
+    let accum = 0;
+    let count = 0;
+
+    const start = Math.floor(offsetSource);
+    const end = Math.min(Math.floor(nextOffsetSource), samples.length);
+
+    for (let i = start; i < end; i++) {
+      accum += samples[i];
+      count++;
+    }
+
+    if (count === 0) {
+      const index = Math.min(Math.floor(offsetSource), samples.length - 1);
+      accum = samples[index];
+      count = 1;
+    }
+
+    result[offsetResult] = accum / count;
+    offsetResult++;
+    offsetSource = nextOffsetSource;
+  }
+
+  return result;
+}

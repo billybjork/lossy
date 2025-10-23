@@ -121,31 +121,36 @@ User closes tab or navigates away
 
 2. **Backend Persistent State Schema**
    - New table: `agent_session_states`
-   - Store accumulated context (notes, frames, evidence)
+   - Store accumulated context snapshots and session health metadata
    - Checkpoint session state periodically
    - Restore state on session resumption
 
-3. **Context Accumulation**
-   - Notes list (all notes created in this session)
-   - Frame history (visual context over time)
-   - Audio transcript buffer (for diffusion review)
-   - Conversation memory (agent's understanding of user intent)
-   - **Typed message ingestion** (critical vs. lossy message taxonomy)
-   - **Adaptive LLM batching** (2-6s debounce window based on activity)
-   - **Mailbox depth monitoring** (telemetry for queue health)
-   - **Backpressure signaling** (pause extension uploads when overloaded)
+3. **Evidence Ledger & Storage Policy**
+   - New table: `session_evidence` (immutable, append-only)
+   - Record every transcript chunk, synthesized draft, frame reference, and agent decision with deterministic payload hashes
+   - Persist transcript artifacts as long as the underlying video stays in the user's library
+   - Persist frame blobs in object storage with TTL/eviction while retaining derived embeddings + evidence pointers in the ledger
+   - Classify evidence as `critical` or `supplementary` to drive pruning rules and backpressure signals
 
-4. **Session State Transitions**
+4. **Context Retrieval & Note Reconciliation**
+   - Implement proximity heuristics for neighborhood lookups (e.g., ±3 s primary window, ±10 s secondary sweep)
+   - Default to updating or merging existing notes when temporal + semantic overlap crosses configured thresholds
+   - Provide low-confidence escalation paths so the agent can request broader context (older transcripts, farther frames) before emitting new notes
+   - Surface note merge/update decisions and lineage in the ledger for later replay
+
+5. **Session State Transitions & Backpressure**
    - `created` → session started
    - `active` → currently accumulating context
    - `idle` → no activity but still alive
    - `checkpointed` → state saved to DB
+   - `degraded` → ledger recovery incomplete; extension notified to operate read-only
    - `closed` → session ended gracefully
    - `abandoned` → session died unexpectedly (cleanup required)
+   - Emit mailbox depth/backpressure telemetry to pause upstream uploads when overloaded
 
-5. **Graceful Degradation**
+6. **Graceful Degradation**
    - Handle network disconnections (queue events locally)
-   - Recover from backend crashes (restore from checkpoint)
+   - Recover from backend crashes (restore from checkpoint or mark session `degraded` with read-only guardrails)
    - Fallback to ephemeral sessions if persistence fails
 
 ### Success Criteria
@@ -155,6 +160,9 @@ User closes tab or navigates away
 - [ ] Session resumes correctly after page reload (<5s)
 - [ ] Session cleanup removes orphaned sessions (<1% abandoned)
 - [ ] Context accumulation visible in agent responses (cross-segment awareness)
+- [ ] Evidence ledger captures 100% of transcript chunks, notes, and frame references with stable payload hashes
+- [ ] Context replay fidelity ≥95% when regenerating notes from ledger-only inputs (spot-check harness)
+- [ ] Note merge/update logic triggers instead of new note creation when overlap thresholds are met (telemetry ratio)
 - [ ] **Mailbox depth monitored** and emitted as telemetry every message
 - [ ] **Extension receives backpressure signals** and pauses uploads when triggered
 - [ ] **Transcripts never dropped** (verified in logs over 24h test)
@@ -162,6 +170,7 @@ User closes tab or navigates away
 - [ ] **Adaptive debounce window** ranges 2-6s based on activity patterns
 - [ ] **LLM tasks spawned via Task.Supervisor** (GenServer survives LLM errors)
 - [ ] **Backpressure clears** when mailbox depth drops below 25 messages
+- [ ] **Degraded sessions** surface a read-only banner in the side panel within 1 s of detection
 
 ---
 
@@ -839,11 +848,12 @@ defmodule Lossy.Repo.Migrations.CreateAgentSessionStates do
       add :video_id, references(:videos, on_delete: :delete_all), null: false
       add :status, :string, null: false, default: "created"
 
-      # Accumulated context (JSONB for flexibility)
-      add :notes, {:array, :uuid}, default: []
-      add :frames, :jsonb, default: "[]"
-      add :transcript_buffer, :text
-      add :conversation_memory, :jsonb, default: "{}"
+      # Lightweight snapshot metadata (everything else lives in the ledger)
+      add :note_ids, {:array, :uuid}, default: []
+      add :ledger_cursor, :bigint, null: false, default: 0
+      add :last_context_hash, :string
+      add :cost_cents, :integer, null: false, default: 0
+      add :health, :jsonb, null: false, default: "{}"
 
       # Metadata
       add :created_at, :utc_datetime_usec, null: false
@@ -861,54 +871,123 @@ defmodule Lossy.Repo.Migrations.CreateAgentSessionStates do
 end
 ```
 
-**Why JSONB for frames and conversation_memory:**
-- Flexible schema for evolving data structures
-- Efficient indexing with GIN indexes (future)
-- No need for additional tables (simpler queries)
+**Ledger Table: `priv/repo/migrations/XXXXXX_create_session_evidence.exs`**
+
+```elixir
+defmodule Lossy.Repo.Migrations.CreateSessionEvidence do
+  use Ecto.Migration
+
+  def change do
+    create table(:session_evidence) do
+      add :session_id, references(:agent_session_states, column: :session_id, type: :uuid, on_delete: :delete_all), null: false
+      add :sequence, :bigint, null: false
+      add :evidence_type, :string, null: false
+      add :payload_hash, :binary, null: false
+      add :payload, :jsonb, null: false
+      add :critical, :boolean, null: false, default: false
+      add :blob_pointer, :string
+      add :occurred_at, :utc_datetime_usec, null: false
+
+      timestamps(type: :utc_datetime_usec)
+    end
+
+    create unique_index(:session_evidence, [:session_id, :sequence])
+    create index(:session_evidence, [:session_id])
+    create index(:session_evidence, [:payload_hash])
+    create index(:session_evidence, [:critical])
+  end
+end
+```
+
+**Storage Policy Notes:**
+- `sequence` is a strictly increasing cursor; `ledger_cursor` in `agent_session_states` tracks the highest applied entry.
+- `payload_hash` (e.g., SHA256) lets us guarantee the “pure function” invariant—any note can be regenerated from ledger entries.
+- Transcript payloads are marked `critical` and persist indefinitely alongside the video library item.
+- Frame payloads store derived embeddings + metadata in the ledger (`payload`), while `blob_pointer` references object storage with TTL; eviction removes the blob but not the ledger row.
+- `health` tracks heartbeat metrics (e.g., last checkpoint error, degraded flag) surfaced to the extension.
 
 ---
 
-### 4. Context Accumulation
+### 4. Context Retrieval & Note Reconciliation
 
-**Notes List:**
-- All notes created in this session (array of UUIDs)
-- Used for diffusion review (Sprint 15)
-- Queryable: "Show me all notes from this session"
+**Neighborhood Heuristics**
+- Primary window: collect evidence ±3 s around the target timestamp (transcripts, frames, prior notes).
+- Secondary sweep: expand to ±10 s when confidence < threshold or neighboring evidence is sparse.
+- Evidence prioritization: always load `critical` entries first, then layer in `supplementary` items until the token budget or confidence target is met.
 
-**Frame History:**
-- Visual context over time
-- JSONB structure: `[{frame_id, timestamp, embedding, uploaded_at}, ...]`
-- Enables: "What was on screen 5 minutes ago?"
+**Merge vs. New Note Logic**
+- Temporal overlap: if an existing note’s span overlaps the current utterance by ≥50% of the shorter duration, consider it a merge candidate.
+- Semantic similarity: cosine similarity ≥0.8 between transcript chunk embedding and candidate note embedding triggers update flow.
+- Update path: mutate the existing note content, attach new evidence to its ledger record, and append a `note_update` entry referencing both the old and new payload hashes.
+- Merge path: create a new synthesized note, mark source notes `archived`, and log a `note_merge` ledger entry with lineage metadata.
 
-**Transcript Buffer:**
-- Accumulated transcripts for the session
-- Used for conversational context
-- Example: "Earlier you mentioned X, related to this note"
+**Low-Confidence Escalation**
+- If the agent’s confidence remains <0.6 after primary + secondary sweeps, pull additional evidence (older transcripts, more distant frames) up to a configurable cap.
+- When confidence still fails to clear the threshold, enqueue a `context_request` message so the extension can prompt the user or capture fresh evidence.
+- Every escalation path is recorded in the ledger so audits can replay “why the agent asked for more context.”
 
-**Conversation Memory:**
-- Agent's understanding of user intent
-- JSONB structure: `{topics: [...], intent: "...", context: "..."}`
-- Enables: Agent remembers user's focus areas
+**Query API**
+
+```elixir
+def fetch_context_window(session_id, timestamp, opts \\ []) do
+  Lossy.Agent.SessionEvidence.fetch_window(session_id,
+    timestamp: timestamp,
+    primary_window_ms: Keyword.get(opts, :primary_window_ms, 3000),
+    secondary_window_ms: Keyword.get(opts, :secondary_window_ms, 10_000),
+    token_budget: Keyword.get(opts, :token_budget, 1_500)
+  )
+end
+```
+
+- Results stream in priority order so the agent can stop once confidence targets are met.
+- Extension side receives backpressure hints when the mailboxes saturate to avoid over-supplying frames.
 
 ---
 
-### 5. Session State Transitions
+### 5. Session State Transitions & Backpressure
 
 ```
 created ──► active ──► idle ──► checkpointed ──► closed
    │           │         │            │
    │           │         │            │
-   └───────────┴─────────┴────────────┴───► abandoned (timeout)
+   │           │         │            └────────► degraded (restore failed)
+   │           │         │
+   │           │         └─────────────────────► degraded (ledger gaps)
+   │
+   └───────────────────────────────────────────► abandoned (timeout)
 ```
 
 **State Definitions:**
 
-- `created`: Session just started, no activity yet
-- `active`: Currently processing audio/frames (status: recording, transcribing, structuring)
-- `idle`: No current activity, but session alive (waiting for next speech)
-- `checkpointed`: State saved to DB (periodic or before shutdown)
-- `closed`: Session ended gracefully (user navigated away)
-- `abandoned`: Session died unexpectedly (cleanup needed)
+- `created`: Session just started, no activity yet.
+- `active`: Currently processing audio/frames (status: recording, transcribing, structuring).
+- `idle`: No current activity, but session alive (waiting for next speech).
+- `checkpointed`: State saved to DB (periodic or before shutdown).
+- `degraded`: Ledger or checkpoint restore failed—session continues in read-only mode until manual recovery.
+- `closed`: Session ended gracefully (user navigated away).
+- `abandoned`: Session died unexpectedly (cleanup needed).
+
+**Degraded Mode Handshake:**
+
+```elixir
+def handle_cast({:mark_degraded, reason}, state) do
+  updated =
+    state
+    |> Map.put(:status, :degraded)
+    |> Map.update!(:health, fn health ->
+      Map.merge(health, %{
+        degraded_reason: reason,
+        degraded_at: DateTime.utc_now()
+      })
+    end)
+
+  notify_extension(state.session_id, :degraded, reason)
+  {:noreply, updated}
+end
+```
+
+- Extension displays a read-only banner and stops enqueueing new evidence.
+- Backpressure telemetry (mailbox depth, restart counters) is emitted with every state change so the extension can throttle uploads before we hit degrade.
 
 **Cleanup Task (Oban):**
 ```elixir
@@ -943,7 +1022,12 @@ defmodule Lossy.Workers.SessionCleanup do
     :ok
   end
 end
+```
 
+- Sessions stuck in `degraded` for >1 hour are escalated to `abandoned` with an alert in telemetry dashboards.
+- Backpressure signals resume once mailbox depth drops below configured thresholds, allowing the extension to restart uploads safely.
+
+```elixir
 # Schedule hourly
 Oban.insert!(Lossy.Workers.SessionCleanup.new(%{}, schedule_in: 3600))
 ```
@@ -962,20 +1046,20 @@ Oban.insert!(Lossy.Workers.SessionCleanup.new(%{}, schedule_in: 3600))
 - Backend: `checkpoint_to_db()`, `restore_from_checkpoint()`
 - Testing: State persistence, resumption after restart
 
-### Phase 3: Context Accumulation (Week 3-4)
-- Backend: Notes list, frame history, transcript buffer
-- Agent: Use accumulated context in note structuring
-- Testing: Cross-segment awareness, conversation continuity
+### Phase 3: Evidence Ledger & Storage Policy (Week 3-4)
+- Migration: `session_evidence` table + blob storage wiring
+- Backend: Append-only writer with payload hash validation, TTL policy for frame blobs
+- Telemetry: Ledger coverage (% of transcripts/frames captured), payload hash audits
 
-### Phase 4: State Transitions & Cleanup (Week 4-5)
-- State machine implementation
-- Oban cleanup worker
-- Monitoring: Abandoned session alerts
+### Phase 4: Context Retrieval & Note Reconciliation (Week 4-5)
+- Agent: Neighborhood query API, similarity/temporal heuristics, merge-vs-update flows
+- Extension: Honor backpressure hints, surface merge/update UI affordances
+- Testing: Context replay harness, merge ratio telemetry, low-confidence escalation paths
 
-### Phase 5: Graceful Degradation (Week 5-6)
-- Network disconnection handling
-- Checkpoint restore on backend crash
-- Fallback to ephemeral sessions
+### Phase 5: State Transitions, Backpressure & Graceful Degradation (Week 5-6)
+- State machine: `degraded` handling, health metadata, extension notification flow
+- Backpressure: Mailbox depth telemetry, extension throttling hooks, recovery scenarios
+- Resilience: Network disconnection handling, checkpoint restore validations, fallback to ephemeral sessions
 
 **Total Estimated Time:** 6 weeks
 
@@ -1010,6 +1094,8 @@ Oban.insert!(Lossy.Workers.SessionCleanup.new(%{}, schedule_in: 3600))
 | **Session ID conflicts** | Data corruption | UUID primary key, unique constraint |
 | **Network partition** | Session isolation | Queue events locally, sync on reconnect |
 | **Migration failures** | Downtime | Reversible migration, zero-downtime deploy |
+| **Ledger replay drift** | Notes no longer reproducible | Payload hash audits, automated nightly ledger replays |
+| **Blob eviction too aggressive** | Missing visual context | Tiered TTLs, fallback to embeddings, user-visible warnings before purge |
 
 ---
 
