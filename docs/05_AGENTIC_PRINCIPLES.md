@@ -67,6 +67,15 @@ Agentic Workflow:
 4. **OCR/visual text** - On-screen text that provides additional context
 5. **Temporal patterns** - How long user lingers on sections, rewatch behavior
 
+**Evidence as Typed Messages:**
+
+All evidence arrives as typed messages in the agent's mailbox, classified by criticality:
+
+- **Critical evidence** (never lose): Transcripts, user decisions, note creation events
+- **Supplementary evidence** (can shed under load): Frames, telemetry, duplicate signals
+
+This taxonomy enables intelligent load management: critical evidence is always preserved, while supplementary evidence can be pruned when the system is under pressure.
+
 **Accumulation Strategy:**
 ```
 Initial Note (from transcript):
@@ -373,9 +382,9 @@ end
 
 ---
 
-### 6. Latency-Budgeted Work Scheduling
+### 6. Latency-Budgeted Work Scheduling & Adaptive Batching
 
-**Definition:** The agent schedules work to maintain UI responsiveness, deferring expensive operations during active user interaction and processing during idle periods.
+**Definition:** The agent schedules work to maintain UI responsiveness and optimal context gathering, using adaptive batching windows and upstream backpressure to balance latency against context richness.
 
 **Work Tiers:**
 ```javascript
@@ -467,6 +476,45 @@ class WorkScheduler {
   }
 }
 ```
+
+**Adaptive Batching Principle:**
+
+Rather than invoking expensive LLM operations immediately for each piece of evidence, the agent employs **adaptive batching windows** to gather temporal context:
+
+**Two-Tier Accumulation:**
+1. **Short-term accumulator** (2-6 seconds): Batches recent transcripts and frames for immediate note creation
+2. **Long-term accumulator** (session lifetime): Preserves all evidence for diffusion refinement and session continuity
+
+**Adaptive Window Strategy:**
+
+The batching window adjusts based on user behavior patterns:
+
+- **Idle state** (>10s quiet): **2s window** → Respond quickly to single utterance
+- **Burst activity** (rapid speech): **6s window** → Capture full conversational context
+- **Topical coherence** (related content): **6s window** → Allow complete thought to finish
+- **Default balanced**: **4s window**
+
+This ensures the agent can understand temporal relationships ("Fix the auth bug... never mind, found it" → single LLM call recognizes cancellation) while maintaining low latency for isolated feedback.
+
+**Backpressure & System Resilience:**
+
+When the system approaches capacity limits, the agent employs **upstream backpressure** rather than silently dropping messages:
+
+1. **Monitor queue health**: Track mailbox depth as a system health signal
+2. **Signal upstream**: Notify extension to pause uploads when overloaded
+3. **Preserve critical evidence**: Transcripts and decisions are NEVER dropped
+4. **Shed supplementary load**: Frames and telemetry can be pruned from bounded buffers
+5. **Recover gracefully**: Resume normal operation when queue drains
+
+This preserves the integrity of the evidence chain while maintaining system stability under load.
+
+**Telemetry & Observability:**
+
+All scheduling decisions, queue depths, and load shedding events are instrumented with telemetry, enabling:
+- Real-time monitoring of system health
+- Adaptive tuning of batching parameters
+- Early warning of capacity issues
+- Post-mortem analysis of incidents
 
 ---
 

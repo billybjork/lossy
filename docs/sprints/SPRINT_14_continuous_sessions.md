@@ -130,6 +130,10 @@ User closes tab or navigates away
    - Frame history (visual context over time)
    - Audio transcript buffer (for diffusion review)
    - Conversation memory (agent's understanding of user intent)
+   - **Typed message ingestion** (critical vs. lossy message taxonomy)
+   - **Adaptive LLM batching** (2-6s debounce window based on activity)
+   - **Mailbox depth monitoring** (telemetry for queue health)
+   - **Backpressure signaling** (pause extension uploads when overloaded)
 
 4. **Session State Transitions**
    - `created` → session started
@@ -151,6 +155,13 @@ User closes tab or navigates away
 - [ ] Session resumes correctly after page reload (<5s)
 - [ ] Session cleanup removes orphaned sessions (<1% abandoned)
 - [ ] Context accumulation visible in agent responses (cross-segment awareness)
+- [ ] **Mailbox depth monitored** and emitted as telemetry every message
+- [ ] **Extension receives backpressure signals** and pauses uploads when triggered
+- [ ] **Transcripts never dropped** (verified in logs over 24h test)
+- [ ] **Frames dropped only when buffer full** (logged as telemetry event)
+- [ ] **Adaptive debounce window** ranges 2-6s based on activity patterns
+- [ ] **LLM tasks spawned via Task.Supervisor** (GenServer survives LLM errors)
+- [ ] **Backpressure clears** when mailbox depth drops below 25 messages
 
 ---
 
@@ -260,11 +271,24 @@ defmodule Lossy.Agent.Session do
     created_at: nil,
     last_activity_at: nil,
 
-    # Accumulated context
+    # Long-term accumulated context (persisted in checkpoints)
     notes: [],            # List of note IDs created in this session
     frames: [],           # List of {frame_id, timestamp, embedding} tuples
-    transcript_buffer: "", # Accumulated transcripts for diffusion review
+    transcript_buffer: "", # ALL transcripts ever (for diffusion review)
     conversation_memory: %{}, # Agent's understanding of user intent
+
+    # Short-term accumulator (2-6s batching window, cleared after LLM call)
+    pending_transcripts: [],  # [{text, timestamp, source}, ...] - NEVER drop
+    lossy_frame_buffer: [],   # [{embedding, timestamp, opts}] - drop oldest under load (max 20)
+    llm_timer_ref: nil,       # Debounce timer reference
+    llm_debounce_ms: 4_000,   # Adaptive window (2-6s based on activity)
+    consecutive_messages: 0,  # Track burst activity
+    last_message_time: nil,   # For adaptive window calculation
+
+    # Backpressure monitoring
+    mailbox_watermark: 50,    # Warning threshold
+    mailbox_critical: 100,    # Signal extension to pause uploads
+    backpressure_signaled: false,
 
     # Current recording state (ephemeral)
     audio_buffer: <<>>,
@@ -381,7 +405,426 @@ end
 
 ---
 
-### 2. Backend Persistent State Schema
+### 2. Intelligent LLM Batching & Backpressure
+
+**Problem:**
+- Current implementation calls LLM immediately per transcript, missing temporal context
+- No backpressure mechanism when backend becomes overloaded
+- Risk of GenServer mailbox overflow under heavy load (transcripts + frames flooding in)
+
+**Solution: Adaptive Debouncing + Upstream Throttling**
+
+**Core Pattern - Two-Tier Accumulation:**
+
+```elixir
+# Short-term: Cleared after each LLM invocation (2-6s window)
+pending_transcripts: []        # Critical - NEVER drop
+lossy_frame_buffer: []         # Bounded (max 20) - can drop oldest
+
+# Long-term: Persisted in checkpoints (session lifetime)
+transcript_buffer: ""          # ALL transcripts ever (for diffusion)
+frames: []                     # ALL frames ever
+conversation_memory: %{}
+```
+
+**Message Type Taxonomy:**
+
+```elixir
+# Critical messages - NEVER drop, always process
+@type critical_message ::
+  {:transcript_ready, text :: String.t(), opts :: keyword()}
+  | {:note_created, note :: map()}
+  | {:checkpoint}
+  | {:close_session}
+
+# Lossy messages - can shed under extreme load
+@type lossy_message ::
+  {:frame_embedding, embedding :: list(float()), timestamp :: float()}
+  | {:vad_event, :speech_start | :speech_end}
+  | {:telemetry_ping, metrics :: map()}
+```
+
+**Adaptive Debounce Window (2-6s):**
+
+The system dynamically adjusts the batching window based on user activity patterns:
+
+| Activity Pattern | Window | Rationale |
+|-----------------|--------|-----------|
+| **Idle** (>10s since last message) | 2s | Respond quickly to single utterance |
+| **Burst** (>3 messages in 5s) | 6s | Batch more for conversational context |
+| **Similar topic** (shared keywords) | 6s | Extend for topical coherence |
+| **Default** | 4s | Balanced responsiveness vs. context |
+
+**Implementation:**
+
+```elixir
+def handle_cast({:transcript_ready, text, opts}, state) do
+  # 1. Instrument with telemetry
+  :telemetry.execute(
+    [:lossy, :agent, :message, :received],
+    %{type: :transcript},
+    %{session_id: state.session_id}
+  )
+
+  # 2. Check mailbox health & signal backpressure if needed
+  state = check_and_signal_backpressure(state)
+
+  # 3. Capture timing before mutating state
+  now = System.monotonic_time(:millisecond)
+  previous_last_message_time = state.last_message_time
+
+  # 4. Accumulate in both buffers
+  updated_state = %{state |
+    # Short-term (for immediate LLM batching)
+    pending_transcripts: [{text, now, opts} | state.pending_transcripts],
+    consecutive_messages: update_consecutive_messages(previous_last_message_time, now, state.consecutive_messages),
+    last_message_time: now,
+
+    # Long-term (for checkpoints & diffusion)
+    transcript_buffer: state.transcript_buffer <> text <> "\n"
+  }
+
+  # 5. Schedule/reset adaptive debounce timer
+  updated_state = schedule_adaptive_llm(updated_state, previous_last_message_time)
+
+  {:noreply, updated_state}
+end
+
+def handle_cast({:frame_embedding, embedding, timestamp, opts}, state) do
+  :telemetry.execute(
+    [:lossy, :agent, :message, :received],
+    %{type: :frame},
+    %{session_id: state.session_id}
+  )
+
+  state = check_and_signal_backpressure(state)
+
+  now = System.monotonic_time(:millisecond)
+  previous_last_message_time = state.last_message_time
+
+  state =
+    state
+    |> add_to_lossy_buffer({embedding, timestamp, opts}, max_size: 20)
+    |> Map.put(:consecutive_messages, update_consecutive_messages(previous_last_message_time, now, state.consecutive_messages))
+    |> Map.put(:last_message_time, now)
+
+  state = schedule_adaptive_llm(state, previous_last_message_time)
+
+  {:noreply, state}
+end
+
+# Timer-driven LLM invocation
+def handle_info(:invoke_llm, state) do
+  if should_invoke_llm?(state) do
+    context = %{
+      transcripts: Enum.reverse(state.pending_transcripts),
+      frames: Enum.reverse(state.lossy_frame_buffer),
+      video_timestamp: state.timestamp_seconds,
+      recent_notes: Enum.take(state.notes, 5)
+    }
+
+    # Spawn via Task.Supervisor for fault isolation
+    Task.Supervisor.async_nolink(
+      Lossy.TaskSupervisor,
+      fn -> process_accumulated_context(state.session_id, context) end
+    )
+
+    :telemetry.execute(
+      [:lossy, :agent, :llm, :invoked],
+      %{batch_size: length(context.transcripts)},
+      %{session_id: state.session_id}
+    )
+  end
+
+  # Clear short-term buffers (long-term stays)
+  {:noreply, %{state |
+    pending_transcripts: [],
+    lossy_frame_buffer: [],
+    llm_timer_ref: nil,
+    consecutive_messages: 0
+  }}
+end
+
+defp schedule_adaptive_llm(state, previous_last_message_time) do
+  # Cancel existing timer (debounce pattern)
+  if state.llm_timer_ref do
+    Process.cancel_timer(state.llm_timer_ref)
+  end
+
+  # Calculate adaptive window
+  window_ms = calculate_adaptive_window(state, previous_last_message_time)
+  timer_ref = Process.send_after(self(), :invoke_llm, window_ms)
+
+  %{state | llm_timer_ref: timer_ref, llm_debounce_ms: window_ms}
+end
+
+defp calculate_adaptive_window(state, previous_last_message_time) do
+  time_since_last =
+    case previous_last_message_time do
+      nil -> :infinity
+      last_timestamp -> System.monotonic_time(:millisecond) - last_timestamp
+    end
+
+  cond do
+    time_since_last != :infinity and time_since_last > 10_000 -> 2_000  # Idle: respond quickly
+    state.consecutive_messages > 3 -> 6_000  # Burst: batch more
+    similar_topic?(state.pending_transcripts) -> 6_000  # Topic coherence
+    true -> 4_000  # Default: balanced
+  end
+end
+
+defp update_consecutive_messages(nil, _now, _count), do: 1
+defp update_consecutive_messages(previous_last, now, _count) when now - previous_last > 10_000, do: 1
+defp update_consecutive_messages(_previous_last, _now, count), do: count + 1
+
+defp similar_topic?(pending_transcripts) do
+  pending_transcripts
+  |> Enum.take(4)
+  |> Enum.map(fn {text, _ts, _opts} -> tokenize(text) end)
+  |> Enum.reduce(%{}, fn tokens, acc ->
+    Enum.reduce(tokens, acc, fn token, inner ->
+      Map.update(inner, token, 1, &(&1 + 1))
+    end)
+  end)
+  |> Enum.any?(fn {_token, freq} -> freq >= 3 end)
+end
+
+defp tokenize(text) do
+  text
+  |> String.downcase()
+  |> String.replace(~r/[^a-z0-9\s]/u, "")
+  |> String.split()
+  |> Enum.reject(&(&1 in ["the", "and", "but", "or"]))
+end
+
+# Handle Task completion/failure without crashing the GenServer
+def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
+  case reason do
+    :normal ->
+      :ok
+
+    _ ->
+      Logger.error("[#{state.session_id}] LLM task crashed: #{inspect(reason)}")
+  end
+
+  {:noreply, state}
+end
+```
+
+`update_consecutive_messages/3` resets burst counters after idle gaps, and `similar_topic?/1` uses a lightweight token frequency check (swap for embeddings later if needed). The `handle_info({:DOWN, ...})` clause keeps LLM crashes from terminating the GenServer while still logging failures for observability.
+
+**Backpressure Strategy:**
+
+Rather than dropping messages in the GenServer, signal the extension to pause uploads upstream:
+
+```elixir
+defp check_and_signal_backpressure(state) do
+  mailbox_len = Process.info(self(), :message_queue_len) |> elem(1)
+
+  # Emit telemetry for monitoring
+  :telemetry.execute(
+    [:lossy, :agent, :mailbox, :depth],
+    %{depth: mailbox_len},
+    %{session_id: state.session_id}
+  )
+
+  cond do
+    # Critical: Signal extension to STOP uploads
+    mailbox_len >= state.mailbox_critical and not state.backpressure_signaled ->
+      Logger.warn("[#{state.session_id}] Mailbox critical: #{mailbox_len}")
+      Phoenix.PubSub.broadcast(
+        Lossy.PubSub,
+        "session:#{state.session_id}",
+        {:backpressure, :critical}
+      )
+      %{state | backpressure_signaled: true}
+
+    # Warning threshold
+    mailbox_len >= state.mailbox_watermark ->
+      Logger.warn("[#{state.session_id}] Mailbox at watermark: #{mailbox_len}")
+      state
+
+    # Recovered: Resume uploads
+    mailbox_len < 25 and state.backpressure_signaled ->
+      Logger.info("[#{state.session_id}] Mailbox recovered: #{mailbox_len}")
+      Phoenix.PubSub.broadcast(
+        Lossy.PubSub,
+        "session:#{state.session_id}",
+        {:backpressure, :normal}
+      )
+      %{state | backpressure_signaled: false}
+
+    true ->
+      state
+  end
+end
+
+defp add_to_lossy_buffer(state, item, opts) do
+  max_size = Keyword.get(opts, :max_size, 20)
+  buffer = state.lossy_frame_buffer
+
+  new_buffer = [item | buffer] |> Enum.take(max_size)
+
+  # Log frame drops
+  if length(buffer) >= max_size do
+    :telemetry.execute(
+      [:lossy, :agent, :frame, :dropped],
+      %{count: 1},
+      %{session_id: state.session_id}
+    )
+  end
+
+  %{state | lossy_frame_buffer: new_buffer}
+end
+```
+
+**Extension Backpressure Handling:**
+
+```javascript
+// extension/src/background/service-worker.js
+
+channel.on('backpressure', ({ level }) => {
+  if (level === 'critical') {
+    console.warn('[Session] Backend overloaded, pausing uploads');
+
+    // Stop frame captures
+    frameCaptureRules.enabled = false;
+
+    // Queue audio locally in IndexedDB
+    audioUploadQueue.pause();
+
+    // Show UI indicator
+    chrome.action.setBadgeText({ text: '⏸', tabId });
+    chrome.action.setBadgeBackgroundColor({ color: '#FFA500', tabId });
+
+  } else if (level === 'normal') {
+    console.log('[Session] Backend recovered, resuming');
+
+    frameCaptureRules.enabled = true;
+    audioUploadQueue.resume();
+
+    chrome.action.setBadgeText({ text: '', tabId });
+  }
+});
+```
+
+**Phoenix Channel bridge:**
+
+```elixir
+# lib/lossy_web/channels/agent_session_channel.ex
+
+@impl true
+def join("agent_session:" <> session_id, _payload, socket) do
+  Phoenix.PubSub.subscribe(Lossy.PubSub, "session:#{session_id}")
+  {:ok, assign(socket, :session_id, session_id)}
+end
+
+@impl true
+def handle_info({:backpressure, level}, socket) do
+  push(socket, "backpressure", %{level: Atom.to_string(level)})
+  {:noreply, socket}
+end
+```
+
+**Telemetry Events:**
+
+```elixir
+# Attach telemetry handlers
+:telemetry.attach_many(
+  "agent-session-metrics",
+  [
+    [:lossy, :agent, :message, :received],   # Count by type
+    [:lossy, :agent, :mailbox, :depth],      # Queue health
+    [:lossy, :agent, :llm, :invoked],        # Batch sizes
+    [:lossy, :agent, :frame, :dropped]       # Load shedding
+  ],
+  &MetricsHandler.handle_event/4,
+  nil
+)
+```
+
+**Load Shedding Policy:**
+
+| Message Type | Drop Policy | Rationale |
+|--------------|-------------|-----------|
+| Transcripts | **NEVER** | Critical for note creation |
+| Note events | **NEVER** | User-facing state |
+| Checkpoints | **NEVER** | Data durability |
+| Frames | Drop oldest when buffer full | Visual context is supplementary |
+| VAD events | Drop duplicates | Redundant timing signals |
+| Telemetry | Drop when mailbox > 50 | Non-critical observability |
+
+**State Diagram:**
+
+```
+Message arrives (handle_cast)
+    ↓
+Telemetry: [:message, :received]
+    ↓
+Check mailbox depth
+    ↓
+mailbox > 100? → Broadcast backpressure signal
+    ↓
+Accumulate in pending_* buffer
+    ↓
+Schedule/reset adaptive timer (2-6s)
+    ↓
+Return immediately (<10ms)
+    ↓
+... [timer expires] ...
+    ↓
+:invoke_llm message fires
+    ↓
+Task.Supervisor.async_nolink spawns task
+    ↓
+LLM processes batched context
+    ↓
+Clear short-term buffers
+    ↓
+Ready for next batch
+```
+
+**Advanced: Separate Priority GenServers**
+
+For extreme load scenarios, split into separate GenServers per priority:
+
+```elixir
+# High-priority lane (critical messages only)
+defmodule Lossy.Agent.Session.HighPriority do
+  use GenServer
+  # Handles transcripts, note events, checkpoints
+end
+
+# Low-priority lane (lossy messages)
+defmodule Lossy.Agent.Session.LowPriority do
+  use GenServer
+  # Handles frames, telemetry
+  # Can shed load aggressively
+end
+
+# Route messages by type
+def route_message(message, session_id) do
+  case classify_priority(message) do
+    :critical -> GenServer.cast(via_tuple(:high, session_id), message)
+    :lossy    -> GenServer.cast(via_tuple(:low, session_id), message)
+  end
+end
+```
+
+**Feature Flag Rollout:**
+
+```elixir
+# config/runtime.exs
+config :lossy, :features,
+  adaptive_batching: System.get_env("ADAPTIVE_BATCHING") == "true",
+  backpressure_signaling: System.get_env("BACKPRESSURE_SIGNALING") == "true"
+
+# Enable in dev/staging first, validate telemetry before production
+```
+
+---
+
+### 3. Backend Persistent State Schema
 
 **Migration: `priv/repo/migrations/XXXXXX_create_agent_session_states.exs`**
 
@@ -425,7 +868,7 @@ end
 
 ---
 
-### 3. Context Accumulation
+### 4. Context Accumulation
 
 **Notes List:**
 - All notes created in this session (array of UUIDs)
@@ -449,7 +892,7 @@ end
 
 ---
 
-### 4. Session State Transitions
+### 5. Session State Transitions
 
 ```
 created ──► active ──► idle ──► checkpointed ──► closed
