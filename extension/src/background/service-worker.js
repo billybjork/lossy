@@ -88,7 +88,7 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     messageRouter.subscribePanelToTab(activeInfo.tabId);
   }
 
-  // Sprint 11.5: Update passive session video context when tab changes
+  // Sprint 12: Update passive session video context when tab changes
   if (passiveSession.status !== 'idle' && passiveSession.audioChannel) {
     const oldTabId = passiveSession.tabId;
     const newTabId = activeInfo.tabId;
@@ -679,7 +679,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
 
-  // Sprint 11.5: Removed 'request_notes_for_sidepanel' handler
+  // Sprint 12: Removed 'request_notes_for_sidepanel' handler
   // Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
 
   // Delete note (from side panel)
@@ -839,7 +839,7 @@ async function startRecording(options = {}) {
   });
 
   // Listen for structured note events
-  // Sprint 11.5: Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
+  // Sprint 12: Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
   // Service worker only forwards to content script for timeline markers
   audioChannel.on('note_created', (payload) => {
     console.log('[ServiceWorker] Received structured note:', payload.id);
@@ -1163,7 +1163,7 @@ async function startPassiveSession() {
     });
 
     // Listen for note_created events on the persistent channel
-    // Sprint 11.5: Sidepanel subscribes directly via NotesChannel
+    // Sprint 12: Sidepanel subscribes directly via NotesChannel
     passiveSession.audioChannel.on('note_created', (payload) => {
       console.log('[Passive] Received structured note:', payload.id);
 
@@ -1413,7 +1413,7 @@ async function loadNotesForVideo(videoDbId, tabId) {
   });
 }
 
-// Sprint 11.5: Removed loadNotesForSidePanel() and sendNotesToSidePanel()
+// Sprint 12: Removed loadNotesForSidePanel() and sendNotesToSidePanel()
 // Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
 
 async function deleteNote(noteId) {

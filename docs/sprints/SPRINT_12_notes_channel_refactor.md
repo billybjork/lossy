@@ -1,4 +1,4 @@
-# Sprint 11.5: Notes Channel Refactor
+# Sprint 12: Notes Channel Refactor
 
 **Status:** 🟢 In Progress
 **Goal:** Replace service worker note relay with direct Phoenix Channel subscription in sidepanel
@@ -377,7 +377,7 @@ Should see note appear in sidepanel if connected to `notes:video:test_123`
    - Document NotesChannel vs AudioChannel separation
 
 4. **docs/sprints/README.md**
-   - Add Sprint 11.5 to completed sprints
+   - Add Sprint 12 to completed sprints
 
 ---
 

@@ -127,6 +127,19 @@ defmodule LossyWeb.AudioChannel do
     end
   end
 
+  # Sprint 12: Handle video context update for passive mode (tab switching)
+  @impl true
+  def handle_in("update_video_context", %{"video_id" => video_id}, socket) do
+    session_id = socket.assigns.session_id
+
+    Logger.info("[#{session_id}] Updating video context to #{video_id}")
+
+    # Update the AgentSession's video_id
+    Lossy.Agent.Session.update_video_context(session_id, video_id)
+
+    {:reply, :ok, socket}
+  end
+
   # Handle agent session events from PubSub
   @impl true
   def handle_info({:agent_event, %{type: :transcript_ready, text: _text}}, socket) do

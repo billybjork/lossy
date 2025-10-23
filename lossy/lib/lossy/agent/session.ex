@@ -39,6 +39,11 @@ defmodule Lossy.Agent.Session do
     GenServer.call(via_tuple(session_id), {:set_timestamp, timestamp})
   end
 
+  # Sprint 12: Update video context for passive mode (when user switches tabs)
+  def update_video_context(session_id, video_id) do
+    GenServer.cast(via_tuple(session_id), {:update_video_context, video_id})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -150,6 +155,14 @@ defmodule Lossy.Agent.Session do
     }
 
     {:noreply, Map.put(state, :pending_visual_context, visual_context)}
+  end
+
+  # Sprint 12: Handle video context update for passive mode (tab switching)
+  @impl true
+  def handle_cast({:update_video_context, video_id}, state) do
+    Logger.info("[#{state.session_id}] Updating video context: #{state.video_id} → #{video_id}")
+    new_state = %{state | video_id: video_id}
+    {:noreply, new_state}
   end
 
   # Sprint 10: Handle timestamp update for passive mode

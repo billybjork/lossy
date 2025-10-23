@@ -37,7 +37,7 @@ Speak naturally while watching. The system:
 | **UI - Popup**            | Vanilla JS                    | Simple controls, Chrome extension APIs            |
 | **UI - Side Panel**       | Vanilla JS + Phoenix Channels | Real-time notes via direct WebSocket subscription |
 | **UI - Overlays**         | Shadow DOM + Vanilla JS       | On-video ghost comments, emoji chips              |
-| **Voice Capture**         | MediaRecorder + VAD           | Silero VAD (onnxruntime-web, Sprint 12)           |
+| **Voice Capture**         | MediaRecorder + VAD           | Silero VAD (onnxruntime-web, Sprint 13)           |
 | **Local STT**             | Transformers.js (Whisper)     | WebGPU → WASM (local-only)                        |
 | **Emoji Chips** (Planned) | Text classification           | Keyword/embedding-based on transcription          |
 | **Bundler**               | Webpack 5                     | Bundles phoenix.js for WebSocket client           |

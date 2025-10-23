@@ -2,7 +2,7 @@
 //
 // Purpose: Client-side UI for extension side panel
 //
-// Architecture (Sprint 11.5):
+// Architecture (Sprint 12):
 // - Service Worker: Audio streaming via AudioChannel (chrome.runtime + Phoenix Channel)
 // - Sidepanel: Notes subscription via NotesChannel (Phoenix Channel direct)
 // - Chrome APIs: Tab management, recording controls, storage
@@ -16,7 +16,7 @@ import {
   setPassiveModeEnabled,
 } from '../shared/settings.js';
 
-// Sprint 11.5: Phoenix Socket for direct notes subscription
+// Sprint 12: Phoenix Socket for direct notes subscription
 import { Socket } from 'phoenix';
 
 console.log('Side panel loaded');
@@ -31,7 +31,7 @@ const notesCache = new Map(); // Persist notes per video to avoid flicker on rel
 const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
 
-// Sprint 11.5: Phoenix connection for real-time notes
+// Sprint 12: Phoenix connection for real-time notes
 let notesSocket = null;
 let notesChannel = null;
 
@@ -601,7 +601,7 @@ async function handleTabChanged(tabId, videoContext) {
       hadCachedNotes = !!(cachedNotes && cachedNotes.length > 0);
     }
 
-    // Sprint 11.5: Subscribe to Phoenix Channel for this video's notes
+    // Sprint 12: Subscribe to Phoenix Channel for this video's notes
     subscribeToVideoNotes(newVideoDbId);
 
     // Request current timestamp for the newly active tab
@@ -733,7 +733,7 @@ async function handleTabChanged(tabId, videoContext) {
                 displayedVideoDbId = videoDbId;
                 loadingSessionId++;
 
-                // Sprint 11.5: Subscribe to Phoenix Channel for notes (replaces service worker relay)
+                // Sprint 12: Subscribe to Phoenix Channel for notes (replaces service worker relay)
                 subscribeToVideoNotes(videoDbId);
               }
             } else {
@@ -1253,7 +1253,7 @@ async function initPassiveMode() {
 initPassiveMode();
 
 // ============================================================================
-// Sprint 11.5: Phoenix Socket for Real-Time Notes
+// Sprint 12: Phoenix Socket for Real-Time Notes
 // ============================================================================
 
 /**

@@ -11,8 +11,8 @@
 - ✅ Sprint 07 – Local Transcription (Whisper + offscreen document)
 - ✅ Sprint 08 – Visual Intelligence (manual "Refine with Vision" button)
 - 🔜 Sprint 11 – Automated Frame Capture Strategy (TBD)
-- 🔜 Sprint 12 – Continuous Session Persistence
-- 🔜 Sprint 13+ – Diffusion Refinement & Cost Governance
+- 🔜 Sprint 14 – Continuous Session Persistence
+- 🔜 Sprint 15+ – Diffusion Refinement & Cost Governance
 
 ---
 
@@ -59,8 +59,8 @@ Establish a passive audio capture path that triggers the existing recording pipe
 ### Deferred to Future Sprints
 
 - **Sprint 11 (TBD):** Automated frame capture strategy, upload queue design, IndexedDB storage patterns, backend persistence decisions
-- **Sprint 12:** Continuous AgentSession lifecycle + `agent_session_states` schema
-- **Sprint 13+:** Diffusion review graph, evidence relations, supervision tree, cost governance ($0.50/session)
+- **Sprint 14:** Continuous AgentSession lifecycle + `agent_session_states` schema
+- **Sprint 15+:** Diffusion review graph, evidence relations, supervision tree, cost governance ($0.50/session)
 
 ---
 
@@ -105,7 +105,7 @@ Establish a passive audio capture path that triggers the existing recording pipe
 **Persistent Audio Channel (Critical Fix)**
 - Problem: Initial implementation created new WebSocket connection per speech segment
 - Solution: ONE persistent `audio:${sessionId}` channel created on passive session start
-- Impact: Eliminates connection churn, prepares foundation for Sprint 12 continuous sessions
+- Impact: Eliminates connection churn, prepares foundation for Sprint 14 continuous sessions
 
 **chrome.storage Persistence**
 - Passive mode enabled state persists across extension reloads
@@ -472,10 +472,10 @@ end
 
 **Recommendation:** Sprint 11 should prototype 2-3 approaches with telemetry before committing to architecture.
 
-### Diffusion & Multi-Agent (Sprint 13+)
+### Diffusion & Multi-Agent (Sprint 15+)
 - Requires shared session state with optimistic locking and a supervision tree
 - Needs research into GenServer vs Oban orchestration and cost accounting
-- Blocked on Sprint 12 delivering persistent session context
+- Blocked on Sprint 14 delivering persistent session context
 
 ---
 

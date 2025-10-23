@@ -1,4 +1,4 @@
-# Sprint 12: Passive Mode Quality & Polish
+# Sprint 13: Passive Mode Quality & Polish
 
 **Status:** 📋 Planned
 **Priority:** High
@@ -145,7 +145,7 @@ Service Worker (passive event handler)
    - See "Research Findings" for complete code example
 
 5. **Update HybridVAD:**
-   - Remove energy-based fallback (per Sprint 12 goals)
+   - Remove energy-based fallback (per Sprint 13 goals)
    - Use Silero as primary VAD (no hybrid mode)
    - Handle model loading failures with clear error message
 
