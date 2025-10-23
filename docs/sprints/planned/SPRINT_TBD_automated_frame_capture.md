@@ -41,11 +41,12 @@ Automatically capture video frames during passive mode recordings to provide vis
    - Upload queue with retry logic (exponential backoff)
    - Handle network failures gracefully
 
-3. **Backend Persistence Decision**
+3. **Ledger-Compatible Backend Persistence**
    - **Option A:** No persistence (stream directly to LLM context)
    - **Option B:** Transient storage (Redis with TTL)
    - **Option C:** Durable storage (S3/blob storage)
    - Select based on cost, latency, and retrieval needs
+   - Ensure every uploaded frame emits a `session_evidence` row with both blob pointer and embedding payload so ledger replay works even after blob eviction
 
 4. **Cost Governance**
    - Frame capture rate limits (frames/minute, frames/session)
@@ -63,6 +64,7 @@ Automatically capture video frames during passive mode recordings to provide vis
 
 - [ ] Frames automatically captured on speech detection (no user action required)
 - [ ] Frame embeddings attached to notes and available for enrichment
+- [ ] Each captured frame creates a ledger entry with deterministic payload hash + blob pointer, enabling replay after blob eviction
 - [ ] IndexedDB storage stays within limits (count + byte caps)
 - [ ] Upload failures handled with retry (max 3 retries, exponential backoff)
 - [ ] Average cost per session < $0.50 (tracked via telemetry)
@@ -117,6 +119,14 @@ Automatically capture video frames during passive mode recordings to provide vis
 - Durable: Full audit trail, highest cost and storage overhead
 
 **Recommendation:** Start with **Option B (Transient)** - store in Redis with 1-hour TTL. Allows note enrichment during session without long-term storage costs. Evaluate in Sprint 15 if permanent storage is needed.
+
+**Ledger Requirement:** Regardless of the blob backing store, emit a `session_evidence` record for every frame:
+- `evidence_type: "frame"`
+- `payload`: embedding vector metadata + capture context (timestamp, capture_reason)
+- `blob_pointer`: Redis/S3 handle (optional when blob expired)
+- `critical: false` (frames become supplementary once embeddings exist)
+
+This keeps the agent’s evidence ledger replayable even when transient blobs are pruned.
 
 ### 4. Upload Retry Strategy
 
@@ -188,8 +198,9 @@ Service worker uploads:
                   │
                   ▼
 Backend processes:
-  - Store in Redis with session_id key
-  - Attach embedding to AgentSession
+  - Store blob in Redis (TTL 1 hour) and emit `blob_pointer`
+  - Persist append-only `session_evidence` row with payload hash, embedding metadata, blob pointer
+  - Attach embedding + ledger id to AgentSession context
   - Link to note via note_id
                   │
                   ▼
