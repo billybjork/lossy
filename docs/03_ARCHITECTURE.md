@@ -107,8 +107,8 @@
 │  │                 │  │ - LocalAgent (GenServer)            │  │
 │  │ - STT           │  │   • Playwright via CDP              │  │
 │  │   • WASM (ext)  │  │   • Gemini Computer Use (fallback) │  │
-│  │   • Cloud API   │  │   • Node.js Port communication     │  │
-│  │   • Rustler NIF │  │                                     │  │
+│  │   Local only!   │  │   • Node.js Port communication     │  │
+│  │   (Sprint 11)   │  │                                     │  │
 │  │                 │  │ - ProfileSetup                      │  │
 │  │ - Vision        │  │   • Manages agent Chrome profile    │  │
 │  │   • CLIP (ext)  │  │   • Persistent cookies/localStorage│  │
@@ -528,12 +528,12 @@ end
 5. Service worker forwards to Phoenix via AudioChannel
    channel.push("audio", {binary: audioChunk})
    ↓
-6. Phoenix AudioChannel routes to AgentSession
-   AgentSession.cast_audio(session_id, audio_chunk)
+6. Extension transcribes locally (WASM - WebGPU or CPU via ONNX Runtime)
    ↓
-7. AgentSession accumulates audio, processes when threshold met
+7. Extension sends transcript to backend via AudioChannel
+   channel.push("transcript_final", {text: "...", source: "local"})
    ↓
-8. STT transcribes (local WASM or cloud API)
+8. AgentSession receives and processes transcript
    ↓
 9. Broadcast event to PubSub
    {:agent_event, %{type: :asr_final, text: "..."}}
@@ -812,7 +812,7 @@ Does it need to work across sessions/devices?
 
 **Examples:**
 - Audio capture → Extension (needs getUserMedia)
-- Transcription → Hybrid (local WASM optional, cloud fallback in backend)
+- Transcription → Extension only (local WASM, WebGPU or CPU - Sprint 11)
 - Note categorization → Backend (business logic)
 - Video frame capture → Extension (needs video element access)
 - Frame analysis → Extension (WASM CLIP for privacy)
