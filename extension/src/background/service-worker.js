@@ -1102,11 +1102,10 @@ async function hasOffscreenDocument() {
 }
 
 /**
- * Sprint 10: Handle passive VAD event from offscreen document
- *
- * Sprint 10 Fix: Uses persistent audio channel instead of creating new sessions
- * Applies debounce/min-duration rules and triggers recording for valid speech segments.
+ * Sprint 09 Phase 3: Set up video channel broadcast listeners
+ * Forwards video updates to side panel for real-time UI updates
  */
+let broadcastsSetUp = false;
 function setupVideoChannelBroadcasts() {
   // Only set up once to avoid duplicate listeners
   if (broadcastsSetUp || !videoChannel) {
