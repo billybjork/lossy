@@ -24,7 +24,7 @@ export class TabManager {
         console.log('[TabManager] Loaded persisted contexts:', this.tabVideoMap.size, 'tabs');
 
         // Clean up any stale recording states (extension reload clears recording)
-        for (const [tabId, context] of this.tabVideoMap.entries()) {
+        for (const context of this.tabVideoMap.values()) {
           if (context.recordingState === 'recording') {
             context.recordingState = 'idle';
           }

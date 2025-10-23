@@ -1,16 +1,11 @@
 /**
- * Offscreen Document - Audio Recording & Local Transcription + Vision
+ * Offscreen Document - Audio Recording & Local Transcription
  *
  * Sprint 11: Local-only transcription
  * - Captures audio from microphone
  * - Buffers audio locally for local transcription
  * - Transcribes locally using Whisper via ONNX Runtime (WebGPU or WASM)
  * - No cloud fallback - 100% local processing
- *
- * Sprint 08: Visual intelligence via SigLIP
- * - Generates frame embeddings from ImageData
- * - Coordinates with Whisper via GPU job queue
- * - Sends embeddings to backend for note enrichment
  *
  * Sprint 10: Passive audio detection (VAD)
  * - Runs Voice Activity Detection independently from recording
@@ -24,25 +19,12 @@ import {
   unloadModel,
   warmCache,
 } from './whisper-loader.js';
-import {
-  loadSigLIPModel,
-  generateEmbedding,
-  detectCapabilities as detectVisionCapabilities,
-  unloadModel as unloadVisionModel,
-  warmCache as warmVisionCache,
-} from './siglip-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
-import { LOCAL_VISION_MODES } from '../shared/settings.js';
 import { HybridVAD } from './vad-detector.js';
 
 let mediaRecorder = null;
 let audioContext = null;
-let recordedChunks = [];
 let audioBuffer = []; // Float32Array chunks for local transcription
-
-// Sprint 08: Vision state
-let localVisionEnabled = false;
-let currentVisionMode = LOCAL_VISION_MODES.AUTO; // Default mode
 
 // Sprint 10: VAD state
 let vadInstance = null;
@@ -51,7 +33,7 @@ let vadAudioStream = null;
 let vadEnabled = false;
 
 // Listen for commands from service worker
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   // Only handle messages targeted to offscreen or without a target
   if (message.target && message.target !== 'offscreen') {
     return false;
@@ -94,34 +76,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       })
       .catch((error) => {
         console.error('[Offscreen] Failed to warm cache:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Keep channel open for async response
-  }
-
-  // Sprint 08: Frame embedding generation
-  if (message.action === 'generate_embedding') {
-    handleGenerateEmbedding(message)
-      .then((result) => {
-        sendResponse({ success: true, ...result });
-      })
-      .catch((error) => {
-        console.error('[Offscreen] Embedding generation failed:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Keep channel open for async response
-  }
-
-  // Sprint 08: Warm vision model cache
-  if (message.action === 'warm_vision_cache') {
-    console.log('[Offscreen] Warming SigLIP model cache...');
-    warmVisionCache()
-      .then(() => {
-        console.log('[Offscreen] Vision cache warmed successfully');
-        sendResponse({ success: true });
-      })
-      .catch((error) => {
-        console.error('[Offscreen] Failed to warm vision cache:', error);
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open for async response
@@ -212,7 +166,6 @@ async function startRecording() {
       audioBitsPerSecond: 16000,
     });
 
-    recordedChunks = [];
     audioBuffer = [];
 
     // Store processor for cleanup
@@ -386,123 +339,6 @@ async function transcribeLocally() {
 }
 
 /**
- * Generate frame embedding using SigLIP.
- *
- * Sprint 08: Visual intelligence
- *
- * @param {Object} message - Message with imageData, timestamp, sessionId
- * @returns {Promise<Object>} Embedding result
- */
-async function handleGenerateEmbedding(message) {
-  const { imageData, timestamp, sessionId, visionMode } = message;
-
-  // Update vision mode if provided
-  if (visionMode) {
-    currentVisionMode = visionMode;
-    console.log('[Offscreen] Vision mode set to:', currentVisionMode);
-  }
-
-  // Check if vision should be enabled
-  localVisionEnabled = currentVisionMode !== LOCAL_VISION_MODES.DISABLED;
-
-  if (!localVisionEnabled) {
-    throw new Error('Local vision is disabled');
-  }
-
-  // Check if local vision should be attempted
-  const shouldUseLocal =
-    currentVisionMode !== LOCAL_VISION_MODES.FORCE_CLOUD &&
-    currentVisionMode !== LOCAL_VISION_MODES.DISABLED;
-
-  if (!shouldUseLocal) {
-    throw new Error('Vision mode set to cloud only');
-  }
-
-  console.log(`[Offscreen] Generating embedding for frame at ${timestamp}s`);
-
-  const startTime = performance.now();
-
-  // Check capabilities
-  const capabilities = await detectVisionCapabilities();
-  const device = capabilities.device || 'wasm';
-
-  if (!capabilities.canUseLocal) {
-    const canFallback = currentVisionMode !== LOCAL_VISION_MODES.FORCE_LOCAL;
-    console.warn('[Offscreen] Local vision unavailable');
-
-    chrome.runtime.sendMessage({
-      action: 'vision_fallback_required',
-      reason: 'Local vision unavailable',
-      canFallback,
-    });
-
-    throw new Error('Local vision unavailable');
-  }
-
-  // Notify UI: embedding generation started
-  chrome.runtime.sendMessage({
-    action: 'embedding_status',
-    stage: 'started',
-    source: 'local',
-    device: device,
-    timestamp,
-  });
-
-  // Convert ImageData array back to ImageData object
-  const reconstructedImageData = new ImageData(
-    new Uint8ClampedArray(imageData.data),
-    imageData.width,
-    imageData.height
-  );
-
-  // Enqueue embedding job in GPU queue (lower priority than Whisper)
-  const embedding = await enqueueGpuTask(
-    'siglip',
-    async () => {
-      console.log('[Offscreen] Generating embedding...');
-      return await generateEmbedding(reconstructedImageData);
-    },
-    {
-      priority: JobPriority.NORMAL, // Lower than Whisper (HIGH)
-      timeout: 10000, // 10 second timeout
-    }
-  );
-
-  const embeddingTime = performance.now() - startTime;
-
-  console.log(
-    `[Offscreen] Embedding generated in ${embeddingTime.toFixed(0)}ms (${embedding.length} dims)`
-  );
-
-  // Notify UI: embedding completed
-  chrome.runtime.sendMessage({
-    action: 'embedding_status',
-    stage: 'completed',
-    source: 'local',
-    device: device,
-    timestamp,
-    timingMs: embeddingTime,
-  });
-
-  // Send embedding to service worker for relay to backend
-  chrome.runtime.sendMessage({
-    action: 'embedding_ready',
-    embedding: Array.from(embedding), // Convert Float32Array to regular array for JSON
-    timestamp,
-    sessionId,
-    source: 'local',
-    device,
-    embeddingTimeMs: Math.round(embeddingTime),
-  });
-
-  return {
-    embedding: Array.from(embedding),
-    embeddingTimeMs: Math.round(embeddingTime),
-    device,
-  };
-}
-
-/**
  * Sprint 10: Start Voice Activity Detection
  *
  * Creates a separate audio stream for passive monitoring.
@@ -672,7 +508,6 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     console.log('[Offscreen] Document hidden, unloading models and stopping VAD');
     unloadModel(); // Whisper
-    unloadVisionModel(); // SigLIP
     stopVAD(); // VAD cleanup
   }
 });

@@ -276,8 +276,8 @@ export function unloadModel() {
     capabilitiesCache = null;
 
     // Force garbage collection if available (non-standard)
-    if (global.gc) {
-      global.gc();
+    if (globalThis.gc) {
+      globalThis.gc();
     }
   }
 }

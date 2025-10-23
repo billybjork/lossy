@@ -22,7 +22,6 @@ import { Socket } from 'phoenix';
 console.log('Side panel loaded');
 
 let isRecording = false;
-let currentTabId = null;
 let currentVideoContext = null;
 let displayedVideoDbId = null; // Track which video's notes are currently displayed
 let loadingSessionId = 0; // Increment this to invalidate in-flight note requests
@@ -576,7 +575,6 @@ async function handleTabChanged(tabId, videoContext) {
   const isSameVideo = previousVideoDbId === newVideoDbId;
 
   // Update state
-  currentTabId = tabId;
   currentVideoContext = videoContext;
   cancelScheduledTranscriptClear();
 
@@ -1097,7 +1095,7 @@ chrome.runtime.onMessage.addListener((message) => {
 });
 
 // Listen for tab updates to refresh site title
-chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
   // Only update if the title changed and this is the active tab
   if (changeInfo.title && tab.active) {
     updateSiteTitle();
@@ -1226,9 +1224,6 @@ function updateTranscriptionStatus(status) {
   }
 }
 
-// Initialize transcription mode on load
-initTranscriptionMode();
-
 // Sprint 10: Initialize passive mode on load
 async function initPassiveMode() {
   // Load persisted passive mode state
@@ -1319,10 +1314,7 @@ function subscribeToVideoNotes(videoDbId) {
 
     // Only append if we're still viewing this video
     if (displayedVideoDbId === note.video_id) {
-      appendNote({
-        action: 'transcript',
-        data: note,
-      });
+      addTranscript(note);
     } else {
       console.log('[Notes] Ignoring note for different video:', note.video_id);
     }
@@ -1502,7 +1494,7 @@ platformFilter.addEventListener('change', loadVideoLibrary);
 
 // Search with debounce
 let searchTimeout;
-videoSearch.addEventListener('input', (e) => {
+videoSearch.addEventListener('input', () => {
   clearTimeout(searchTimeout);
   searchTimeout = setTimeout(() => {
     loadVideoLibrary();

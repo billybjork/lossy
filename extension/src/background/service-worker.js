@@ -83,9 +83,39 @@ function sendMessageToTab(tabId, message) {
 })();
 
 // Track tab activation to subscribe panel to active tab
-chrome.tabs.onActivated.addListener((activeInfo) => {
+chrome.tabs.onActivated.addListener(async (activeInfo) => {
   if (messageRouter) {
     messageRouter.subscribePanelToTab(activeInfo.tabId);
+  }
+
+  // Sprint 11.5: Update passive session video context when tab changes
+  if (passiveSession.status !== 'idle' && passiveSession.audioChannel) {
+    const oldTabId = passiveSession.tabId;
+    const newTabId = activeInfo.tabId;
+
+    console.log(`[Passive] Tab changed: ${oldTabId} → ${newTabId}`);
+
+    // Update tracked tab ID
+    passiveSession.tabId = newTabId;
+
+    // Get video context for new tab
+    const newVideoContext = tabManager ? tabManager.getVideoContext(newTabId) : null;
+
+    if (newVideoContext?.videoDbId) {
+      console.log(`[Passive] Updating video context to: ${newVideoContext.videoDbId}`);
+
+      // Update backend AgentSession's video context
+      passiveSession.audioChannel
+        .push('update_video_context', { video_id: newVideoContext.videoDbId })
+        .receive('ok', () => {
+          console.log('[Passive] Video context updated successfully');
+        })
+        .receive('error', (err) => {
+          console.error('[Passive] Failed to update video context:', err);
+        });
+    } else {
+      console.log('[Passive] New tab has no video context (non-video page)');
+    }
   }
 });
 
@@ -383,67 +413,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // Sprint 08: Handle frame embedding from local vision
-  if (message.action === 'embedding_ready' && sender.url?.includes('offscreen.html')) {
-    console.log(
-      `[Lossy] Frame embedding received: ${message.embedding.length} dims at ${message.timestamp}s`
-    );
-
-    // Sprint 10 Fix: Route embedding to correct channel (passive vs manual)
-    const targetChannel = passiveSession.status === 'recording'
-      ? passiveSession.audioChannel
-      : audioChannel;
-
-    if (targetChannel) {
-      targetChannel
-        .push('frame_embedding', {
-          embedding: message.embedding,
-          timestamp: message.timestamp,
-          source: message.source,
-          device: message.device,
-          embeddingTimeMs: message.embeddingTimeMs,
-        })
-        .receive('ok', () => {
-          console.log('[Lossy] Frame embedding sent to backend');
-        })
-        .receive('error', (err) => {
-          console.error('[Lossy] Failed to send embedding:', err);
-        });
-    }
-    return false;
-  }
-
-  // Sprint 08: Handle local vision fallback
-  if (message.action === 'vision_fallback_required' && sender.url?.includes('offscreen.html')) {
-    console.warn('[Lossy] Local vision failed:', message.reason);
-
-    // Notify side panel of fallback (optional)
-    chrome.runtime.sendMessage({
-      action: 'vision_status',
-      stage: 'fallback',
-      source: 'cloud',
-      reason: message.reason,
-    }).catch(() => {});
-
-    if (!message.canFallback) {
-      console.log('[Lossy] Cloud vision fallback disabled, skipping enrichment');
-    }
-
-    return false;
-  }
-
-  // Sprint 08: Handle frame embedding generation request from content script
-  if (message.action === 'generate_frame_embedding') {
-    handleFrameEmbeddingRequest(message)
-      .then(sendResponse)
-      .catch((error) => {
-        console.error('[ServiceWorker] Frame embedding failed:', error);
-        sendResponse({ success: false, error: error.message });
-      });
-    return true; // Keep channel open for async response
-  }
-
-  // Sprint 08: Handle clarify note request from side panel
   // Sprint 08: Refine note with GPT-4o Vision
   if (message.action === 'refine_note_with_vision') {
     handleRefineNoteWithVision(message.noteId, message.timestamp)
@@ -476,7 +445,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[ServiceWorker] 📹 VIDEO_DETECTED in tab', tabId, ':', videoData);
 
     // Send to backend VideoChannel
-    handleVideoDetected(videoData, tabId)
+    handleVideoDetected(videoData)
       .then((response) => {
         console.log('[ServiceWorker] 📹 Backend returned videoDbId:', response.videoDbId);
 
@@ -710,31 +679,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep channel open for async response
   }
 
-  // Request notes for side panel only (from side panel when switching tabs)
-  if (message.action === 'request_notes_for_sidepanel') {
-    if (!message.videoDbId || !message.tabId) {
-      sendResponse({ error: 'Missing videoDbId or tabId' });
-      return false;
-    }
-
-    console.log(
-      '[ServiceWorker] 📝 REQUEST_NOTES_FOR_SIDEPANEL for video:',
-      message.videoDbId,
-      'tab:',
-      message.tabId
-    );
-
-    loadNotesForSidePanel(message.videoDbId, message.tabId)
-      .then(() => {
-        sendResponse({ success: true });
-      })
-      .catch((err) => {
-        console.error('[Lossy] Failed to load notes:', err);
-        sendResponse({ error: err.message });
-      });
-
-    return true; // Keep channel open for async response
-  }
+  // Sprint 11.5: Removed 'request_notes_for_sidepanel' handler
+  // Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
 
   // Delete note (from side panel)
   if (message.action === 'delete_note') {
@@ -1217,28 +1163,9 @@ async function startPassiveSession() {
     });
 
     // Listen for note_created events on the persistent channel
+    // Sprint 11.5: Sidepanel subscribes directly via NotesChannel
     passiveSession.audioChannel.on('note_created', (payload) => {
-      console.log('[Passive] Received structured note:', payload);
-
-      // Forward to sidepanel
-      if (passiveSession.tabId && messageRouter) {
-        messageRouter.routeToSidePanel(
-          {
-            action: 'transcript',
-            data: {
-              id: payload.id,
-              text: payload.text,
-              category: payload.category,
-              confidence: payload.confidence,
-              timestamp_seconds: payload.timestamp_seconds,
-              raw_transcript: payload.raw_transcript,
-              timestamp: payload.timestamp,
-              video_id: videoContext?.videoDbId,
-            },
-          },
-          passiveSession.tabId
-        );
-      }
+      console.log('[Passive] Received structured note:', payload.id);
 
       // Forward to content script for timeline marker
       if (passiveSession.tabId) {
@@ -1396,7 +1323,7 @@ function setupVideoChannelBroadcasts() {
   broadcastsSetUp = true;
 }
 
-async function handleVideoDetected(videoData, tabId) {
+async function handleVideoDetected(videoData) {
   console.log('[Lossy] Handling video detected:', videoData);
 
   // Connect to socket if not already connected
@@ -1475,7 +1402,7 @@ async function loadNotesForVideo(videoDbId, tabId) {
             action: 'load_markers',
             notes: notesResponse.notes,
           })
-          .catch((err) => console.log('[ServiceWorker] ⚠️ No content script on this page'));
+          .catch(() => console.log('[ServiceWorker] ⚠️ No content script on this page'));
 
         resolve();
       })
@@ -1486,71 +1413,8 @@ async function loadNotesForVideo(videoDbId, tabId) {
   });
 }
 
-async function loadNotesForSidePanel(videoDbId, tabId) {
-  console.log('[ServiceWorker] 📝 Loading notes for side panel only:', videoDbId, 'tab:', tabId);
-
-  // Ensure we have a video channel connection
-  if (!socket || !socket.isConnected()) {
-    socket = new Socket('ws://localhost:4000/socket', {
-      params: {},
-    });
-    socket.connect();
-  }
-
-  // Reuse or create video channel
-  if (!videoChannel) {
-    videoChannel = socket.channel('video:meta', {});
-    await new Promise((resolve, reject) => {
-      videoChannel.join().receive('ok', resolve).receive('error', reject);
-    });
-  }
-
-  // Request notes
-  return new Promise((resolve, reject) => {
-    videoChannel
-      .push('get_notes', { video_id: videoDbId })
-      .receive('ok', (notesResponse) => {
-        console.log(
-          '[ServiceWorker] 📝 Received',
-          notesResponse.notes?.length || 0,
-          'existing notes for side panel'
-        );
-
-        // Send notes to side panel only (filtered by tab)
-        sendNotesToSidePanel(notesResponse.notes, videoDbId, tabId);
-
-        resolve();
-      })
-      .receive('error', (err) => {
-        console.error('[Lossy] Failed to get notes:', err);
-        reject(err);
-      });
-  });
-}
-
-function sendNotesToSidePanel(notes, videoDbId, tabId) {
-  if (notes && notes.length > 0 && messageRouter) {
-    notes.forEach((note) => {
-      // Only send to side panel if it's viewing this tab
-      messageRouter.routeToSidePanel(
-        {
-          action: 'transcript',
-          data: {
-            id: note.id,
-            text: note.text,
-            category: note.category,
-            confidence: note.confidence,
-            timestamp_seconds: note.timestamp_seconds,
-            raw_transcript: note.raw_transcript,
-            timestamp: note.timestamp,
-            video_id: videoDbId, // Add video context for filtering
-          },
-        },
-        tabId
-      );
-    });
-  }
-}
+// Sprint 11.5: Removed loadNotesForSidePanel() and sendNotesToSidePanel()
+// Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
 
 async function deleteNote(noteId) {
   console.log('[ServiceWorker] 🗑️ Deleting note:', noteId);
@@ -1698,71 +1562,8 @@ async function ensureContentScriptInjected(tabId) {
 }
 
 /**
- * Sprint 08: Handle frame embedding generation request from ClarifyButton
- * Relays frame capture to offscreen document for SigLIP processing
+ * Sprint 08: Refine note with GPT-4o Vision using captured video frame
  */
-async function handleFrameEmbeddingRequest(message) {
-  const { imageData, timestamp } = message;
-
-  console.log('[ServiceWorker] 🔍 Handling frame embedding request at timestamp:', timestamp);
-
-  // Ensure offscreen document exists
-  await createOffscreenDocument();
-
-  // Get current session ID from audio channel (if active) or generate one
-  // For now, we'll get it from the audio channel topic since embeddings are tied to sessions
-  const sessionId = audioChannel?.topic?.split(':')[1] || null;
-
-  if (!sessionId) {
-    console.warn('[ServiceWorker] No active session - embedding will be sent without session context');
-  }
-
-  // Get vision mode from settings
-  const { getLocalVisionMode } = await import('../shared/settings.js');
-  const visionMode = await getLocalVisionMode();
-
-  console.log('[ServiceWorker] Sending frame to offscreen for embedding (mode:', visionMode, ')');
-
-  // Send to offscreen document for embedding generation
-  try {
-    const response = await chrome.runtime.sendMessage({
-      target: 'offscreen',
-      action: 'generate_embedding',
-      imageData,
-      timestamp,
-      sessionId,
-      visionMode,
-    });
-
-    if (response?.success) {
-      console.log(
-        '[ServiceWorker] ✅ Embedding generated:',
-        response.embedding?.length,
-        'dims in',
-        response.embeddingTimeMs,
-        'ms on',
-        response.device
-      );
-      return {
-        success: true,
-        embedding: response.embedding,
-        embeddingTimeMs: response.embeddingTimeMs,
-        device: response.device,
-      };
-    } else {
-      throw new Error(response?.error || 'Embedding generation failed');
-    }
-  } catch (error) {
-    console.error('[ServiceWorker] ❌ Failed to generate embedding:', error);
-    throw error;
-  }
-}
-
-/**
- * Sprint 08: Handle clarify note request from side panel
- * Captures frame, generates embedding, and enriches note
- */
-// Sprint 08: Refine note with GPT-4o Vision using captured video frame
 async function handleRefineNoteWithVision(noteId, timestamp) {
   console.log('[ServiceWorker] 🔍 Refining note with vision:', noteId, 'at timestamp:', timestamp);
 
@@ -1789,7 +1590,7 @@ async function handleRefineNoteWithVision(noteId, timestamp) {
     throw new Error(captureResponse?.error || 'Frame capture failed');
   }
 
-  const { imageData, actualTimestamp, base64 } = captureResponse;
+  const { actualTimestamp, base64 } = captureResponse;
   console.log('[ServiceWorker] Frame captured at', actualTimestamp);
 
   // Validate we have base64 data
