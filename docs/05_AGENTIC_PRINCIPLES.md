@@ -397,7 +397,7 @@ const fastWork = {
 
 // Medium (1-3s) - Run during idle or low activity
 const mediumWork = {
-  cloudTranscription: true,      // OpenAI Whisper API
+  localTranscription: true,      // ONNX Whisper (local-only, Sprint 11)
   noteStructuring: true,         // GPT-4o-mini
   frameUpload: true,             // Send frames to backend for LLM vision
   ocrExtraction: true            // Text from frames
@@ -914,10 +914,7 @@ defmodule Lossy.Agent.CostGovernor do
         session.vision_calls < @max_vision_calls
 
       :local_transcription ->
-        true  # Free, always allow
-
-      :cloud_transcription ->
-        session.cost_spent < @max_session_cost_cents
+        true  # Free, always allow (Sprint 11: local-only)
 
       _ ->
         true

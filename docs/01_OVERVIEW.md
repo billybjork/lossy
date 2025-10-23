@@ -39,17 +39,16 @@ Speak naturally while watching. The system:
 | **UI - Side Panel** | Phoenix LiveView | Persistent note list with live updates |
 | **UI - Overlays** | Shadow DOM + Vanilla JS | On-video ghost comments, emoji chips |
 | **Voice Capture** | MediaRecorder + VAD | @ricky0123/vad-web for speech detection |
-| **Local STT** | Transformers.js (Whisper) | WebGPU → WASM → Cloud fallback |
+| **Local STT** | Transformers.js (Whisper) | WebGPU → WASM (local-only, Sprint 11) |
 | **Emoji Chips** (Planned) | Text classification | Keyword/embedding-based on transcription |
 | **Bundler** | Webpack 5 | Local bundling of phoenix.js |
 
 **Technology Fallback Hierarchy:**
 
 *Transcription (STT):*
-1. **Best**: Local WASM Whisper with WebGPU acceleration (Sprint 07)
-2. **Good**: Local WASM Whisper with CPU (Sprint 07)
-3. **Fallback**: OpenAI Whisper API (cloud)
-4. **User preference**: Settings toggle for cloud vs local
+1. **Best**: Local WASM Whisper with WebGPU acceleration (Sprint 11: local-only)
+2. **Fallback**: Local WASM Whisper with CPU (ONNX Runtime auto-selects)
+3. **Privacy**: 100% local - audio never leaves device
 
 *Emoji Chips (Text-based, Planned):*
 1. **Best**: Keyword-based classification (<10ms, simple)
@@ -71,7 +70,6 @@ Speak naturally while watching. The system:
 | **Agent State** | GenServer + PubSub | Supervised, observable sessions |
 | **Database** | PostgreSQL | Structured storage, vector embeddings |
 | **Background Jobs** | Oban | Note posting queue |
-| **STT (cloud)** | OpenAI Whisper API | Cloud fallback/acceleration |
 | **LLM** | OpenAI GPT-4o-mini | Note structuring, intent extraction |
 | **Optional Local** | Rustler NIFs | whisper.cpp/llama.cpp acceleration |
 
@@ -167,25 +165,19 @@ Based on blueprint and research:
 
 ## 🔒 Privacy & Data Flow
 
-### Default: Local-First
+### Local-Only (Sprint 11)
 
 ```
-Browser (WASM)                Backend (Cloud)
+Browser (Extension)           Backend (Phoenix)
 ├── Audio capture            ├── Receives: transcript text only
-├── STT (Whisper)           ├── Structures with LLM
-├── Frame capture (CLIP)    ├── Stores: notes, timestamps
-└── Emoji inference         └── Automation: Browserbase
+├── STT (Whisper WASM)      ├── Structures with LLM
+├── Frame capture (SigLIP)  ├── Stores: notes, timestamps
+└── Emoji inference         └── Automation: Local browser agent
 
-❌ NO audio sent to cloud by default
-✅ Only text + metadata + embeddings
+❌ NO audio sent to cloud (100% local transcription)
+✅ Only text + metadata sent to backend
+✅ ONNX Runtime auto-selects: WebGPU (70% users) → WASM (30% users)
 ```
-
-### Optional: Cloud Acceleration
-
-User can opt-in to send audio for:
-- Higher quality STT (OpenAI Whisper API)
-- Faster processing
-- Advanced features (speaker diarization)
 
 ---
 

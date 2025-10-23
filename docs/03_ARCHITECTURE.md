@@ -453,16 +453,13 @@ end
 ```elixir
 def transcribe(audio_binary) do
   case Application.get_env(:lossy, :stt_backend) do
-    :wasm ->
-      # Already done in extension, use transcript
+    :extension ->
+      # Sprint 11: All transcription happens in browser (local-only)
+      # Backend receives final transcript via AudioChannel
       {:ok, get_transcript_from_extension()}
 
-    :cloud ->
-      # OpenAI Whisper API
-      OpenAI.transcribe(audio_binary)
-
     :native ->
-      # Rustler NIF to whisper.cpp
+      # Optional: Rustler NIF to whisper.cpp (if needed in future)
       WhisperNIF.transcribe(audio_binary)
   end
 end
