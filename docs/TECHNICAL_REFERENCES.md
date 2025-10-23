@@ -487,11 +487,11 @@ const notes = await db.notes.where('video_id').equals(videoDbId).toArray();
 const videos = await db.videos.orderBy('cached_at').reverse().limit(20).toArray();
 ```
 
-### Eviction & Quota (Planned)
+### Eviction & Quota
 
-- Target soft limits: ~500 notes per video and ~200 videos total.
-- Use `cached_at` for FIFO pruning when `navigator.storage.estimate()` indicates >60% usage.
-- Emit telemetry once metrics pipeline is available to surface cache hit/miss rates.
+- Hard-coded guardrails: **500 notes per video**, **5,000 total notes**, and **200 videos** (see `extension/src/sidepanel/sidepanel.js`).
+- When limits are exceeded the oldest entries (by `cached_at`) are removed from Dexie and in-memory caches with a console log.
+- Future work: hook `navigator.storage.estimate()` + telemetry stream to surface quota usage before eviction kicks in.
 
 ### Manual Verification
 

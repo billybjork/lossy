@@ -29,6 +29,10 @@ const notesCache = new Map(); // Persist notes per video to avoid flicker on rel
 const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
 
+const MAX_CACHED_NOTES_PER_VIDEO = 500;
+const MAX_TOTAL_CACHED_NOTES = 5000;
+const MAX_CACHED_VIDEOS = 200;
+
 function normalizeNoteForCache(note, offset = 0) {
   if (!note) return null;
   const cachedAt = note.cached_at ?? Date.now() - offset;
@@ -56,6 +60,7 @@ async function replaceVideoNotesInIndexedDb(videoDbId, notes) {
         await db.notes.bulkPut(notes);
       }
     });
+    enforceNoteLimits(videoDbId);
   } catch (err) {
     console.error('[IndexedDB] Failed to replace notes for video:', videoDbId, err);
   }
@@ -81,6 +86,76 @@ async function loadNotesFromIndexedDb(videoDbId) {
     console.error('[IndexedDB] Failed to load cached notes:', videoDbId, err);
     return [];
   }
+}
+
+function removeNoteFromMemoryCache(noteId, videoDbId) {
+  if (videoDbId && notesCache.has(videoDbId)) {
+    const filtered = notesCache.get(videoDbId).filter((note) => note.id !== noteId);
+    notesCache.set(videoDbId, filtered);
+    return;
+  }
+
+  for (const [vid, noteList] of notesCache.entries()) {
+    const index = noteList.findIndex((note) => note.id === noteId);
+    if (index >= 0) {
+      const updated = [...noteList.slice(0, index), ...noteList.slice(index + 1)];
+      notesCache.set(vid, updated);
+      break;
+    }
+  }
+}
+
+async function pruneNotesForVideo(videoDbId) {
+  const cached = notesCache.get(videoDbId);
+  if (!cached || cached.length <= MAX_CACHED_NOTES_PER_VIDEO) {
+    return;
+  }
+
+  const sorted = [...cached].sort((a, b) => (b.cached_at || 0) - (a.cached_at || 0));
+  const keep = sorted.slice(0, MAX_CACHED_NOTES_PER_VIDEO);
+  const toRemove = sorted.slice(MAX_CACHED_NOTES_PER_VIDEO);
+
+  notesCache.set(videoDbId, keep);
+
+  try {
+    await db.notes.bulkDelete(toRemove.map((note) => note.id));
+    console.log('[IndexedDB] Pruned', toRemove.length, 'notes for video', videoDbId);
+  } catch (err) {
+    console.error('[IndexedDB] Failed to prune notes for video:', videoDbId, err);
+  }
+}
+
+async function pruneTotalNotes() {
+  try {
+    const count = await db.notes.count();
+    if (count <= MAX_TOTAL_CACHED_NOTES) {
+      return;
+    }
+
+    const overflow = count - MAX_TOTAL_CACHED_NOTES;
+    const oldestNotes = await db.notes.orderBy('cached_at').limit(overflow).toArray();
+    if (oldestNotes.length === 0) {
+      return;
+    }
+
+    await db.notes.bulkDelete(oldestNotes.map((note) => note.id));
+
+    oldestNotes.forEach((note) => {
+      removeNoteFromMemoryCache(note.id, note.video_id);
+    });
+
+    console.log('[IndexedDB] Pruned', oldestNotes.length, 'oldest notes to enforce global limit');
+  } catch (err) {
+    console.error('[IndexedDB] Failed to prune global notes cache:', err);
+  }
+}
+
+function enforceNoteLimits(videoDbId) {
+  pruneNotesForVideo(videoDbId)
+    .then(() => pruneTotalNotes())
+    .catch((err) => {
+      console.error('[IndexedDB] Failed to enforce note cache limits:', err);
+    });
 }
 
 // Sprint 12: Phoenix connection for real-time notes
@@ -833,12 +908,14 @@ function storeNoteInCache(videoDbId, noteData) {
     updated[existingIndex] = { ...updated[existingIndex], ...normalized };
     notesCache.set(videoDbId, updated);
     persistNoteToIndexedDb(updated[existingIndex]);
+    enforceNoteLimits(videoDbId);
     return { added: false, count: updated.length };
   }
 
   const updated = [normalized, ...existing];
   notesCache.set(videoDbId, updated);
   persistNoteToIndexedDb(normalized);
+  enforceNoteLimits(videoDbId);
   return { added: true, count: updated.length };
 }
 
@@ -1492,9 +1569,39 @@ async function upsertVideosInIndexedDb(videos) {
 
   try {
     await db.videos.bulkPut(videos);
+    enforceVideoLimits();
   } catch (err) {
     console.error('[IndexedDB] Failed to persist videos:', err);
   }
+}
+
+async function pruneVideoCacheIfNeeded() {
+  try {
+    const count = await db.videos.count();
+    if (count <= MAX_CACHED_VIDEOS) {
+      return;
+    }
+
+    const overflow = count - MAX_CACHED_VIDEOS;
+    const oldestVideos = await db.videos.orderBy('cached_at').limit(overflow).toArray();
+    if (oldestVideos.length === 0) {
+      return;
+    }
+
+    await db.videos.bulkDelete(oldestVideos.map((video) => video.id));
+    const idsToRemove = new Set(oldestVideos.map((video) => video.id));
+    videoLibraryCache = videoLibraryCache.filter((video) => !idsToRemove.has(video.id));
+
+    console.log('[IndexedDB] Pruned', oldestVideos.length, 'videos from cache');
+  } catch (err) {
+    console.error('[IndexedDB] Failed to prune video cache:', err);
+  }
+}
+
+function enforceVideoLimits() {
+  pruneVideoCacheIfNeeded().catch((err) => {
+    console.error('[IndexedDB] Failed to enforce video cache limits:', err);
+  });
 }
 
 // Get DOM elements for library

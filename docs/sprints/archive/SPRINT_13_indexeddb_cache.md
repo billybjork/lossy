@@ -26,7 +26,7 @@ Persist the sidepanel's notes and video library data in the browser so previousl
 - Sidepanel now hydrates notes from IndexedDB before requesting `get_notes`, keeping cached arrays in sync via write-through on `note_created` and delete flows.
 - Video library tab renders cached results immediately, then refreshes in the background and upserts fresh data into IndexedDB for future sessions.
 - Introduced helper utilities for normalizing cached items and lightweight logging around cache hits/misses.
-- Outstanding follow-up: add quota guardrails/telemetry and eviction logic once metrics are wired up.
+- Outstanding follow-up: wire telemetry for cache hit/miss + quota usage to monitor the new eviction guards.
 
 ---
 
@@ -45,7 +45,7 @@ Persist the sidepanel's notes and video library data in the browser so previousl
 - [x] Cache hydration on sidepanel load: render from IndexedDB first, then reconcile with live Phoenix data.
 - [x] Channel/event handlers write-through to IndexedDB (create, delete, and future update events).
 - [x] Video library fetch adopts cache-first + background refresh pattern with basic filter support.
-- [ ] Storage quota guardrails and metrics/logging for cache hits vs server fallbacks. *(Follow-up: add eviction + telemetry hook)*
+- [x] Storage quota guardrails and metrics/logging for cache hits vs server fallbacks. *(Guardrails shipped: per-video, global, and library limits. Telemetry still pending.)*
 - [x] Automated smoke test (Playwright or Puppeteer) or manual test script covering warm start, cold start, offline mode, and deletion flow. *(Manual checklist: `docs/manual_tests/indexeddb_cache.md`)*
 - [x] Documentation updates (e.g., `docs/TECHNICAL_REFERENCES.md`) describing the IndexedDB schema and eviction policy.
 

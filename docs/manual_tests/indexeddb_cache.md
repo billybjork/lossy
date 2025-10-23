@@ -40,6 +40,11 @@
 1. Open the Library tab.
 2. Verify the list renders instantly from cache and then refreshes when the service worker response completes.
 
+### 6. Eviction Guard (Optional)
+1. Using DevTools console, insert mock notes until the 500-per-video limit is exceeded.
+2. Confirm `[IndexedDB] Pruned ...` appears and the note count caps at the limit.
+3. Repeat across multiple videos if testing the global limit (5,000 total notes).
+
 ---
 
 ## Expected Console Signals
@@ -55,5 +60,4 @@ To inspect stored data, open the sidepanel DevTools (`Cmd+Opt+Shift+I`) → Appl
 ## Follow-ups
 
 - Add automated Playwright smoke covering the above scenarios once telemetry guards are in place.
-- Hook `navigator.storage.estimate()` logs into the passive telemetry stream to monitor quota usage.
-
+- Hook `navigator.storage.estimate()` logs into the passive telemetry stream to monitor quota usage and eviction frequency.
