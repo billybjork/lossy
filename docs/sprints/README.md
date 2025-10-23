@@ -55,6 +55,7 @@
 | [10 - Always-On Agent](./archive/SPRINT_10_always_on_agent.md) | ✅ 2025-10-22 | VAD-driven passive recording with energy-based speech detection | 1 day |
 | [11 - Local-Only Transcription](./archive/SPRINT_11_local_only_transcription.md) | ✅ 2025-10-22 | Removed cloud transcription, 100% local privacy with WebGPU/WASM | 1 day |
 | [12 - Notes Channel Refactor](./archive/SPRINT_12_notes_channel_refactor.md) | ✅ 2025-10-23 | Direct Phoenix Channel subscription + passive mode tab switching fix | 3 hours |
+| [13 - IndexedDB Cache](./archive/SPRINT_13_indexeddb_cache.md) | ✅ 2025-10-23 | Sidepanel/Dexie caching for notes & video library | 1 day |
 
 ---
 

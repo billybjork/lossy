@@ -460,7 +460,53 @@ async function loadModelWithProgress(url, onProgress) {
 
 ---
 
-## 5. Web Worker Pattern (Non-blocking Inference)
+## 5. Sidepanel IndexedDB Cache (Dexie)
+
+### Database Overview
+
+| Store           | Primary Key | Indexed Fields                                           | Purpose                                         |
+|-----------------|-------------|----------------------------------------------------------|-------------------------------------------------|
+| `notes`         | `id`        | `video_id`, `timestamp_seconds`, `[video_id+timestamp_seconds]`, `cached_at` | Sidepanel note cache across sessions            |
+| `videos`        | `id`        | `user_id`, `status`, `platform`, `last_viewed_at`, `cached_at`              | Video library cache for instant hydration       |
+| `sync_metadata` | `key`       | _(none)_                                                 | Reserved for incremental sync cursors/metadata  |
+
+- Database name: `LossyExtensionDB`.
+- Managed via Dexie singleton in `extension/src/shared/db.js`.
+- Writes happen from the sidepanel to avoid service worker shutdown loss.
+- `cached_at` drives ordering and future eviction decisions.
+
+### Access Patterns
+
+```javascript
+import db from '../shared/db.js';
+
+// Notes for a video
+const notes = await db.notes.where('video_id').equals(videoDbId).toArray();
+
+// Most recent videos
+const videos = await db.videos.orderBy('cached_at').reverse().limit(20).toArray();
+```
+
+### Eviction & Quota (Planned)
+
+- Target soft limits: ~500 notes per video and ~200 videos total.
+- Use `cached_at` for FIFO pruning when `navigator.storage.estimate()` indicates >60% usage.
+- Emit telemetry once metrics pipeline is available to surface cache hit/miss rates.
+
+### Manual Verification
+
+1. Open the Lossy sidepanel and launch its DevTools (`Cmd+Opt+Shift+I` while focused).
+2. Navigate to Application → IndexedDB → `LossyExtensionDB`.
+3. Inspect `notes`/`videos`, or run:
+   ```javascript
+   const { default: db } = await import('../shared/db.js');
+   await db.notes.count();
+   await db.videos.count();
+   ```
+
+---
+
+## 6. Web Worker Pattern (Non-blocking Inference)
 
 ### Main Thread
 

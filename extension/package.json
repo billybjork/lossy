@@ -19,6 +19,7 @@
   "license": "ISC",
   "dependencies": {
     "@huggingface/transformers": "^3.7.5",
+    "dexie": "^3.2.7",
     "phoenix": "^1.8.1",
     "phoenix_live_view": "^0.20.0"
   },

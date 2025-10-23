@@ -19,6 +19,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 | **[05_COMPUTER_USE.md](./05_COMPUTER_USE.md)** | Local browser automation with Playwright + Gemini Computer Use | Automated note posting via local agent |
 | **[sprints/](./sprints/)** | Sprint-based implementation roadmap | Ready to implement - follow sprint-by-sprint |
 | **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Implementation references for local ML |
+| **[manual_tests/indexeddb_cache.md](./manual_tests/indexeddb_cache.md)** | Manual verification checklist for IndexedDB caching | Run after cache-related changes |
 | **[advanced/BROWSERBASE_FALLBACK.md](./advanced/BROWSERBASE_FALLBACK.md)** | Cloud automation fallback via Browserbase | Optional when local agent unavailable |
 
 ---
