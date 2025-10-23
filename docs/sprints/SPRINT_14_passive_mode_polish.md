@@ -1,4 +1,4 @@
-# Sprint 13: Passive Mode Quality & Polish
+# Sprint 14: Passive Mode Quality & Polish
 
 **Status:** 📋 Planned
 **Priority:** High
@@ -8,8 +8,8 @@
 **Related Sprints**
 - ✅ Sprint 10 – Always-On Foundations (passive audio VAD baseline)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
-- 🔜 Sprint 13 – Continuous Session Persistence
-- 🔜 Sprint 14+ – Automated Frame Capture & Diffusion
+- 🔜 Sprint 14 – Continuous Session Persistence
+- 🔜 Sprint 15+ – Automated Frame Capture & Diffusion
 
 ---
 
@@ -17,7 +17,7 @@
 
 Improve passive mode quality, accuracy, and user experience through ML-based VAD (Silero ONNX), visual status indicators, waveform visualizer, and automatic restart capabilities. These enhancements will reduce false positives from ~10-20% to <5%, provide better visibility into system state, and improve reliability.
 
-**Scope:** Passive mode quality improvements only. Does NOT include frame capture or continuous sessions (deferred to Sprint 13+).
+**Scope:** Passive mode quality improvements only. Does NOT include frame capture or continuous sessions (deferred to Sprint 14+).
 
 ---
 
@@ -145,7 +145,7 @@ Service Worker (passive event handler)
    - See "Research Findings" for complete code example
 
 5. **Update HybridVAD:**
-   - Remove energy-based fallback (per Sprint 13 goals)
+   - Remove energy-based fallback (per Sprint 14 goals)
    - Use Silero as primary VAD (no hybrid mode)
    - Handle model loading failures with clear error message
 
@@ -490,7 +490,7 @@ async function handleHeartbeatFailure() {
 
 ---
 
-## Deferred Items (Sprint 13+)
+## Deferred Items (Sprint 14+)
 
 ### VAD Tuning UI (Deferred - Not Currently Needed)
 - User-adjustable sensitivity/threshold sliders

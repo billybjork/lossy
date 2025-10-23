@@ -1249,7 +1249,7 @@ For users who want background posting or whose machines are offline, implement B
 
 ## Reference Documentation
 
-See [06_COMPUTER_USE.md](../../06_COMPUTER_USE.md) for:
+See [05_COMPUTER_USE.md](../../05_COMPUTER_USE.md) for:
 - Complete architecture overview
 - **Platform adapter integration** (reusing existing selector code!)
 - Gemini 2.5 Computer Use API integration (alternative to Playwright)

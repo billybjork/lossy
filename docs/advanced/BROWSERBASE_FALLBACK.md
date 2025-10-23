@@ -2,7 +2,7 @@
 
 **Last Updated:** 2025-10-22
 **Status:** Optional/Fallback
-**Primary Approach:** See [docs/06_COMPUTER_USE.md](../06_COMPUTER_USE.md) for local-first browser automation
+**Primary Approach:** See [docs/05_COMPUTER_USE.md](../05_COMPUTER_USE.md) for local-first browser automation
 
 ---
 

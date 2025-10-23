@@ -186,8 +186,8 @@ See `docs/` directory for detailed guides:
 - `02_PRINCIPLES.md` - Development principles
 - `03_ARCHITECTURE.md` - System design and data flow
 - `sprints/` - Sprint-by-sprint implementation roadmap
-- `04_LIVEVIEW_PATTERNS.md` - LiveView in extensions
-- `06_COMPUTER_USE.md` - Local-first browser automation
+- `04_AGENTIC_PRINCIPLES.md` - Intelligent agent behavior patterns
+- `05_COMPUTER_USE.md` - Local-first browser automation
 - `advanced/BROWSERBASE_FALLBACK.md` - Cloud fallback (optional)
 - `TECHNICAL_REFERENCES.md` - WASM, WebGPU, model caching
 

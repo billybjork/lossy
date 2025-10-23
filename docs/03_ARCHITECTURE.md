@@ -353,7 +353,7 @@ end
 
 #### AgentSession (GenServer)
 
-**Note:** Sprint 14 introduces adaptive batching and backpressure for intelligent LLM invocation. The patterns below show the basic state machine; see `docs/sprints/SPRINT_14_continuous_sessions.md` for details on two-tier accumulation (short-term 2-6s batching + long-term session persistence), adaptive debounce windows, and upstream backpressure signaling to the extension.
+**Note:** Sprint 15 introduces adaptive batching and backpressure for intelligent LLM invocation. The patterns below show the basic state machine; see `docs/sprints/SPRINT_15_continuous_sessions.md` for details on two-tier accumulation (short-term 2-6s batching + long-term session persistence), adaptive debounce windows, and upstream backpressure signaling to the extension.
 
 **State Machine:**
 ```
@@ -504,7 +504,7 @@ end
 
 ### Example 1: Voice Note Creation
 
-**Note:** This flow shows immediate processing for clarity. Sprint 14 introduces adaptive batching where transcripts accumulate in a 2-6s window before LLM invocation. See `docs/sprints/SPRINT_14_continuous_sessions.md` for the full batched flow with backpressure handling.
+**Note:** This flow shows immediate processing for clarity. Sprint 15 introduces adaptive batching where transcripts accumulate in a 2-6s window before LLM invocation. See `docs/sprints/SPRINT_15_continuous_sessions.md` for the full batched flow with backpressure handling.
 
 ```
 1. User clicks mic in side panel
@@ -678,7 +678,7 @@ check_origin: ["https://your-app.com", "chrome-extension://EXT_ID"]
 
 - `"session:#{session_id}"` - Private, one-to-one
   - Agent events (transcription, note creation)
-  - Backpressure signals (`{:backpressure, :critical | :normal}`) - Sprint 14
+  - Backpressure signals (`{:backpressure, :critical | :normal}`) - Sprint 15
 - `"video:#{video_id}"` - Shared, multi-user (future)
 - `"user:#{user_id}"` - User's global events
 

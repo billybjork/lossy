@@ -474,4 +474,4 @@ Consider adding:
 - Note search via channel
 - Pagination for large note lists
 - User-level notes feed for library view
-- Session ID keying for backend latency >10s (see Sprint 14)
+- Session ID keying for backend latency >10s (see Sprint 15)

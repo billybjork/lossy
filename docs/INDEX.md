@@ -15,8 +15,8 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 | **[01_OVERVIEW.md](./01_OVERVIEW.md)** | Project goals, technology stack, features, success metrics | Start here - understand the "what" and "why" |
 | **[02_PRINCIPLES.md](./02_PRINCIPLES.md)** | Development principles guiding architectural decisions | Understand the "why" behind design choices |
 | **[03_ARCHITECTURE.md](./03_ARCHITECTURE.md)** | System design, components, data flow, architectural boundaries | Understand how everything fits together + integration rules |
-| **[05_AGENTIC_PRINCIPLES.md](./05_AGENTIC_PRINCIPLES.md)** | Agentic architecture, diffusion refinement, continuous observation | Understand intelligent agent behavior patterns |
-| **[06_COMPUTER_USE.md](./06_COMPUTER_USE.md)** | Local browser automation with Playwright + Gemini Computer Use | Automated note posting via local agent |
+| **[04_AGENTIC_PRINCIPLES.md](./04_AGENTIC_PRINCIPLES.md)** | Agentic architecture, diffusion refinement, continuous observation | Understand intelligent agent behavior patterns |
+| **[05_COMPUTER_USE.md](./05_COMPUTER_USE.md)** | Local browser automation with Playwright + Gemini Computer Use | Automated note posting via local agent |
 | **[sprints/](./sprints/)** | Sprint-based implementation roadmap | Ready to implement - follow sprint-by-sprint |
 | **[TECHNICAL_REFERENCES.md](./TECHNICAL_REFERENCES.md)** | WASM inference, WebGPU, model caching patterns | Implementation references for local ML |
 | **[advanced/BROWSERBASE_FALLBACK.md](./advanced/BROWSERBASE_FALLBACK.md)** | Cloud automation fallback via Browserbase | Optional when local agent unavailable |
@@ -87,7 +87,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 
 ---
 
-### 05_AGENTIC_PRINCIPLES.md
+### 04_AGENTIC_PRINCIPLES.md
 **What it covers:**
 - Transition from manual tools to intelligent companions
 - Context-aware passive observation patterns

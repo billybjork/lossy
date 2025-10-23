@@ -9,7 +9,7 @@
 
 🎉 **Latest:** Sprint 12 (Notes Channel Refactor + Passive Mode Tab Switching) completed 2025-10-23
 📋 **Active:** None
-🔜 **Next:** Sprint 13 (Passive Mode Polish) or Sprint 14 (Continuous Sessions)
+🔜 **Next:** Sprint 14 (Passive Mode Polish) or Sprint 15 (Continuous Sessions)
 
 ---
 
@@ -31,8 +31,8 @@
 
 | Sprint | Goal | Duration |
 |--------|------|----------|
-| [13 - Passive Mode Polish](./SPRINT_13_passive_mode_polish.md) | UX improvements, status indicators, error recovery | 2-3 days |
-| [14 - Continuous Sessions](./SPRINT_14_continuous_sessions.md) | Session persistence across browser restarts + state recovery | 3-4 days |
+| [14 - Passive Mode Polish](./SPRINT_14_passive_mode_polish.md) | UX improvements, status indicators, error recovery | 2-3 days |
+| [15 - Continuous Sessions](./SPRINT_15_continuous_sessions.md) | Session persistence across browser restarts + state recovery | 3-4 days |
 | [TBD - Emoji Chips](./planned/SPRINT_TBD_emoji_chips.md) | Text-based visual feedback tokens using transcription | 2-3 days |
 | [TBD - Auto Posting](./planned/SPRINT_TBD_auto_posting.md) | Browserbase automation + Oban workers | 3-5 days |
 | [TBD - Auth](./planned/SPRINT_TBD_auth.md) | User authentication & multi-user support | 2-3 days |

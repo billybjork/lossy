@@ -1,7 +1,7 @@
 # Sprint TBD: Automated Frame Capture Strategy
 
 **Status:** 🔄 Deferred (was Sprint 13, now TBD)
-**Priority:** Medium (deferred in favor of Sprint 11: Local-Only Transcription and Sprint 13: Passive Mode Polish)
+**Priority:** Medium (deferred in favor of Sprint 11: Local-Only Transcription and Sprint 14: Passive Mode Polish)
 **Owner:** TBD
 **Progress:** 0%
 
@@ -9,8 +9,8 @@
 - ✅ Sprint 08 – Visual Intelligence (manual "Refine with Vision" button)
 - ✅ Sprint 10 – Always-On Foundations (passive audio VAD)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
-- 🔜 Sprint 13 – Passive Mode Polish (Silero VAD)
-- 🔜 Sprint 14 – Continuous Session Persistence
+- 🔜 Sprint 14 – Passive Mode Polish (Silero VAD)
+- 🔜 Sprint 15 – Continuous Session Persistence
 - 🔜 Sprint 15+ – Diffusion Refinement & Cost Governance
 
 **Note:** This sprint has been deferred to prioritize improving passive mode quality with Silero VAD. Frame capture will be revisited after continuous session persistence is established.
@@ -116,7 +116,7 @@ Automatically capture video frames during passive mode recordings to provide vis
 - Transient: Supports session replay, moderate cost, complexity
 - Durable: Full audit trail, highest cost and storage overhead
 
-**Recommendation:** Start with **Option B (Transient)** - store in Redis with 1-hour TTL. Allows note enrichment during session without long-term storage costs. Evaluate in Sprint 14 if permanent storage is needed.
+**Recommendation:** Start with **Option B (Transient)** - store in Redis with 1-hour TTL. Allows note enrichment during session without long-term storage costs. Evaluate in Sprint 15 if permanent storage is needed.
 
 ### 4. Upload Retry Strategy
 
@@ -132,7 +132,7 @@ Automatically capture video frames during passive mode recordings to provide vis
 - Exponential backoff: Industry standard, good balance
 - Queue persistence: Most robust, high complexity
 
-**Recommendation:** Start with **Option C (Exponential backoff)** - retry up to 3 times with 1s, 2s, 4s delays. Log failures but don't block note creation. Defer queue persistence to Sprint 14.
+**Recommendation:** Start with **Option C (Exponential backoff)** - retry up to 3 times with 1s, 2s, 4s delays. Log failures but don't block note creation. Defer queue persistence to Sprint 15.
 
 ### 5. Cost Per Session Target
 
@@ -317,9 +317,9 @@ end
 
 ---
 
-## Deferred Items (Sprint 14+)
+## Deferred Items (Sprint 15+)
 
-### Sprint 14: Continuous Session Persistence
+### Sprint 15: Continuous Session Persistence
 - Persistent upload queue (survive extension reload)
 - Frame batch uploads (reduce channel overhead)
 - Long-lived session frame history

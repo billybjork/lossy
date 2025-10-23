@@ -213,7 +213,7 @@ Total_Energy =
 
 **Definition:** Systematically capture video frames based on configurable rules that adapt to client capabilities (network bandwidth, GPU availability, storage).
 
-**Frame Capture Triggers (Target for Sprint 14+):**
+**Frame Capture Triggers (Target for Sprint 15+):**
 ```javascript
 // Configurable rules (default values)
 const frameCaptureRules = {
@@ -520,7 +520,7 @@ All scheduling decisions, queue depths, and load shedding events are instrumente
 
 ## Agentic Agent Architecture
 
-> **Implementation Roadmap:** Always-on observation is being introduced in phases. Sprint 10 delivers passive audio triggers and a debug view while preserving the current per-recording backend. Sprint 11 adds local-only transcription with browser-based VAD. Sprint 12 completes the notes channel refactor. Sprint 13 improves passive mode quality with Silero VAD. Sprint 14 extends the lifecycle to continuous sessions. Frame capture and diffusion-style refinement land after persistent review state is in place. Each phase should be feature-gated so manual controls remain available during rollout.
+> **Implementation Roadmap:** Always-on observation is being introduced in phases. Sprint 10 delivers passive audio triggers and a debug view while preserving the current per-recording backend. Sprint 11 adds local-only transcription with browser-based VAD. Sprint 12 completes the notes channel refactor. Sprint 14 improves passive mode quality with Silero VAD. Sprint 15 extends the lifecycle to continuous sessions. Frame capture and diffusion-style refinement land after persistent review state is in place. Each phase should be feature-gated so manual controls remain available during rollout.
 
 ### Agent Lifecycle
 
