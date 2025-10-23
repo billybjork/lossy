@@ -13,12 +13,7 @@
  * - Supports energy-based and Silero ONNX detection
  */
 
-import {
-  loadWhisperModel,
-  detectCapabilities,
-  unloadModel,
-  warmCache,
-} from './whisper-loader.js';
+import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './whisper-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { HybridVAD } from './vad-detector.js';
 
@@ -124,7 +119,9 @@ async function startRecording() {
     console.log('[Offscreen] Device capabilities:', capabilities);
 
     if (!capabilities.canUseLocal) {
-      throw new Error('Local transcription unavailable - please ensure your browser supports WebAssembly');
+      throw new Error(
+        'Local transcription unavailable - please ensure your browser supports WebAssembly'
+      );
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -176,7 +173,7 @@ async function startRecording() {
       console.error('MediaRecorder error:', event.error);
     };
 
-    mediaRecorder.onstop = function() {
+    mediaRecorder.onstop = function () {
       stream.getTracks().forEach((track) => track.stop());
 
       // Cleanup audio processor (use 'this' instead of 'mediaRecorder' to avoid null reference)

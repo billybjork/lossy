@@ -39,6 +39,9 @@ const passiveSession = {
   recordingContext: null, // { tabId, videoDbId, videoContext, timestamp, startedAt }
   recordingContextTimeout: null, // Safety timeout to clear stale context
 
+  // Auto-start behavior: Stop passive session if no speech detected within 10 seconds
+  firstSpeechTimeout: null,
+
   // Telemetry (console only)
   telemetry: {
     speechDetections: 0,
@@ -106,7 +109,9 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     const newVideoContext = tabManager ? tabManager.getVideoContext(activeInfo.tabId) : null;
 
     if (newVideoContext?.videoDbId) {
-      console.log(`[Passive] Tab switched while observing, updating context to: ${newVideoContext.videoDbId}`);
+      console.log(
+        `[Passive] Tab switched while observing, updating context to: ${newVideoContext.videoDbId}`
+      );
 
       // Update backend AgentSession's video context for next recording
       passiveSession.audioChannel
@@ -159,11 +164,9 @@ chrome.runtime.onConnect.addListener((port) => {
     // Notify all tabs in this window that panel is open
     chrome.tabs.query({ windowId }, (tabs) => {
       tabs.forEach((tab) => {
-        chrome.tabs
-          .sendMessage(tab.id, { action: 'panel_opened' })
-          .catch(() => {
-            // Silently ignore tabs without content script
-          });
+        chrome.tabs.sendMessage(tab.id, { action: 'panel_opened' }).catch(() => {
+          // Silently ignore tabs without content script
+        });
       });
     });
 
@@ -177,11 +180,9 @@ chrome.runtime.onConnect.addListener((port) => {
       // Notify all tabs in this window that panel is closed
       chrome.tabs.query({ windowId }, (tabs) => {
         tabs.forEach((tab) => {
-          chrome.tabs
-            .sendMessage(tab.id, { action: 'panel_closed' })
-            .catch(() => {
-              // Silently ignore tabs without content script
-            });
+          chrome.tabs.sendMessage(tab.id, { action: 'panel_closed' }).catch(() => {
+            // Silently ignore tabs without content script
+          });
         });
       });
     });
@@ -201,8 +202,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       '*://*.youtube.com/*',
       '*://*.vimeo.com/*',
       '*://*.frame.io/*',
-      '*://app.iconik.io/*'
-    ]
+      '*://app.iconik.io/*',
+    ],
   });
 
   // Warm cache on install or update
@@ -257,7 +258,7 @@ async function queueCurrentVideo(tab) {
         type: 'basic',
         iconUrl: 'icons/icon128.png',
         title: 'Video Queued',
-        message: `Added "${videoData.title}" to your queue`
+        message: `Added "${videoData.title}" to your queue`,
       });
     }
   } catch (error) {
@@ -266,7 +267,7 @@ async function queueCurrentVideo(tab) {
       type: 'basic',
       iconUrl: 'icons/icon128.png',
       title: 'Queue Failed',
-      message: 'Failed to add video to queue'
+      message: 'Failed to add video to queue',
     });
   }
 }
@@ -286,7 +287,7 @@ async function extractVideoMetadata(tab) {
         const title = document.querySelector('h1')?.textContent || document.title;
         const thumbnail = document.querySelector('meta[property="og:image"]')?.content;
         return { title, thumbnail };
-      }
+      },
     });
   } catch (err) {
     console.log('[ServiceWorker] Could not extract page metadata:', err.message);
@@ -301,7 +302,7 @@ async function extractVideoMetadata(tab) {
     external_id,
     url: tab.url,
     title: result?.result?.title || tab.title,
-    thumbnail_url: result?.result?.thumbnail
+    thumbnail_url: result?.result?.thumbnail,
   };
 }
 
@@ -390,9 +391,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.log('[Lossy] Local transcript received:', message.text.substring(0, 50) + '...');
 
     // Sprint 10 Fix: Route transcript to correct channel (passive vs manual)
-    const targetChannel = passiveSession.status === 'recording' || passiveSession.status === 'cooldown'
-      ? passiveSession.audioChannel
-      : audioChannel;
+    const targetChannel =
+      passiveSession.status === 'recording' || passiveSession.status === 'cooldown'
+        ? passiveSession.audioChannel
+        : audioChannel;
 
     if (targetChannel) {
       targetChannel
@@ -418,12 +420,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     console.error('[Lossy] Local transcription failed:', message.error);
 
     // Notify side panel of error
-    chrome.runtime.sendMessage({
-      action: 'transcription_status',
-      stage: 'error',
-      source: 'local',
-      error: message.error,
-    }).catch(() => {});
+    chrome.runtime
+      .sendMessage({
+        action: 'transcription_status',
+        stage: 'error',
+        source: 'local',
+        error: message.error,
+      })
+      .catch(() => {});
 
     return false;
   }
@@ -478,7 +482,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           // Phase 2: If this is the active tab and passive mode is observing,
           // update the backend context immediately (handles late detection)
           chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]?.id === tabId && passiveSession.status === 'observing' && passiveSession.audioChannel) {
+            if (
+              tabs[0]?.id === tabId &&
+              passiveSession.status === 'observing' &&
+              passiveSession.audioChannel
+            ) {
               console.log('[Passive] Late video detection on active tab, updating backend context');
               passiveSession.audioChannel
                 .push('update_video_context', { video_id: response.videoDbId })
@@ -1049,7 +1057,11 @@ async function handlePassiveEvent(event) {
     if (passiveSession.recordingContext) {
       passiveSession.telemetry.ignoredPendingNote++;
       console.log('[Passive] Ignored speech - still waiting for previous note to arrive');
-      console.log('[Passive] Context age:', Date.now() - passiveSession.recordingContext.startedAt, 'ms');
+      console.log(
+        '[Passive] Context age:',
+        Date.now() - passiveSession.recordingContext.startedAt,
+        'ms'
+      );
       return;
     }
 
@@ -1071,7 +1083,7 @@ async function handlePassiveEvent(event) {
     console.log('[Passive] Captured recording context:', {
       tabId: currentTabId,
       videoDbId: currentVideoContext.videoDbId,
-      video: currentVideoContext.title || currentVideoContext.videoId
+      video: currentVideoContext.title || currentVideoContext.videoId,
     });
 
     // Capture timestamp from the CURRENT tab (where speech is starting)
@@ -1105,12 +1117,19 @@ async function handlePassiveEvent(event) {
       videoDbId: currentVideoContext.videoDbId,
       videoContext: currentVideoContext,
       timestamp: capturedTimestamp,
-      startedAt: now
+      startedAt: now,
     };
 
     passiveSession.status = 'recording';
     passiveSession.lastStartAt = now;
     passiveSession.telemetry.speechDetections++;
+
+    // Clear first speech timeout on first detection (auto-start behavior)
+    if (passiveSession.firstSpeechTimeout) {
+      clearTimeout(passiveSession.firstSpeechTimeout);
+      passiveSession.firstSpeechTimeout = null;
+      console.log('[Passive] First speech detected - cleared auto-stop timeout');
+    }
 
     // Send timestamp to backend via persistent channel
     if (passiveSession.audioChannel && capturedTimestamp != null) {
@@ -1208,13 +1227,15 @@ async function handlePassiveEvent(event) {
     }
 
     // Sprint 10: Notify sidepanel of error
-    chrome.runtime.sendMessage({
-      action: 'passive_status_update',
-      status: 'error',
-      errorMessage: event.data?.message || 'VAD initialization failed',
-    }).catch(() => {
-      // Sidepanel may not be open, ignore
-    });
+    chrome.runtime
+      .sendMessage({
+        action: 'passive_status_update',
+        status: 'error',
+        errorMessage: event.data?.message || 'VAD initialization failed',
+      })
+      .catch(() => {
+        // Sidepanel may not be open, ignore
+      });
 
     stopPassiveSession();
   }
@@ -1253,10 +1274,13 @@ async function startPassiveSession() {
     const videoContext = tabManager ? tabManager.getVideoContext(tab.id) : null;
 
     // Create audio channel with video context (timestamp will be added per speech segment)
-    passiveSession.audioChannel = passiveSession.socket.channel(`audio:${passiveSession.sessionId}`, {
-      video_id: videoContext?.videoDbId,
-      passive_mode: true, // Flag to indicate this is a persistent passive session
-    });
+    passiveSession.audioChannel = passiveSession.socket.channel(
+      `audio:${passiveSession.sessionId}`,
+      {
+        video_id: videoContext?.videoDbId,
+        passive_mode: true, // Flag to indicate this is a persistent passive session
+      }
+    );
 
     // Listen for note_created events on the persistent channel
     // Sprint 12: Sidepanel subscribes directly via NotesChannel
@@ -1338,6 +1362,15 @@ async function startPassiveSession() {
     passiveSession.vadEnabled = true;
     passiveSession.status = 'observing';
     console.log('[Passive] Session active with persistent audio channel');
+
+    // Auto-start behavior: Stop session if no speech detected within 10 seconds
+    // This prevents forgotten sidepanels from recording indefinitely
+    passiveSession.firstSpeechTimeout = setTimeout(async () => {
+      if (passiveSession.telemetry.speechDetections === 0) {
+        console.log('[Passive] No speech detected in first 10 seconds - auto-stopping');
+        await stopPassiveSession();
+      }
+    }, 10000);
   } catch (error) {
     console.error('[Passive] Failed to start session:', error);
     // Clean up on error
@@ -1397,10 +1430,15 @@ async function stopPassiveSession() {
     passiveSession.recordingContext = null;
   }
 
-  // Clear any pending timeout
+  // Clear any pending timeouts
   if (passiveSession.recordingContextTimeout) {
     clearTimeout(passiveSession.recordingContextTimeout);
     passiveSession.recordingContextTimeout = null;
+  }
+
+  if (passiveSession.firstSpeechTimeout) {
+    clearTimeout(passiveSession.firstSpeechTimeout);
+    passiveSession.firstSpeechTimeout = null;
   }
 
   passiveSession.vadEnabled = false;
@@ -1427,26 +1465,30 @@ function setupVideoChannelBroadcasts() {
   videoChannel.on('video_updated', (payload) => {
     console.log('[ServiceWorker] 📡 Broadcast: video_updated', payload);
     // Forward to side panel
-    chrome.runtime.sendMessage({
-      type: 'channel_broadcast',
-      event: 'video_updated',
-      data: payload,
-    }).catch(() => {
-      // Silently ignore if side panel not open
-    });
+    chrome.runtime
+      .sendMessage({
+        type: 'channel_broadcast',
+        event: 'video_updated',
+        data: payload,
+      })
+      .catch(() => {
+        // Silently ignore if side panel not open
+      });
   });
 
   // Listen for video_queued broadcasts
   videoChannel.on('video_queued', (payload) => {
     console.log('[ServiceWorker] 📡 Broadcast: video_queued', payload);
     // Forward to side panel
-    chrome.runtime.sendMessage({
-      type: 'channel_broadcast',
-      event: 'video_queued',
-      data: payload,
-    }).catch(() => {
-      // Silently ignore if side panel not open
-    });
+    chrome.runtime
+      .sendMessage({
+        type: 'channel_broadcast',
+        event: 'video_queued',
+        data: payload,
+      })
+      .catch(() => {
+        // Silently ignore if side panel not open
+      });
   });
 
   broadcastsSetUp = true;
@@ -1798,7 +1840,8 @@ async function handleListVideos(filters) {
   if (!videoChannel) {
     videoChannel = socket.channel('video:meta', {});
     await new Promise((resolve, reject) => {
-      videoChannel.join()
+      videoChannel
+        .join()
         .receive('ok', () => {
           // Set up broadcast listeners
           setupVideoChannelBroadcasts();
@@ -1844,7 +1887,8 @@ async function handleUpdateVideoStatus(videoId, status) {
   if (!videoChannel) {
     videoChannel = socket.channel('video:meta', {});
     await new Promise((resolve, reject) => {
-      videoChannel.join()
+      videoChannel
+        .join()
         .receive('ok', () => {
           // Set up broadcast listeners
           setupVideoChannelBroadcasts();
@@ -1890,7 +1934,8 @@ async function handleQueueVideo(videoData) {
   if (!videoChannel) {
     videoChannel = socket.channel('video:meta', {});
     await new Promise((resolve, reject) => {
-      videoChannel.join()
+      videoChannel
+        .join()
         .receive('ok', () => {
           // Set up broadcast listeners
           setupVideoChannelBroadcasts();

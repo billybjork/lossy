@@ -81,9 +81,7 @@ export class EnergyVAD {
               source: 'energy',
             });
           } else {
-            console.log(
-              `[VAD] Ignored short speech segment: ${speechDuration.toFixed(0)}ms`
-            );
+            console.log(`[VAD] Ignored short speech segment: ${speechDuration.toFixed(0)}ms`);
           }
 
           this.state = 'silence';

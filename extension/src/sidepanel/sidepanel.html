@@ -641,6 +641,29 @@
       margin-bottom: 12px;
     }
 
+    /* Waveform in main UI - compact version for passive mode */
+    .waveform-container-main {
+      width: 100%;
+      height: 48px;
+      background: #ffffff;
+      border-radius: 6px;
+      margin-top: 12px;
+      border: 1px solid #e5e7eb;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .waveform-canvas-main {
+      width: 100%;
+      height: 100%;
+      opacity: 0.6;
+      transition: opacity 0.3s ease;
+    }
+
+    .waveform-container-main.is-recording .waveform-canvas-main {
+      opacity: 1;
+    }
+
     .passive-mode-header {
       display: flex;
       align-items: center;
@@ -915,6 +938,12 @@
             <button class="debug-toggle-btn" id="debugToggleBtn">Debug</button>
           </div>
         </div>
+
+        <!-- Waveform visualization (shows recording activity) -->
+        <div class="waveform-container-main" id="waveformContainerMain">
+          <canvas id="waveformCanvas" class="waveform-canvas-main"></canvas>
+        </div>
+
         <!-- Sprint 10: Error message (hidden by default) -->
         <div class="passive-error-message hidden" id="passiveErrorMessage"></div>
       </div>
@@ -922,8 +951,8 @@
       <!-- Sprint 10: Debug Drawer (Hidden by Default) -->
       <div class="debug-drawer hidden" id="debugDrawer">
         <div class="debug-header">
-          <span class="debug-title">Manual Recording Controls</span>
-          <span class="debug-shortcut">For testing/fallback only</span>
+          <span class="debug-title">Diagnostics</span>
+          <span class="debug-shortcut">Passive mode telemetry</span>
         </div>
 
         <!-- Transcription Status (Sprint 11: Local-only) -->
@@ -933,13 +962,6 @@
             <span class="mode-badge inactive" id="modeBadge">INACTIVE</span>
           </div>
           <div class="transcription-timing" id="timingInfo">Local-only (WebGPU or WASM)</div>
-        </div>
-
-        <!-- Waveform visualization (Manual mode) -->
-        <div class="waveform-container" id="waveformContainer">
-          <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
-          <button id="recordBtn" class="waveform-start-button">🎤 Start Listening</button>
-          <button id="pauseBtn" class="waveform-pause-button">⏸️ Pause</button>
         </div>
 
         <!-- Telemetry -->

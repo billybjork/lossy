@@ -11,10 +11,8 @@
 // - Audio: Mic → Service Worker → AudioChannel → Phoenix → AgentSession
 // - Notes: AgentSession → PubSub → NotesChannel → Sidepanel (this file)
 
-import {
-  getPassiveModeEnabled,
-  setPassiveModeEnabled,
-} from '../shared/settings.js';
+import { getPassiveModeEnabled, setPassiveModeEnabled } from '../shared/settings.js';
+import db from '../shared/db.js';
 
 // Sprint 12: Phoenix Socket for direct notes subscription
 import { Socket } from 'phoenix';
@@ -31,14 +29,70 @@ const notesCache = new Map(); // Persist notes per video to avoid flicker on rel
 const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
 
+function normalizeNoteForCache(note, offset = 0) {
+  if (!note) return null;
+  const cachedAt = note.cached_at ?? Date.now() - offset;
+  return {
+    ...note,
+    cached_at: cachedAt,
+  };
+}
+
+async function persistNoteToIndexedDb(note) {
+  if (!note?.id) return;
+
+  try {
+    await db.notes.put(note);
+  } catch (err) {
+    console.error('[IndexedDB] Failed to persist note:', err);
+  }
+}
+
+async function replaceVideoNotesInIndexedDb(videoDbId, notes) {
+  try {
+    await db.transaction('rw', db.notes, async () => {
+      await db.notes.where('video_id').equals(videoDbId).delete();
+      if (notes.length > 0) {
+        await db.notes.bulkPut(notes);
+      }
+    });
+  } catch (err) {
+    console.error('[IndexedDB] Failed to replace notes for video:', videoDbId, err);
+  }
+}
+
+async function removeNoteFromIndexedDb(noteId) {
+  if (!noteId) return;
+
+  try {
+    await db.notes.delete(noteId);
+  } catch (err) {
+    console.error('[IndexedDB] Failed to delete note:', noteId, err);
+  }
+}
+
+async function loadNotesFromIndexedDb(videoDbId) {
+  if (!videoDbId) return [];
+
+  try {
+    const stored = await db.notes.where('video_id').equals(videoDbId).toArray();
+    return stored.sort((a, b) => (b.cached_at || 0) - (a.cached_at || 0));
+  } catch (err) {
+    console.error('[IndexedDB] Failed to load cached notes:', videoDbId, err);
+    return [];
+  }
+}
+
 // Sprint 12: Phoenix connection for real-time notes
 let notesSocket = null;
 let notesChannel = null;
 let pendingSubscription = null; // Video ID to subscribe to once socket connects
 
-const recordBtn = document.getElementById('recordBtn');
-const pauseBtn = document.getElementById('pauseBtn');
-const waveformContainer = document.getElementById('waveformContainer');
+// Removed: Manual recording buttons (replaced by passive mode toggle in main UI)
+// const recordBtn = document.getElementById('recordBtn');
+// const pauseBtn = document.getElementById('pauseBtn');
+// const waveformContainer = document.getElementById('waveformContainer');
+const waveformContainerMain = document.getElementById('waveformContainerMain');
 const statusEl = document.getElementById('status');
 const transcriptsEl = document.getElementById('transcripts');
 const videoTimestampEl = document.getElementById('videoTimestamp');
@@ -276,6 +330,7 @@ async function toggleRecording() {
             barColor: '#dc2626',
             sensitivity: 1.2,
             mode: 'static',
+            height: 48, // Compact size for main UI
           });
         }
         await waveform.start();
@@ -326,11 +381,9 @@ async function toggleRecording() {
   }
 }
 
-// Handle record button (Start Listening)
-recordBtn.addEventListener('click', toggleRecording);
-
-// Handle pause button (stops recording)
-pauseBtn.addEventListener('click', toggleRecording);
+// Removed: Manual recording button event listeners (replaced by passive mode toggle in main UI)
+// recordBtn.addEventListener('click', toggleRecording);
+// pauseBtn.addEventListener('click', toggleRecording);
 
 // Sprint 10: Debug drawer toggle button
 debugToggleBtn.addEventListener('click', () => {
@@ -410,14 +463,13 @@ function updatePassiveStatus(status, telemetry = null, errorMessage = null) {
     passiveErrorMessage.classList.add('hidden');
   }
 
-  // Disable manual controls when passive mode is active
-  const isPassiveActive = passiveModeToggleMain.classList.contains('active');
-  if (isPassiveActive) {
-    recordBtn.disabled = true;
-    recordBtn.textContent = '🎤 Passive Mode Active';
+  // Update waveform visualization based on passive mode status
+  if (status === 'observing' || status === 'recording' || status === 'cooldown') {
+    // Start waveform when passive mode is active
+    startWaveformVisualization();
   } else {
-    recordBtn.disabled = false;
-    recordBtn.textContent = isRecording ? '⏸️ Pause' : '🎤 Start Listening';
+    // Stop waveform when passive mode is idle or error
+    stopWaveformVisualization();
   }
 }
 
@@ -443,6 +495,57 @@ function getUserFriendlyErrorMessage(errorMessage) {
 
   // Generic fallback
   return `VAD initialization failed: ${errorMessage}`;
+}
+
+// Waveform visualization control for passive mode
+async function startWaveformVisualization() {
+  if (waveform) {
+    // Already running
+    return;
+  }
+
+  try {
+    console.log('[Waveform] Starting visualization for passive mode');
+    waveform = new LiveWaveform(waveformCanvas, {
+      barColor: '#dc2626',
+      sensitivity: 1.2,
+      mode: 'static',
+      height: 48, // Compact size for main UI
+    });
+    await waveform.start();
+
+    // Add recording class to show waveform
+    if (waveformContainerMain) {
+      waveformContainerMain.classList.add('is-recording');
+    }
+
+    console.log('[Waveform] Visualization started');
+  } catch (error) {
+    console.error('[Waveform] Failed to start:', error);
+    // Don't fail passive mode if waveform fails - it's just visual feedback
+  }
+}
+
+function stopWaveformVisualization() {
+  if (!waveform) {
+    // Already stopped
+    return;
+  }
+
+  try {
+    console.log('[Waveform] Stopping visualization');
+    waveform.stop();
+    waveform = null;
+
+    // Remove recording class to hide waveform
+    if (waveformContainerMain) {
+      waveformContainerMain.classList.remove('is-recording');
+    }
+
+    console.log('[Waveform] Visualization stopped');
+  } catch (error) {
+    console.error('[Waveform] Failed to stop:', error);
+  }
 }
 
 // Initialize side panel
@@ -571,14 +674,29 @@ async function handleTabChanged(tabId, videoContext) {
   // Update site title for the new tab
   updateSiteTitle();
 
+  // Privacy protection: Stop recording when switching to non-video tabs
+  // But keep recording across video-to-video tab changes (seamless multi-video notes)
+  if (previousVideoDbId && !newVideoDbId) {
+    const isPassiveActive = passiveModeToggleMain.classList.contains('active');
+    if (isPassiveActive) {
+      console.log('[Passive] Stopping recording - switched from video to non-video tab');
+      try {
+        await chrome.runtime.sendMessage({ action: 'stop_passive_session' });
+        passiveModeToggleMain.classList.remove('active');
+        updatePassiveStatus('idle');
+        await setPassiveModeEnabled(false);
+      } catch (err) {
+        console.error('[Passive] Failed to stop session on tab change:', err);
+      }
+    }
+  }
+
   // If switching to a tab with a video
   if (newVideoDbId) {
     let hadCachedNotes = false;
-    let hasCacheEntry = false;
 
     if (!isSameVideo) {
-      hasCacheEntry = notesCache.has(newVideoDbId);
-      hadCachedNotes = renderNotesFromCache(newVideoDbId);
+      hadCachedNotes = await renderNotesFromCache(newVideoDbId);
       if (hadCachedNotes) {
         console.log('[SidePanel] ♻️ Restored cached notes for video', newVideoDbId);
       }
@@ -586,7 +704,6 @@ async function handleTabChanged(tabId, videoContext) {
       displayedVideoDbId = newVideoDbId;
     } else {
       displayedVideoDbId = newVideoDbId;
-      hasCacheEntry = notesCache.has(newVideoDbId);
       const cachedNotes = notesCache.get(newVideoDbId);
       hadCachedNotes = !!(cachedNotes && cachedNotes.length > 0);
     }
@@ -701,24 +818,41 @@ async function handleTabChanged(tabId, videoContext) {
 }
 
 function storeNoteInCache(videoDbId, noteData) {
+  if (!videoDbId || !noteData) {
+    return { added: false, count: 0 };
+  }
+
+  const normalized = normalizeNoteForCache(noteData);
+  Object.assign(noteData, normalized); // Ensure caller sees cached metadata
+
   const existing = notesCache.get(videoDbId) || [];
-  const existingIndex = existing.findIndex((note) => note.id === noteData.id);
+  const existingIndex = existing.findIndex((note) => note.id === normalized.id);
 
   if (existingIndex >= 0) {
     const updated = [...existing];
-    updated[existingIndex] = { ...updated[existingIndex], ...noteData };
+    updated[existingIndex] = { ...updated[existingIndex], ...normalized };
     notesCache.set(videoDbId, updated);
+    persistNoteToIndexedDb(updated[existingIndex]);
     return { added: false, count: updated.length };
   }
 
-  const updated = [noteData, ...existing];
+  const updated = [normalized, ...existing];
   notesCache.set(videoDbId, updated);
+  persistNoteToIndexedDb(normalized);
   return { added: true, count: updated.length };
 }
 
-function renderNotesFromCache(videoDbId) {
+async function renderNotesFromCache(videoDbId) {
   cancelScheduledTranscriptClear();
-  const cachedNotes = notesCache.get(videoDbId);
+  let cachedNotes = notesCache.get(videoDbId);
+
+  if (!cachedNotes) {
+    cachedNotes = await loadNotesFromIndexedDb(videoDbId);
+
+    if (cachedNotes.length > 0) {
+      notesCache.set(videoDbId, cachedNotes);
+    }
+  }
 
   if (!cachedNotes || cachedNotes.length === 0) {
     clearTranscriptsImmediately();
@@ -736,12 +870,17 @@ function renderNotesFromCache(videoDbId) {
   return true;
 }
 
+// Note: Manual recording mode removed - waveform now driven by passive mode
 function updateUI() {
   if (isRecording) {
-    waveformContainer.classList.add('is-recording');
+    if (waveformContainerMain) {
+      waveformContainerMain.classList.add('is-recording');
+    }
     statusEl.classList.add('connected');
   } else {
-    waveformContainer.classList.remove('is-recording');
+    if (waveformContainerMain) {
+      waveformContainerMain.classList.remove('is-recording');
+    }
     statusEl.classList.remove('connected');
   }
 }
@@ -940,6 +1079,7 @@ function deleteNote(noteId, videoId, noteElement) {
       notesCache.set(videoId, updatedNotes);
       console.log('[SidePanel] Removed note from cache, remaining:', updatedNotes.length);
     }
+    await removeNoteFromIndexedDb(noteId);
 
     // Send delete request to backend
     try {
@@ -1169,28 +1309,22 @@ function updateTranscriptionStatus(status) {
 }
 
 // Sprint 10: Initialize passive mode on load
+// Auto-start behavior: Always start when sidepanel opens, with 10-second timeout if no speech
 async function initPassiveMode() {
-  // Load persisted passive mode state
-  const enabled = await getPassiveModeEnabled();
-  console.log('[Passive] Loaded persisted state:', enabled ? 'enabled' : 'disabled');
+  console.log('[Passive] Auto-starting passive mode on sidepanel open');
 
-  if (enabled) {
-    // Restore passive mode
-    try {
-      await chrome.runtime.sendMessage({ action: 'start_passive_session' });
-      passiveModeToggleMain.classList.add('active');
-      updatePassiveStatus('observing');
-      console.log('[Passive] Restored passive mode from storage');
-    } catch (err) {
-      console.error('[Passive] Failed to restore passive session:', err);
-      // If restoration fails, reset the persisted state
-      await setPassiveModeEnabled(false);
-      updatePassiveStatus('idle');
-    }
-  } else {
-    // Ensure UI is in disabled state
+  try {
+    // Always start passive mode when sidepanel opens
+    await chrome.runtime.sendMessage({ action: 'start_passive_session' });
+    passiveModeToggleMain.classList.add('active');
+    updatePassiveStatus('observing');
+    await setPassiveModeEnabled(true);
+    console.log('[Passive] Auto-started passive mode (will stop after 10s if no speech)');
+  } catch (err) {
+    console.error('[Passive] Failed to auto-start passive session:', err);
     passiveModeToggleMain.classList.remove('active');
     updatePassiveStatus('idle');
+    await setPassiveModeEnabled(false);
   }
 }
 
@@ -1283,9 +1417,11 @@ function subscribeToVideoNotes(videoDbId) {
   notesChannel.on('note_created', (note) => {
     console.log('[Notes] 📝 Received real-time note:', note);
 
+    storeNoteInCache(note.video_id, note);
+
     // Only append if we're still viewing this video
     if (displayedVideoDbId === note.video_id) {
-      addTranscript(note);
+      addTranscript(note, { skipCache: true });
     } else {
       console.log('[Notes] Ignoring note for different video:', note.video_id);
     }
@@ -1294,23 +1430,21 @@ function subscribeToVideoNotes(videoDbId) {
   // Join channel and load existing notes
   notesChannel
     .join()
-    .receive('ok', () => {
+    .receive('ok', async () => {
       console.log(`[Notes] ✅ Joined channel for video: ${videoDbId}`);
 
       // Load existing notes from backend
       notesChannel
         .push('get_notes', { video_id: videoDbId })
-        .receive('ok', ({ notes }) => {
+        .receive('ok', async ({ notes }) => {
           console.log(`[Notes] 📚 Loaded ${notes.length} existing notes`);
 
-          if (notes.length > 0) {
-            // Update cache
-            notesCache.set(videoDbId, notes);
+          const normalizedNotes = notes.map((note, index) => normalizeNoteForCache(note, index));
+          notesCache.set(videoDbId, normalizedNotes);
+          await replaceVideoNotesInIndexedDb(videoDbId, normalizedNotes);
 
-            // Render notes if this is still the current video
-            if (displayedVideoDbId === videoDbId) {
-              renderNotesFromCache(videoDbId);
-            }
+          if (displayedVideoDbId === videoDbId) {
+            await renderNotesFromCache(videoDbId);
           }
         })
         .receive('error', (err) => {
@@ -1331,6 +1465,37 @@ initNotesSocket();
 
 let currentSection = 'notes';
 let videoLibraryCache = [];
+
+function normalizeVideoForCache(video, offset = 0) {
+  if (!video?.id) return null;
+  const cachedAt = video.cached_at ?? Date.now() - offset;
+  return {
+    ...video,
+    cached_at: cachedAt,
+  };
+}
+
+async function loadVideosFromIndexedDb() {
+  try {
+    const stored = await db.videos.toArray();
+    return stored.sort((a, b) => (b.cached_at || 0) - (a.cached_at || 0));
+  } catch (err) {
+    console.error('[IndexedDB] Failed to load cached videos:', err);
+    return [];
+  }
+}
+
+async function upsertVideosInIndexedDb(videos) {
+  if (!videos || videos.length === 0) {
+    return;
+  }
+
+  try {
+    await db.videos.bulkPut(videos);
+  } catch (err) {
+    console.error('[IndexedDB] Failed to persist videos:', err);
+  }
+}
 
 // Get DOM elements for library
 const tabNotesBtn = document.getElementById('tabNotes');
@@ -1368,29 +1533,76 @@ async function loadVideoLibrary() {
   const filters = {
     status: statusFilter.value || undefined,
     platform: platformFilter.value || undefined,
-    search: videoSearch.value || undefined
+    search: videoSearch.value || undefined,
   };
 
-  console.log('[Library] Loading videos from backend:', filters);
+  console.log('[Library] Loading videos (cache-first) with filters:', filters);
+  let renderedFromCache = false;
+
+  const cachedVideos = await loadVideosFromIndexedDb();
+  if (cachedVideos.length > 0) {
+    const filteredCached = applyVideoFilters(cachedVideos, filters);
+    videoLibraryCache = filteredCached;
+    renderVideoLibrary(filteredCached);
+    renderedFromCache = true;
+    console.log('[Library] Rendered from IndexedDB cache, refreshing in background...');
+  } else {
+    videoList.innerHTML = '<div class="empty-state">Loading videos...</div>';
+  }
 
   try {
     const response = await chrome.runtime.sendMessage({
       type: 'list_videos',
-      filters
+      filters,
     });
 
     if (response.error) {
       console.error('[Library] Failed to load videos:', response.error);
-      videoList.innerHTML = '<div class="empty-state">Failed to load videos</div>';
+      if (!renderedFromCache) {
+        videoList.innerHTML = '<div class="empty-state">Failed to load videos</div>';
+      }
       return;
     }
 
-    videoLibraryCache = response.videos || [];
+    const incomingVideos = response.videos || [];
+    const normalizedVideos = incomingVideos
+      .map((video, index) => normalizeVideoForCache(video, index))
+      .filter(Boolean);
+
+    await upsertVideosInIndexedDb(normalizedVideos);
+
+    videoLibraryCache = applyVideoFilters(normalizedVideos, filters);
     renderVideoLibrary(videoLibraryCache);
+    console.log('[Library] Updated list after backend sync');
   } catch (error) {
     console.error('[Library] Error loading videos:', error);
-    videoList.innerHTML = '<div class="empty-state">Failed to load videos</div>';
+    if (!renderedFromCache) {
+      videoList.innerHTML = '<div class="empty-state">Failed to load videos</div>';
+    }
   }
+}
+
+function applyVideoFilters(videos, filters) {
+  return videos.filter((video) => {
+    if (filters.status && video.status !== filters.status) {
+      return false;
+    }
+
+    if (filters.platform && video.platform !== filters.platform) {
+      return false;
+    }
+
+    if (filters.search) {
+      const query = filters.search.toLowerCase();
+      const title = video.title?.toLowerCase() || '';
+      const url = video.url?.toLowerCase() || '';
+      if (!title.includes(query) && !url.includes(query)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
 }
 
 // Render video library list
@@ -1400,11 +1612,12 @@ function renderVideoLibrary(videos) {
     return;
   }
 
-  videoList.innerHTML = videos.map(video => {
-    const statusClass = video.status.replace('_', '-');
-    const statusLabel = video.status.replace('_', ' ');
+  videoList.innerHTML = videos
+    .map((video) => {
+      const statusClass = video.status.replace('_', '-');
+      const statusLabel = video.status.replace('_', ' ');
 
-    return `
+      return `
       <div class="video-item"
            data-video-id="${video.id}"
            data-status="${video.status}"
@@ -1422,10 +1635,11 @@ function renderVideoLibrary(videos) {
         </div>
       </div>
     `;
-  }).join('');
+    })
+    .join('');
 
   // Attach click handlers
-  videoList.querySelectorAll('.video-item').forEach(item => {
+  videoList.querySelectorAll('.video-item').forEach((item) => {
     item.addEventListener('click', (e) => {
       const url = e.currentTarget.dataset.url;
       console.log('[Library] Opening video:', url);
@@ -1440,10 +1654,10 @@ function renderVideoLibrary(videos) {
 // Get platform icon emoji
 function getPlatformIcon(platform) {
   const icons = {
-    'youtube': '▶️',
-    'vimeo': '🎬',
-    'frame_io': '🎞️',
-    'iconik': '📹'
+    youtube: '▶️',
+    vimeo: '🎬',
+    frame_io: '🎞️',
+    iconik: '📹',
   };
   return icons[platform] || '🎥';
 }
@@ -1452,11 +1666,11 @@ function getPlatformIcon(platform) {
 function escapeHtml(unsafe) {
   if (!unsafe) return '';
   return unsafe
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 // Filter event listeners

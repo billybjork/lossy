@@ -84,9 +84,7 @@ export class FrameCapturer {
       // If paused, use immediate capture instead
       if (this.videoElement.paused) {
         console.log('[FrameCapturer] Video paused, using immediate capture');
-        this._captureImmediate()
-          .then(resolve)
-          .catch(reject);
+        this._captureImmediate().then(resolve).catch(reject);
         return;
       }
 
@@ -96,9 +94,7 @@ export class FrameCapturer {
         console.warn(
           '[FrameCapturer] requestVideoFrameCallback not supported, using immediate capture'
         );
-        this._captureImmediate()
-          .then(resolve)
-          .catch(reject);
+        this._captureImmediate().then(resolve).catch(reject);
         return;
       }
 

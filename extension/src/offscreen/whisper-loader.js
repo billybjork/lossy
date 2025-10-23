@@ -67,9 +67,7 @@ export async function detectCapabilities() {
     const totalMemoryMB = performance.memory.jsHeapSizeLimit / 1024 / 1024;
     capabilities.estimatedMemoryMB = Math.round(totalMemoryMB - usedMemoryMB);
 
-    console.log(
-      `[WhisperLoader] Estimated available memory: ${capabilities.estimatedMemoryMB} MB`
-    );
+    console.log(`[WhisperLoader] Estimated available memory: ${capabilities.estimatedMemoryMB} MB`);
   } else {
     // Fallback: Use user agent heuristics
     // Whisper Tiny needs ~100MB for model + ~50MB for inference
@@ -132,8 +130,8 @@ async function _loadWhisperModelInternal(onProgress) {
     const reason = !capabilities.userPreference
       ? 'user preference disabled'
       : capabilities.estimatedMemoryMB < MIN_MEMORY_MB
-      ? 'insufficient memory'
-      : 'no suitable backend';
+        ? 'insufficient memory'
+        : 'no suitable backend';
 
     console.warn(`[WhisperLoader] Cannot use local transcription: ${reason}`);
     throw new Error(`Local transcription unavailable: ${reason}`);
@@ -153,7 +151,10 @@ async function _loadWhisperModelInternal(onProgress) {
   env.backends.onnx.wasm.wasmPaths = chrome.runtime.getURL('onnx/');
   env.backends.onnx.wasm.numThreads = 1; // Required: Chrome extension bug workaround
 
-  console.log('[WhisperLoader] ONNX Runtime configured for local WASM:', env.backends.onnx.wasm.wasmPaths);
+  console.log(
+    '[WhisperLoader] ONNX Runtime configured for local WASM:',
+    env.backends.onnx.wasm.wasmPaths
+  );
 
   console.log(`[WhisperLoader] Creating pipeline with device: ${capabilities.device}`);
 

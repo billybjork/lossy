@@ -116,10 +116,7 @@ class GPUJobQueue {
       job.resolve(result);
     } catch (error) {
       const duration = performance.now() - startTime;
-      console.error(
-        `[GPUJobQueue] ${job.kind} job failed after ${duration.toFixed(0)}ms:`,
-        error
-      );
+      console.error(`[GPUJobQueue] ${job.kind} job failed after ${duration.toFixed(0)}ms:`, error);
 
       job.reject(error);
     } finally {

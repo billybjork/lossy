@@ -729,7 +729,10 @@ function listenForEvents() {
     // Sprint 08: Capture frame for visual intelligence
     if (message.action === 'capture_frame') {
       const requestedTimestamp = message.timestamp;
-      console.log('[Lossy] 🔍 CAPTURE_FRAME: Received request to capture frame at', requestedTimestamp);
+      console.log(
+        '[Lossy] 🔍 CAPTURE_FRAME: Received request to capture frame at',
+        requestedTimestamp
+      );
 
       (async () => {
         try {

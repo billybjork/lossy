@@ -90,7 +90,9 @@ export class VideoLifecycleManager {
       // For mock video elements (e.g., YouTube iframe), check isConnected property
       // For real video elements, use document.contains()
       const isConnected = this.videoElement?.__isYouTubeIframe
-        ? this.videoElement.isConnected && this.videoElement.iframe && document.contains(this.videoElement.iframe)
+        ? this.videoElement.isConnected &&
+          this.videoElement.iframe &&
+          document.contains(this.videoElement.iframe)
         : this.videoElement && document.contains(this.videoElement);
 
       if (!this.videoElement || !isConnected) {

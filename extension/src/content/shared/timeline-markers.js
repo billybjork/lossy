@@ -217,7 +217,11 @@ export class TimelineMarkers {
    */
   processPendingMarkers() {
     if (!this.hasUsableDuration()) {
-      console.log('[TimelineMarkers] ⏳ Duration still unavailable, keeping', this.pendingMarkers.length, 'markers pending');
+      console.log(
+        '[TimelineMarkers] ⏳ Duration still unavailable, keeping',
+        this.pendingMarkers.length,
+        'markers pending'
+      );
       this.waitForUsableDuration();
       this.schedulePendingProcessing(200);
       return;
