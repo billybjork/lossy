@@ -48,7 +48,7 @@ Speak naturally while watching. The system:
 *Transcription (STT):*
 1. **Best**: Local WASM Whisper with WebGPU acceleration (Sprint 11: local-only)
 2. **Fallback**: Local WASM Whisper with CPU (ONNX Runtime auto-selects)
-3. **Privacy**: 100% local - audio never leaves device
+3. **Privacy**: Transcription always happens locally (audio may be uploaded for playback/review)
 
 *Emoji Chips (Text-based, Planned):*
 1. **Best**: Keyword-based classification (<10ms, simple)
@@ -130,10 +130,9 @@ Based on blueprint and research:
 | Metric | Target | Notes |
 |--------|--------|-------|
 | **Listening Indicator** | ≤100ms | Video pause + anchor display |
-| **Emoji Chips (WASM)** | 300-600ms | CLIP inference on frame |
-| **Emoji Chips (WebGPU)** | 50-150ms | GPU-accelerated |
-| **Ghost Comment** | 0.8-1.3s | Transcription + LLM structuring |
-| **Note Posting** | 5-10s | Browserbase automation |
+| **Emoji Chips (Text)** | <10ms | Keyword-based classification from transcript |
+| **Ghost Comment** | 0.8-1.3s | Local transcription + LLM structuring |
+| **Note Posting** | 5-10s | Local browser automation |
 | **Frame Capture** | 20-60ms | Grab → scale → WebP encode |
 
 ---
@@ -169,14 +168,14 @@ Based on blueprint and research:
 
 ```
 Browser (Extension)           Backend (Phoenix)
-├── Audio capture            ├── Receives: transcript text only
+├── Audio capture            ├── Receives: transcript text + metadata
 ├── STT (Whisper WASM)      ├── Structures with LLM
-├── Frame capture (SigLIP)  ├── Stores: notes, timestamps
-└── Emoji inference         └── Automation: Local browser agent
+├── Frame capture            ├── Stores: notes, timestamps, frames
+└── Emoji inference (text)   └── Automation: Local browser agent
 
-❌ NO audio sent to cloud (100% local transcription)
-✅ Only text + metadata sent to backend
+✅ Transcription always happens locally (Sprint 11)
 ✅ ONNX Runtime auto-selects: WebGPU (70% users) → WASM (30% users)
+✅ Audio may be uploaded for playback/review purposes
 ```
 
 ---

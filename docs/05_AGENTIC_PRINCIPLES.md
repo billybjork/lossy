@@ -126,7 +126,7 @@ Iteration 0 (coarse anchors):
 
 Iteration 1 (draft notes + evidence):
 - Note 1: "Audio levels inconsistent" [confidence: 0.6]
-  Evidence: transcript span 0:00-0:05, frame embedding, user pause event
+  Evidence: transcript span 0:00-0:05, timestamp, user pause event
 - Note 2: "Pacing is slow" [confidence: 0.5]
   Evidence: transcript span 0:30-0:35
 
@@ -385,7 +385,7 @@ const immediateWork = {
   displayDraftNote: true,       // Show text from transcript immediately
   updateWaveform: true,          // Visual feedback during recording
   videoSeek: true,               // Click timeline marker → seek video
-  captureFrame: true             // Grab frame (but defer embedding)
+  captureFrame: true             // Grab frame for context
 };
 
 // Fast (<500ms) - Run during pauses/scrubs
@@ -609,8 +609,7 @@ defmodule Lossy.Agent.Note do
     confidence: 0.0..1.0,
     evidence_refs: [
       {:transcript, span_id},
-      {:frame, timestamp, embedding_id},
-      {:ocr, frame_id, text},
+      {:frame, timestamp, frame_id},
       {:user_action, :pause, timestamp}
     ],
     status: :draft | :firmed | :posted | :archived
@@ -890,8 +889,8 @@ const performanceBudgets = {
   // Time from silence to draft visible
   drafting: 1500,     // 1.5s (transcription + structuring)
 
-  // Time from draft to refined (with visual context)
-  refinement: 3000,   // 3s (frame capture + embedding + LLM)
+  // Time from draft to refined
+  refinement: 2000,   // 2s (frame capture + LLM structuring)
 
   // Global merge latency
   globalMerge: 5000,  // 5s (full graph traversal)

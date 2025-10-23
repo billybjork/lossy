@@ -70,7 +70,7 @@ async function detectCapabilities() {
 - ✅ Works in more environments (low-end devices, WebGPU-capable devices)
 - ✅ Better user experience when conditions are optimal (WebGPU: 2-5s transcription)
 - ✅ No hard failures from missing capabilities (WASM fallback: 10-30s transcription)
-- ✅ 100% privacy - all processing happens locally (audio never leaves device)
+- ✅ Privacy-focused - transcription processing happens locally (audio may be uploaded for other purposes)
 
 **Anti-Pattern:**
 ```javascript

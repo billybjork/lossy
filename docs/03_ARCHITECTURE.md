@@ -38,8 +38,8 @@
 │  │ - getUserMedia (microphone access)                     │   │
 │  │ - VAD (Voice Activity Detection)                       │   │
 │  │ - Audio encoding (PCM/Opus)                            │   │
-│  │ - WASM Whisper (optional local transcription)          │   │
-│  │ - ONNX CLIP (frame analysis)                           │   │
+│  │ - WASM Whisper (local transcription, Sprint 11)       │   │
+│  │ - Frame capture (sent to backend for analysis)        │   │
 │  └─────────────────────────────────────────────────────────┘  │
 │                                                                 │
 └────────────────────────┬────────────────────────────────────────┘
@@ -111,8 +111,8 @@
 │  │   (Sprint 11)   │  │                                     │  │
 │  │                 │  │ - ProfileSetup                      │  │
 │  │ - Vision        │  │   • Manages agent Chrome profile    │  │
-│  │   • CLIP (ext)  │  │   • Persistent cookies/localStorage│  │
-│  │   • Cloud API   │  │                                     │  │
+│  │   • Server-side │  │   • Persistent cookies/localStorage│  │
+│  │   (future)      │  │                                     │  │
 │  │                 │  │ - Platform Adapters (reusable)      │  │
 │  │ - LLM           │  │   • Video/timeline element finders │  │
 │  │   • OpenAI API  │  │   • Selector discovery helpers     │  │
@@ -129,8 +129,8 @@
 │  │ - users                                                   │ │
 │  │ - videos (metadata, thumbnails)                          │ │
 │  │ - notes (ghost → firmed → posted)                        │ │
-│  │ - audio_chunks (queue for processing)                    │ │
-│  │ - video_frames (embeddings, phash)                       │ │
+│  │ - transcripts (from local processing)                   │ │
+│  │ - video_frames (metadata, optional analysis)            │ │
 │  │ - review_sessions (presence, history)                    │ │
 │  └───────────────────────────────────────────────────────────┘│
 │                                                                 │
@@ -183,8 +183,8 @@
 - Access microphone via `getUserMedia`
 - Voice Activity Detection (VAD)
 - Encode audio chunks (PCM/Opus)
-- Optional: Local WASM Whisper transcription
-- Optional: Local ONNX CLIP frame analysis
+- Local WASM Whisper transcription (Sprint 11: local-only)
+- Frame capture (sent to backend for future analysis)
 
 **Why separate from service worker:**
 - Service workers can't access `getUserMedia`
@@ -350,8 +350,9 @@ end
 ```
 
 **VideoChannel:**
-- Receives frame data, embeddings, metadata
+- Receives frame data and metadata
 - Stores in database for context
+- Future: Server-side frame analysis if needed
 
 **UserChannel:**
 - Global events not tied to specific session/video
@@ -812,7 +813,7 @@ Does it need to work across sessions/devices?
 - Transcription → Extension only (local WASM, WebGPU or CPU - Sprint 11)
 - Note categorization → Backend (business logic)
 - Video frame capture → Extension (needs video element access)
-- Frame analysis → Extension (WASM CLIP for privacy)
+- Frame analysis → Backend (server-side, if needed in future)
 - Note posting → Backend (platform APIs, authentication)
 
 ### Common Anti-Patterns

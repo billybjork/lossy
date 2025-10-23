@@ -6,7 +6,7 @@
 
 ## Overview
 
-This document contains essential code patterns and technical details extracted from research. Reference these when implementing Phases 6-7 (WASM inference, CLIP emoji tokens).
+This document contains essential code patterns and technical details extracted from research. Reference these when implementing local transcription (Sprint 11) and future enhancements.
 
 ---
 
@@ -141,9 +141,12 @@ async function getExecutionProvider() {
 
 ---
 
-## 2. Transformers.js Setup for SigLIP/CLIP
+## 2. Transformers.js Setup (Reference)
 
-### Recommended Models
+### Note: Visual Embedding Deprecated
+Local visual embedding (SigLIP/CLIP) has been deprioritized. Frame analysis, if needed, will be handled server-side.
+
+### Historical: Recommended Models for Reference
 
 For 384-512px frames, use:
 - `Xenova/siglip-base-patch16-384` (recommended)
@@ -611,12 +614,11 @@ const model = await SiglipVisionModel.from_pretrained(
 2. Initialize in **offscreen document** (MV3 requirement for Web Workers)
 3. **Sprint 11**: Local-only transcription - WebGPU first, WASM fallback automatic (no cloud)
 
-### For Phase 7 (CLIP Emoji Tokens):
-1. Use **SigLIP-base-patch16-384** (better than CLIP per Google research)
-2. Pre-compute text embeddings for emoji categories at startup
-3. Run inference in **Web Worker** to avoid blocking UI
-4. Capture frames at 224-384px (balance speed/quality)
-5. Cache text embeddings, only compute image embeddings on demand
+### For Future: Emoji Chips (Text-Based)
+1. Use **keyword classification** from transcripts (<10ms, simple)
+2. Alternative: **Lightweight text embeddings** for better accuracy (~50ms)
+3. No visual processing needed - emoji chips derived from speech content
+4. Process in main thread (fast enough for real-time)
 
 ---
 
@@ -658,7 +660,7 @@ const model = await SiglipVisionModel.from_pretrained(
 **All transcription happens locally** - no cloud fallback or mode selection:
 - **70% of users**: WebGPU backend (fast, 2-5s for 10s audio)
 - **30% of users**: WASM backend (acceptable, 10-30s for 10s audio)
-- **100% privacy**: Audio never leaves the device
+- **Privacy**: Transcription processing never leaves the device (audio may be uploaded for other purposes like playback)
 
 ### ONNX Runtime Automatic Backend Selection
 
