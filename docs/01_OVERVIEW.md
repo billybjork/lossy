@@ -40,7 +40,7 @@ Speak naturally while watching. The system:
 | **UI - Popup**            | Phoenix LiveView          | Real-time agent progress streaming       |
 | **UI - Side Panel**       | Phoenix LiveView          | Persistent note list with live updates   |
 | **UI - Overlays**         | Shadow DOM + Vanilla JS   | On-video ghost comments, emoji chips     |
-| **Voice Capture**         | MediaRecorder + VAD       | @ricky0123/vad-web for speech detection  |
+| **Voice Capture**         | MediaRecorder + VAD       | Silero VAD (onnxruntime-web, Sprint 12)  |
 | **Local STT**             | Transformers.js (Whisper) | WebGPU → WASM (local-only)               |
 | **Emoji Chips** (Planned) | Text classification       | Keyword/embedding-based on transcription |
 | **Bundler**               | Webpack 5                 | Local bundling of phoenix.js             |
