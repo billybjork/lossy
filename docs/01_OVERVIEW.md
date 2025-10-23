@@ -1,8 +1,5 @@
 # Voice-First Video Companion - Project Overview
 
-**Last Updated:** 2025-10-14
-**Status:** Pre-Implementation
-
 ---
 
 ## 🎯 Project Goal
@@ -188,44 +185,7 @@ Browser (Extension)           Backend (Phoenix)
 
 ---
 
-## 📁 Repository Structure
-
-```
-lossy/
-├── docs/                          # 📚 Documentation (this directory)
-│   ├── 01_OVERVIEW.md            # This file
-│   ├── 02_PRINCIPLES.md          # Development principles
-│   ├── 03_ARCHITECTURE.md        # System design
-│   ├── sprints/                  # Sprint-based roadmap
-│   ├── 04_LIVEVIEW_PATTERNS.md
-│   ├── 06_COMPUTER_USE.md        # Local-first browser automation
-│   └── advanced/
-│       └── BROWSERBASE_FALLBACK.md  # Optional cloud fallback
-│
-├── lossy/                         # 🔥 Elixir/Phoenix application (@lossy namespace)
-│   ├── lib/lossy/
-│   │   ├── accounts/             # User management
-│   │   ├── videos/               # Video & note storage
-│   │   ├── agent/                # AgentSession GenServers
-│   │   ├── inference/            # STT/LLM routing
-│   │   └── automation/           # Browserbase integration
-│   ├── lib/lossy_web/
-│   │   ├── channels/             # Phoenix Channels
-│   │   ├── live/                 # LiveView modules
-│   │   └── controllers/          # REST API
-│   └── priv/python/              # Existing Python agents
-│
-└── extension/                     # 🧩 Browser extension (MV3)
-    ├── src/
-    │   ├── background/           # Service worker
-    │   ├── content/              # Content scripts + overlays
-    │   ├── sidepanel/            # Side panel (LiveView client)
-    │   ├── popup/                # Popup (LiveView client)
-    │   └── shared/               # Phoenix client, utilities
-    ├── public/
-    │   └── models/               # ONNX models (cached)
-    └── manifest.json
-```
+> **📁 Project Structure**: See [README.md](../README.md#project-structure) for repository layout and setup instructions.
 
 ---
 
@@ -266,13 +226,6 @@ From research and prototype:
 6. **Platform adapters** - Reusable video/timeline element finders
 7. **Phoenix Channels for binary** - Efficient audio streaming
 8. **Side Panel > Popup** - Persistent UI for note list with status updates
-
----
-
-## 📚 References
-
-- **Research:** Conducted 2025-10-14 (WASM inference, LiveView patterns, etc.)
-- **Archived docs:** See `docs/archive/` for blueprint and earlier implementation plans
 
 ---
 

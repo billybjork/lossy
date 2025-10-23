@@ -1,7 +1,5 @@
 # System Architecture
 
-**Last Updated:** 2025-10-17
-
 ---
 
 ## High-Level System Diagram

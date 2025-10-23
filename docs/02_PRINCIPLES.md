@@ -1,7 +1,5 @@
 # Development Principles
 
-**Last Updated:** 2025-10-17
-
 ---
 
 ## Overview
