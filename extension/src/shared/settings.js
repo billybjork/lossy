@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = {
   features: {
     localVisionEnabled: LOCAL_VISION_MODES.AUTO,
     passiveModeEnabled: false, // Sprint 10: Default OFF per spec
+    debugLoggingEnabled: false, // Passive mode refactor: Debug logging OFF by default (production-safe)
   },
 };
 
@@ -187,6 +188,35 @@ export async function setPassiveModeEnabled(enabled) {
   return updateSettings({
     features: {
       passiveModeEnabled: Boolean(enabled),
+    },
+  });
+}
+
+// ========================================
+// Passive Mode Refactor: Debug Logging Settings
+// ========================================
+
+/**
+ * Get the current debug logging enabled state.
+ * Debug logging is OFF by default (production-safe).
+ *
+ * @returns {Promise<boolean>} True if debug logging is enabled
+ */
+export async function getDebugLoggingEnabled() {
+  const settings = await getSettings();
+  return settings.features.debugLoggingEnabled ?? false; // Default OFF
+}
+
+/**
+ * Set the debug logging enabled state.
+ * Controls verbose logging output for passive mode and VAD.
+ *
+ * @param {boolean} enabled - True to enable debug logging
+ */
+export async function setDebugLoggingEnabled(enabled) {
+  return updateSettings({
+    features: {
+      debugLoggingEnabled: Boolean(enabled),
     },
   });
 }
