@@ -7,8 +7,8 @@
 
 **Related Sprints**
 - ✅ Sprint 07 – Local Transcription (hybrid local/cloud)
-- 🔜 Sprint 11 – Passive Mode Polish
-- 🔜 Sprint 12 – Continuous Session Persistence
+- 🔜 Sprint 12 – Passive Mode Polish
+- 🔜 Sprint 13 – Continuous Session Persistence
 
 ---
 

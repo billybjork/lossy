@@ -744,7 +744,7 @@ CircuitBreaker.reset("device_fingerprint_xyz")
 
 - **Sprint 07 (Complete)**: Local Whisper transcription with cloud fallback - see [archive](./sprints/archive/SPRINT_07_local_transcription.md)
 - **Sprint 08 (Complete)**: GPT-4o Vision integration - see [archive](./sprints/archive/SPRINT_08_siglip_vision.md)
-- **Sprint 11 (Complete)**: Local-only transcription (removed cloud fallback) - see [SPRINT_11_local_only_transcription.md](./sprints/SPRINT_11_local_only_transcription.md)
+- **Sprint 11 (Complete)**: Local-only transcription (removed cloud fallback) - see [archive](./sprints/archive/SPRINT_11_local_only_transcription.md)
 - **Sprint TBD (Planned)**: Text-based emoji chips - see [planned](./sprints/planned/SPRINT_TBD_emoji_chips.md)
 - **Performance tuning**: When optimizing inference speed
 - **Debugging**: WebGPU/WASM backend selection issues
