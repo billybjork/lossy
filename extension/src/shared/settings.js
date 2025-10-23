@@ -1,23 +1,11 @@
 /**
  * Shared settings helper for feature flags and user preferences.
  *
- * Sprint 07: Local STT feature flag
+ * Sprint 11: Local-only transcription (no cloud fallback)
  * Sprint 08: Local Vision (SigLIP) feature flag
  * - Stored in chrome.storage.local for persistence across sessions
- * - Supports "auto", "force_local", "force_cloud", "disabled" modes
+ * - Supports "auto", "force_local", "force_cloud", "disabled" modes for vision
  */
-
-/**
- * Local STT (Speech-to-Text) feature flag values:
- * - "auto": Try local first, fall back to cloud if needed (DEFAULT)
- * - "force_local": Only use local transcription, fail if unavailable
- * - "force_cloud": Always use cloud transcription (bypass local)
- */
-export const LOCAL_STT_MODES = {
-  AUTO: 'auto',
-  FORCE_LOCAL: 'force_local',
-  FORCE_CLOUD: 'force_cloud',
-};
 
 /**
  * Local Vision (SigLIP image encoder) feature flag values:
@@ -35,7 +23,6 @@ export const LOCAL_VISION_MODES = {
 
 const DEFAULT_SETTINGS = {
   features: {
-    localSttEnabled: LOCAL_STT_MODES.AUTO,
     localVisionEnabled: LOCAL_VISION_MODES.AUTO,
     passiveModeEnabled: false, // Sprint 10: Default OFF per spec
   },
@@ -97,55 +84,8 @@ export async function updateSettings(updates) {
 }
 
 /**
- * Get the current local STT mode.
- *
- * @returns {Promise<string>} One of LOCAL_STT_MODES values
+ * Sprint 11: STT mode removed - all transcription is local-only (WebGPU or WASM via ONNX Runtime)
  */
-export async function getLocalSttMode() {
-  const settings = await getSettings();
-  return settings.features.localSttEnabled;
-}
-
-/**
- * Set the local STT mode.
- *
- * @param {string} mode - One of LOCAL_STT_MODES values
- */
-export async function setLocalSttMode(mode) {
-  if (!Object.values(LOCAL_STT_MODES).includes(mode)) {
-    throw new Error(`Invalid local STT mode: ${mode}. Must be one of: ${Object.values(LOCAL_STT_MODES).join(', ')}`);
-  }
-
-  return updateSettings({
-    features: {
-      localSttEnabled: mode,
-    },
-  });
-}
-
-/**
- * Check if local STT should be attempted based on current mode.
- *
- * @returns {Promise<boolean>} True if local STT should be attempted
- */
-export async function shouldUseLocalStt() {
-  const mode = await getLocalSttMode();
-
-  // Only skip local STT if explicitly forced to cloud
-  return mode !== LOCAL_STT_MODES.FORCE_CLOUD;
-}
-
-/**
- * Check if cloud fallback is allowed based on current mode.
- *
- * @returns {Promise<boolean>} True if cloud fallback is allowed
- */
-export async function allowCloudFallback() {
-  const mode = await getLocalSttMode();
-
-  // Allow cloud fallback unless explicitly forced to local
-  return mode !== LOCAL_STT_MODES.FORCE_LOCAL;
-}
 
 /**
  * Reset settings to defaults.

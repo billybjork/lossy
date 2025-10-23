@@ -6,7 +6,6 @@
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
-import { getLocalSttMode } from '../shared/settings.js';
 
 let socket = null;
 let audioChannel = null;
@@ -330,22 +329,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true; // Keep channel open
   }
 
-  // Handle audio chunks from offscreen document
-  if (message.action === 'audio_chunk' && sender.url?.includes('offscreen.html')) {
-    // Sprint 10 Fix: Route chunks to correct channel (passive vs manual)
-    const targetChannel = passiveSession.status === 'recording'
-      ? passiveSession.audioChannel
-      : audioChannel;
-
-    if (targetChannel) {
-      // Send binary audio to Phoenix as plain Array (not Uint8Array)
-      // Phoenix.js doesn't properly serialize Uint8Array, so keep it as Array
-      targetChannel
-        .push('audio_chunk', { data: message.data })
-        .receive('error', (err) => console.error('Failed to send chunk:', err));
-    }
-    return false; // No async response needed
-  }
+  // Sprint 11: Audio chunks removed - all transcription happens locally
 
   // Sprint 07: Handle transcription status updates from offscreen
   if (message.action === 'transcription_status' && sender.url?.includes('offscreen.html')) {
@@ -384,24 +368,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // Sprint 07: Handle local transcription fallback
-  if (message.action === 'transcript_fallback_required' && sender.url?.includes('offscreen.html')) {
-    console.warn('[Lossy] Local transcription failed, cloud fallback:', message.reason);
+  // Sprint 11: Handle transcription errors (no cloud fallback)
+  if (message.action === 'transcription_error' && sender.url?.includes('offscreen.html')) {
+    console.error('[Lossy] Local transcription failed:', message.error);
 
-    // Notify side panel of fallback
+    // Notify side panel of error
     chrome.runtime.sendMessage({
       action: 'transcription_status',
-      stage: 'fallback',
-      source: 'cloud',
-      reason: message.reason,
+      stage: 'error',
+      source: 'local',
+      error: message.error,
     }).catch(() => {});
 
-    if (!message.canFallback) {
-      console.error('[Lossy] Cloud fallback disabled by user settings');
-      // TODO: Show error to user in side panel
-    }
-
-    // Backend will use buffered audio for cloud transcription
     return false;
   }
 
@@ -986,14 +964,11 @@ async function startRecording(options = {}) {
   });
 
   if (offscreenClients.length > 0) {
-    // Get STT mode and send to offscreen document
-    const sttMode = await getLocalSttMode();
-    console.log('Sending start_recording message to offscreen with mode:', sttMode);
+    console.log('Sending start_recording message to offscreen (local-only mode)');
     chrome.runtime
       .sendMessage({
         target: 'offscreen',
         action: 'start_recording',
-        sttMode: sttMode,
       })
       .catch((err) => console.error('Failed to start offscreen recording:', err));
   } else {
@@ -1022,9 +997,7 @@ async function stopRecording() {
   // 2. Notify content script to resume video
   sendMessageToTab(recordingTabId, { action: 'recording_stopped' });
 
-  // 2. Stop audio capture and attempt local transcription
-  let localTranscriptSent = false;
-
+  // 2. Stop audio capture (local transcription happens automatically)
   if (await hasOffscreenDocument()) {
     try {
       const offscreenResponse = await chrome.runtime.sendMessage({
@@ -1034,40 +1007,15 @@ async function stopRecording() {
 
       console.log('[Lossy] Offscreen stop response:', offscreenResponse);
 
-      // Check if local transcription was attempted and succeeded
-      if (offscreenResponse?.localTranscription && offscreenResponse?.success) {
-        console.log('[Lossy] Local transcription succeeded, transcript already sent to backend');
-        localTranscriptSent = true;
+      if (offscreenResponse?.success) {
+        console.log('[Lossy] Local transcription succeeded, transcript sent to backend');
         // Offscreen already sent transcript_final, backend will handle it
-        // Don't send stop_recording to backend - it would trigger cloud transcription
+      } else {
+        console.error('[Lossy] Local transcription failed:', offscreenResponse?.error);
       }
     } catch (err) {
       console.error('[Lossy] Failed to stop offscreen recording:', err);
     }
-  }
-
-  // 3. Tell backend to finalize transcription ONLY if local transcription didn't happen
-  // If local transcript was sent, backend is already processing it
-  if (audioChannel && !localTranscriptSent) {
-    console.log('[Lossy] Sending stop_recording to backend (local transcript not available)');
-    await new Promise((resolve) => {
-      audioChannel
-        .push('stop_recording', {})
-        .receive('ok', () => {
-          console.log('Backend notified to finalize');
-          resolve();
-        })
-        .receive('error', (err) => {
-          console.error('Failed to notify backend:', err);
-          resolve(); // Resolve anyway to continue cleanup
-        })
-        .receive('timeout', () => {
-          console.error('Backend notification timed out');
-          resolve();
-        });
-    });
-  } else if (localTranscriptSent) {
-    console.log('[Lossy] Skipping stop_recording to backend - local transcript already sent');
   }
 
   // 4. DON'T leave the channel yet - wait for note_created event
@@ -1184,11 +1132,9 @@ async function handlePassiveEvent(event) {
 
     // Start recording in offscreen (audio flows to persistent channel)
     try {
-      const sttMode = await getLocalSttMode();
       await chrome.runtime.sendMessage({
         target: 'offscreen',
         action: 'start_recording',
-        sttMode: sttMode,
       });
       console.log('[Passive] Recording started successfully');
     } catch (error) {

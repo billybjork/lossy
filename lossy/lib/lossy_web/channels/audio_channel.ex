@@ -35,58 +35,8 @@ defmodule LossyWeb.AudioChannel do
     {:ok, assign(socket, :session_id, session_id)}
   end
 
-  # Handle audio chunks from extension
-  @impl true
-  def handle_in("audio_chunk", %{"data" => audio_data}, socket) when is_list(audio_data) do
-    # Convert array to binary (most common case - from JS Array)
-    audio_binary = :binary.list_to_bin(audio_data)
-
-    Logger.debug("Received audio chunk: #{byte_size(audio_binary)} bytes (from array)")
-
-    # Send to AgentSession
-    Lossy.Agent.Session.cast_audio(socket.assigns.session_id, audio_binary)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_in("audio_chunk", %{"data" => audio_data}, socket) when is_map(audio_data) do
-    # Convert map with string keys to binary (JSON serialization artifact)
-    # This handles the case where Phoenix.js serializes Uint8Array as object
-    audio_list =
-      audio_data
-      |> Enum.sort_by(fn {k, _v} -> String.to_integer(k) end)
-      |> Enum.map(fn {_k, v} -> v end)
-
-    audio_binary = :binary.list_to_bin(audio_list)
-
-    Logger.debug("Received audio chunk: #{byte_size(audio_binary)} bytes (from map)")
-
-    # Send to AgentSession
-    Lossy.Agent.Session.cast_audio(socket.assigns.session_id, audio_binary)
-
-    {:noreply, socket}
-  end
-
-  @impl true
-  def handle_in("audio_chunk", %{"data" => audio_data}, socket) when is_binary(audio_data) do
-    Logger.debug("Received audio chunk: #{byte_size(audio_data)} bytes (from binary)")
-
-    # Send to AgentSession
-    Lossy.Agent.Session.cast_audio(socket.assigns.session_id, audio_data)
-
-    {:noreply, socket}
-  end
-
-  # Handle stop recording event
-  @impl true
-  def handle_in("stop_recording", _payload, socket) do
-    Logger.info("Stop recording event received")
-
-    Lossy.Agent.Session.stop_recording(socket.assigns.session_id)
-
-    {:reply, {:ok, %{}}, socket}
-  end
+  # Sprint 11: Audio chunks removed - all transcription happens locally
+  # Extension sends transcript_final after local transcription completes
 
   # Sprint 07: Handle client-supplied transcript (partial)
   @impl true

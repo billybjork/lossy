@@ -1,12 +1,11 @@
 /**
  * Offscreen Document - Audio Recording & Local Transcription + Vision
  *
- * Sprint 07: Hybrid local/cloud transcription
+ * Sprint 11: Local-only transcription
  * - Captures audio from microphone
- * - Sends chunks to backend (for cloud fallback)
  * - Buffers audio locally for local transcription
- * - Transcribes locally using Whisper (if enabled)
- * - Falls back to cloud if local fails
+ * - Transcribes locally using Whisper via ONNX Runtime (WebGPU or WASM)
+ * - No cloud fallback - 100% local processing
  *
  * Sprint 08: Visual intelligence via SigLIP
  * - Generates frame embeddings from ImageData
@@ -33,15 +32,13 @@ import {
   warmCache as warmVisionCache,
 } from './siglip-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
-import { LOCAL_STT_MODES, LOCAL_VISION_MODES } from '../shared/settings.js';
+import { LOCAL_VISION_MODES } from '../shared/settings.js';
 import { HybridVAD } from './vad-detector.js';
 
 let mediaRecorder = null;
 let audioContext = null;
 let recordedChunks = [];
 let audioBuffer = []; // Float32Array chunks for local transcription
-let localTranscriptionEnabled = false;
-let currentSttMode = LOCAL_STT_MODES.AUTO; // Default mode
 
 // Sprint 08: Vision state
 let localVisionEnabled = false;
@@ -61,12 +58,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message.action === 'start_recording') {
-    // Receive STT mode from service worker
-    if (message.sttMode) {
-      currentSttMode = message.sttMode;
-      console.log('[Offscreen] STT mode set to:', currentSttMode);
-    }
-
     startRecording()
       .then(() => {
         sendResponse({ success: true });
@@ -171,20 +162,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 async function startRecording() {
   try {
-    // Check if local transcription should be used based on mode passed from service worker
-    localTranscriptionEnabled = currentSttMode !== LOCAL_STT_MODES.FORCE_CLOUD;
-    console.log('[Offscreen] Using STT mode:', currentSttMode);
-    console.log('[Offscreen] Local transcription enabled:', localTranscriptionEnabled);
+    // Always use local transcription (WebGPU or WASM via ONNX Runtime)
+    console.log('[Offscreen] Using local-only transcription');
 
-    if (localTranscriptionEnabled) {
-      // Detect capabilities
-      const capabilities = await detectCapabilities();
-      console.log('[Offscreen] Device capabilities:', capabilities);
+    // Detect capabilities
+    const capabilities = await detectCapabilities();
+    console.log('[Offscreen] Device capabilities:', capabilities);
 
-      if (!capabilities.canUseLocal) {
-        console.warn('[Offscreen] Local transcription unavailable, will use cloud fallback');
-        localTranscriptionEnabled = false;
-      }
+    if (!capabilities.canUseLocal) {
+      throw new Error('Local transcription unavailable - please ensure your browser supports WebAssembly');
     }
 
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -197,7 +183,26 @@ async function startRecording() {
       },
     });
 
-    // Prefer WebM/Opus for OpenAI Whisper API (cloud fallback)
+    // Create AudioContext for Float32 audio (for ONNX transcription)
+    audioContext = new AudioContext({ sampleRate: 16000 });
+    const source = audioContext.createMediaStreamSource(stream);
+
+    // Create ScriptProcessor to capture raw audio samples
+    const bufferSize = 4096;
+    const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+
+    processor.onaudioprocess = (event) => {
+      // Copy input buffer (Float32Array)
+      const inputData = event.inputBuffer.getChannelData(0);
+      const copy = new Float32Array(inputData.length);
+      copy.set(inputData);
+      audioBuffer.push(copy);
+    };
+
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+
+    // Simple MediaRecorder for basic state management (not used for buffering)
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
@@ -210,44 +215,9 @@ async function startRecording() {
     recordedChunks = [];
     audioBuffer = [];
 
-    // If local transcription enabled, create AudioContext for Float32 audio
-    if (localTranscriptionEnabled) {
-      audioContext = new AudioContext({ sampleRate: 16000 });
-      const source = audioContext.createMediaStreamSource(stream);
-
-      // Create ScriptProcessor to capture raw audio samples
-      const bufferSize = 4096;
-      const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
-
-      processor.onaudioprocess = (event) => {
-        // Copy input buffer (Float32Array)
-        const inputData = event.inputBuffer.getChannelData(0);
-        const copy = new Float32Array(inputData.length);
-        copy.set(inputData);
-        audioBuffer.push(copy);
-      };
-
-      source.connect(processor);
-      processor.connect(audioContext.destination);
-
-      // Store processor for cleanup
-      mediaRecorder._audioProcessor = processor;
-      mediaRecorder._audioSource = source;
-    }
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        // Always send to backend for cloud fallback
-        event.data.arrayBuffer().then((buffer) => {
-          chrome.runtime.sendMessage({
-            action: 'audio_chunk',
-            data: Array.from(new Uint8Array(buffer)),
-            mimeType: mimeType,
-            size: buffer.byteLength,
-          });
-        });
-      }
-    };
+    // Store processor for cleanup
+    mediaRecorder._audioProcessor = processor;
+    mediaRecorder._audioSource = source;
 
     mediaRecorder.onerror = (event) => {
       console.error('MediaRecorder error:', event.error);
@@ -285,14 +255,13 @@ async function stopRecording() {
     audioContext = null;
   }
 
-  // Attempt local transcription if enabled and audio was captured
-  if (localTranscriptionEnabled && audioBuffer.length > 0) {
-    console.log(`[Offscreen] Attempting local transcription (${audioBuffer.length} chunks)`);
+  // Attempt local transcription if audio was captured
+  if (audioBuffer.length > 0) {
+    console.log(`[Offscreen] Transcribing locally (${audioBuffer.length} chunks)`);
 
     try {
       const result = await transcribeLocally();
       return {
-        localTranscription: true,
         success: true,
         ...result,
       };
@@ -301,29 +270,25 @@ async function stopRecording() {
       console.error('[Offscreen] Error stack:', error.stack);
       console.error('[Offscreen] Error type:', error.constructor.name);
 
-      // Notify service worker to fall back to cloud (unless forced local-only)
-      const canFallback = currentSttMode !== LOCAL_STT_MODES.FORCE_LOCAL;
-
+      // No cloud fallback - show error to user
       chrome.runtime.sendMessage({
-        action: 'transcript_fallback_required',
-        reason: error.message,
-        canFallback,
+        action: 'transcription_error',
+        error: error.message,
+        stack: error.stack,
       });
 
       return {
-        localTranscription: true,
         success: false,
         error: error.message,
         stack: error.stack,
-        fallback: canFallback,
       };
     } finally {
       // Clear audio buffer
       audioBuffer = [];
     }
   } else {
-    console.log('[Offscreen] Skipping local transcription (cloud only)');
-    return { localTranscription: false };
+    console.warn('[Offscreen] No audio captured');
+    return { success: false, error: 'No audio captured' };
   }
 }
 

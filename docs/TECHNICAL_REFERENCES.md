@@ -609,8 +609,7 @@ const model = await SiglipVisionModel.from_pretrained(
 ### For Phase 6 (WASM Whisper):
 1. Use **Transformers.js** (not raw ONNX Runtime Web) - simpler API
 2. Initialize in **offscreen document** (MV3 requirement for Web Workers)
-3. WebGPU first, WASM fallback automatic
-4. Keep cloud Whisper API as backup for accuracy
+3. **Sprint 11**: Local-only transcription - WebGPU first, WASM fallback automatic (no cloud)
 
 ### For Phase 7 (CLIP Emoji Tokens):
 1. Use **SigLIP-base-patch16-384** (better than CLIP per Google research)
@@ -652,50 +651,35 @@ const model = await SiglipVisionModel.from_pretrained(
 
 ---
 
-## 12. Sprint 07: Local Transcription Feature Flags
+## 12. Sprint 11: Local-Only Transcription (Simplified)
 
-### Manual Override Procedure
+### Architecture
 
-#### Extension Settings (Client-Side)
+**All transcription happens locally** - no cloud fallback or mode selection:
+- **70% of users**: WebGPU backend (fast, 2-5s for 10s audio)
+- **30% of users**: WASM backend (acceptable, 10-30s for 10s audio)
+- **100% privacy**: Audio never leaves the device
 
-The extension stores the local STT preference in `chrome.storage.local`:
+### ONNX Runtime Automatic Backend Selection
+
+ONNX Runtime Web automatically selects the best available backend:
 
 ```javascript
-import { setLocalSttMode, LOCAL_STT_MODES } from './src/shared/settings.js';
-
-// Default: Auto (try local, fall back to cloud)
-await setLocalSttMode(LOCAL_STT_MODES.AUTO);
-
-// Force local only (fail if unavailable)
-await setLocalSttMode(LOCAL_STT_MODES.FORCE_LOCAL);
-
-// Force cloud only (bypass local)
-await setLocalSttMode(LOCAL_STT_MODES.FORCE_CLOUD);
+// Automatic backend detection (no manual configuration needed)
+const transcriber = await pipeline(
+  'automatic-speech-recognition',
+  'onnx-community/whisper-tiny.en'
+);
+// ONNX Runtime chooses: WebGPU (if available) → WASM (fallback)
 ```
 
-**Via DevTools Console (chrome-extension context):**
-```javascript
-// Get current settings
-chrome.storage.local.get('settings', (result) => console.log(result));
+### Removed in Sprint 11
 
-// Force cloud transcription
-chrome.storage.local.set({
-  settings: {
-    features: {
-      localSttEnabled: 'force_cloud'
-    }
-  }
-});
-
-// Reset to auto
-chrome.storage.local.set({
-  settings: {
-    features: {
-      localSttEnabled: 'auto'
-    }
-  }
-});
-```
+- ❌ Cloud transcription fallback
+- ❌ STT mode selection UI (Auto/Force Local/Force Cloud)
+- ❌ `LOCAL_STT_MODES` constants
+- ❌ Audio chunk streaming to backend
+- ❌ Feature flags for transcription mode
 
 #### Backend Configuration (Server-Side)
 
@@ -760,7 +744,7 @@ CircuitBreaker.reset("device_fingerprint_xyz")
 
 - **Sprint 07 (Complete)**: Local Whisper transcription with cloud fallback - see [archive](./sprints/archive/SPRINT_07_local_transcription.md)
 - **Sprint 08 (Complete)**: GPT-4o Vision integration - see [archive](./sprints/archive/SPRINT_08_siglip_vision.md)
+- **Sprint 11 (Complete)**: Local-only transcription (removed cloud fallback) - see [SPRINT_11_local_only_transcription.md](./sprints/SPRINT_11_local_only_transcription.md)
 - **Sprint TBD (Planned)**: Text-based emoji chips - see [planned](./sprints/planned/SPRINT_TBD_emoji_chips.md)
 - **Performance tuning**: When optimizing inference speed
-- **Debugging**: WebGPU/WASM fallback issues, local/cloud routing
-- **Feature flag management**: Enabling/disabling local STT
+- **Debugging**: WebGPU/WASM backend selection issues

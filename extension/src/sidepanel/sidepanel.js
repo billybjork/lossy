@@ -12,9 +12,6 @@
 // See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
 
 import {
-  getLocalSttMode,
-  setLocalSttMode,
-  LOCAL_STT_MODES,
   getPassiveModeEnabled,
   setPassiveModeEnabled,
 } from '../shared/settings.js';
@@ -39,12 +36,9 @@ const statusEl = document.getElementById('status');
 const transcriptsEl = document.getElementById('transcripts');
 const videoTimestampEl = document.getElementById('videoTimestamp');
 
-// Sprint 07: Transcription status elements
+// Sprint 11: Transcription status elements (simplified for local-only)
 const modeBadge = document.getElementById('modeBadge');
 const timingInfo = document.getElementById('timingInfo');
-const modeAutoBtn = document.getElementById('modeAuto');
-const modeForceLocalBtn = document.getElementById('modeForceLocal');
-const modeForceCloudBtn = document.getElementById('modeForceCloud');
 
 // Sprint 10: Passive mode elements (Main UI)
 const passiveStatusMain = document.getElementById('passiveStatusMain');
@@ -1167,40 +1161,8 @@ function updateTranscriptEmptyState() {
   transcriptsEl.classList.toggle('is-empty', isEmpty);
 }
 
-// Sprint 07: Transcription Mode Management
-async function initTranscriptionMode() {
-  // Load current mode using settings helper
-  const mode = await getLocalSttMode();
-
-  // Update UI to reflect current mode
-  updateModeButtons(mode);
-}
-
-function updateModeButtons(mode) {
-  modeAutoBtn.classList.toggle('active', mode === LOCAL_STT_MODES.AUTO);
-  modeForceLocalBtn.classList.toggle('active', mode === LOCAL_STT_MODES.FORCE_LOCAL);
-  modeForceCloudBtn.classList.toggle('active', mode === LOCAL_STT_MODES.FORCE_CLOUD);
-
-  // Update timingInfo to show current configuration
-  if (mode === LOCAL_STT_MODES.AUTO) {
-    timingInfo.textContent = 'Auto: Local with cloud fallback';
-  } else if (mode === LOCAL_STT_MODES.FORCE_LOCAL) {
-    timingInfo.textContent = 'Forced: Local transcription only';
-  } else if (mode === LOCAL_STT_MODES.FORCE_CLOUD) {
-    timingInfo.textContent = 'Forced: Cloud transcription only';
-  }
-}
-
-async function setTranscriptionMode(mode) {
-  await setLocalSttMode(mode);
-  updateModeButtons(mode);
-  console.log('[SidePanel] Transcription mode set to:', mode);
-}
-
-// Mode toggle handlers
-modeAutoBtn.addEventListener('click', () => setTranscriptionMode(LOCAL_STT_MODES.AUTO));
-modeForceLocalBtn.addEventListener('click', () => setTranscriptionMode(LOCAL_STT_MODES.FORCE_LOCAL));
-modeForceCloudBtn.addEventListener('click', () => setTranscriptionMode(LOCAL_STT_MODES.FORCE_CLOUD));
+// Sprint 11: No mode management needed - always local-only
+// timingInfo is set in HTML to "Local-only (WebGPU or WASM)"
 
 // Listen for transcription status updates from service worker/offscreen
 chrome.runtime.onMessage.addListener((message) => {
