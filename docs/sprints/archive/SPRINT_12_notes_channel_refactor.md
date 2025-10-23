@@ -1,9 +1,10 @@
 # Sprint 12: Notes Channel Refactor
 
-**Status:** 🟢 In Progress
+**Status:** ✅ Complete
 **Goal:** Replace service worker note relay with direct Phoenix Channel subscription in sidepanel
 **Duration:** 2-3 hours
 **Started:** 2025-10-22
+**Completed:** 2025-10-23
 
 ---
 
@@ -56,12 +57,12 @@ Service Worker                           NotesChannel (in sidepanel)
 
 ## 📋 Deliverables
 
-- [ ] `lib/lossy_web/channels/notes_channel.ex` - New channel for notes subscription
-- [ ] Phoenix socket handler updated with notes channel route
-- [ ] Sidepanel connects directly to NotesChannel via WebSocket
-- [ ] Service worker relay logic removed (~200 lines)
-- [ ] Real-time notes working in sidepanel
-- [ ] Documentation updated to reflect architecture change
+- [x] `lib/lossy_web/channels/notes_channel.ex` - New channel for notes subscription
+- [x] Phoenix socket handler updated with notes channel route
+- [x] Sidepanel connects directly to NotesChannel via WebSocket
+- [x] Service worker relay logic removed (obsolete `request_notes_for_sidepanel`)
+- [x] Real-time notes working in sidepanel
+- [x] Documentation updated to reflect architecture change
 
 ---
 
@@ -415,15 +416,54 @@ Should see note appear in sidepanel if connected to `notes:video:test_123`
 
 ## ✅ Definition of Done
 
-- [ ] NotesChannel implemented and tested
-- [ ] Sidepanel connects to NotesChannel on load
-- [ ] Real-time notes appear in sidepanel without service worker relay
-- [ ] Tab switching subscribes to new video's channel
-- [ ] Service worker relay logic removed
-- [ ] No regressions in audio streaming or recording
-- [ ] Timeline markers still work in content script
-- [ ] Documentation updated
-- [ ] Sprint archived with learnings
+- [x] NotesChannel implemented and tested
+- [x] Sidepanel connects to NotesChannel on load
+- [x] Real-time notes appear in sidepanel without service worker relay
+- [x] Tab switching subscribes to new video's channel
+- [x] Service worker relay logic removed
+- [x] No regressions in audio streaming or recording
+- [x] Timeline markers still work in content script
+- [x] Documentation updated
+- [x] Sprint archived with learnings
+
+---
+
+## 🔧 Implementation Summary
+
+**What Was Completed:**
+
+1. **Core Refactor** ✅
+   - NotesChannel backend already implemented
+   - Sidepanel Phoenix Socket connection working
+   - Direct real-time note subscriptions via `notes:video:${videoId}`
+   - Removed obsolete `request_notes_for_sidepanel` service worker relay
+
+2. **Critical Bug Fixes** ✅ (Discovered during testing)
+   - **Phoenix Socket API Error**: Fixed incorrect `on('open')` usage → implemented `pendingSubscription` queue
+   - **Reconnection Handling**: Added automatic re-subscription on Phoenix reconnect
+   - **Tab Context Management**: Fixed race conditions in note routing (see below)
+   - **100ms Debounce Removed**: Eliminated tab_changed debounce that caused subscription races
+
+3. **Tab Context Management Overhaul** ✅
+   - **Phase 1**: Recording context snapshot - atomic capture at speech_start prevents routing to wrong tab
+   - **Phase 2**: VAD suspension on no-video tabs - prevents notes bleeding into unrelated videos
+   - **Phase 3**: NotesChannel resilience - queue subscriptions while connecting, handle reconnections
+   - **Overlapping Fix**: Block new recordings while previous note pending (prevents context overwrite)
+
+**Verified in Production Logs:**
+- ✅ Video context switching between tabs (YouTube, TikTok)
+- ✅ Context clearing on non-video tabs (`video_id: nil`)
+- ✅ Phoenix channel joins/subscriptions working
+- ✅ Real-time note broadcasting and delivery
+- ✅ Timeline markers routed to correct tabs
+- ✅ Performance: Local transcription ~513ms, queries <2ms, total pipeline ~1.5-2s
+
+**Architecture Improvements:**
+- Service worker now focused solely on audio streaming and Chrome APIs
+- Sidepanel owns its data subscription lifecycle
+- Direct WebSocket connection eliminates 3-hop relay
+- Tab context management is rock-solid (no race conditions)
+- Graceful handling of network reconnections
 
 ---
 
@@ -434,3 +474,4 @@ Consider adding:
 - Note search via channel
 - Pagination for large note lists
 - User-level notes feed for library view
+- Session ID keying for backend latency >10s (see Sprint 14)

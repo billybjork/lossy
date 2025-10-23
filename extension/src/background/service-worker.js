@@ -33,11 +33,18 @@ const passiveSession = {
   audioChannel: null,
   sessionId: null,
 
+  // Recording context snapshot (captured atomically at speech_start)
+  // This ensures notes/timestamps always route to the correct tab/video,
+  // even if the user switches tabs mid-recording
+  recordingContext: null, // { tabId, videoDbId, videoContext, timestamp, startedAt }
+  recordingContextTimeout: null, // Safety timeout to clear stale context
+
   // Telemetry (console only)
   telemetry: {
     speechDetections: 0,
     ignoredShort: 0,
     ignoredCooldown: 0,
+    ignoredPendingNote: 0, // NEW: Count speech ignored while waiting for previous note
     avgLatencyMs: 0,
   },
 };
@@ -88,23 +95,20 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     messageRouter.subscribePanelToTab(activeInfo.tabId);
   }
 
-  // Sprint 12: Update passive session video context when tab changes
-  if (passiveSession.status !== 'idle' && passiveSession.audioChannel) {
-    const oldTabId = passiveSession.tabId;
-    const newTabId = activeInfo.tabId;
+  // Update the current active tab ID for passive session
+  // NOTE: This does NOT update the recording context mid-recording
+  // Recording context is captured atomically at speech_start and frozen
+  passiveSession.tabId = activeInfo.tabId;
 
-    console.log(`[Passive] Tab changed: ${oldTabId} → ${newTabId}`);
-
-    // Update tracked tab ID
-    passiveSession.tabId = newTabId;
-
-    // Get video context for new tab
-    const newVideoContext = tabManager ? tabManager.getVideoContext(newTabId) : null;
+  // If passive mode is observing (not recording), update the video context
+  // so the next speech segment will use the current tab's context
+  if (passiveSession.status === 'observing' && passiveSession.audioChannel) {
+    const newVideoContext = tabManager ? tabManager.getVideoContext(activeInfo.tabId) : null;
 
     if (newVideoContext?.videoDbId) {
-      console.log(`[Passive] Updating video context to: ${newVideoContext.videoDbId}`);
+      console.log(`[Passive] Tab switched while observing, updating context to: ${newVideoContext.videoDbId}`);
 
-      // Update backend AgentSession's video context
+      // Update backend AgentSession's video context for next recording
       passiveSession.audioChannel
         .push('update_video_context', { video_id: newVideoContext.videoDbId })
         .receive('ok', () => {
@@ -114,7 +118,18 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
           console.error('[Passive] Failed to update video context:', err);
         });
     } else {
-      console.log('[Passive] New tab has no video context (non-video page)');
+      console.log('[Passive] New tab has no video context - clearing backend context');
+
+      // Phase 2: Clear video context in backend when switching to non-video tab
+      // This prevents notes from bleeding into unrelated videos
+      passiveSession.audioChannel
+        .push('update_video_context', { video_id: null })
+        .receive('ok', () => {
+          console.log('[Passive] Backend video context cleared (no video on active tab)');
+        })
+        .receive('error', (err) => {
+          console.error('[Passive] Failed to clear backend video context:', err);
+        });
     }
   }
 });
@@ -458,6 +473,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             videoId: videoData.videoId,
             url: videoData.url,
             title: videoData.title,
+          });
+
+          // Phase 2: If this is the active tab and passive mode is observing,
+          // update the backend context immediately (handles late detection)
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            if (tabs[0]?.id === tabId && passiveSession.status === 'observing' && passiveSession.audioChannel) {
+              console.log('[Passive] Late video detection on active tab, updating backend context');
+              passiveSession.audioChannel
+                .push('update_video_context', { video_id: response.videoDbId })
+                .receive('ok', () => {
+                  console.log('[Passive] Backend context updated after late detection');
+                })
+                .receive('error', (err) => {
+                  console.error('[Passive] Failed to update backend context:', err);
+                });
+            }
           });
         }
 
@@ -1013,38 +1044,73 @@ async function handlePassiveEvent(event) {
       return;
     }
 
+    // CRITICAL FIX: Block new recordings if previous note hasn't arrived yet
+    // This prevents overwriting recordingContext and misrouting notes
+    if (passiveSession.recordingContext) {
+      passiveSession.telemetry.ignoredPendingNote++;
+      console.log('[Passive] Ignored speech - still waiting for previous note to arrive');
+      console.log('[Passive] Context age:', Date.now() - passiveSession.recordingContext.startedAt, 'ms');
+      return;
+    }
+
     console.log('[Passive] Speech detected (latency:', event.data?.timestamp || 'unknown', 'ms)');
-    passiveSession.status = 'recording';
-    passiveSession.lastStartAt = now;
-    passiveSession.telemetry.speechDetections++;
 
-    // CRITICAL FIX: Capture video timestamp when speech starts
+    // CRITICAL: Capture recording context atomically at speech_start
+    // This ensures notes/timestamps always route to the correct tab/video,
+    // even if the user switches tabs during recording
+    const currentTabId = passiveSession.tabId;
+    const currentVideoContext = tabManager ? tabManager.getVideoContext(currentTabId) : null;
+
+    // Validate we have a video context - if not, skip this speech segment
+    if (!currentVideoContext || !currentVideoContext.videoDbId) {
+      console.log('[Passive] No video context for current tab, skipping speech segment');
+      passiveSession.telemetry.ignoredShort++;
+      return;
+    }
+
+    console.log('[Passive] Captured recording context:', {
+      tabId: currentTabId,
+      videoDbId: currentVideoContext.videoDbId,
+      video: currentVideoContext.title || currentVideoContext.videoId
+    });
+
+    // Capture timestamp from the CURRENT tab (where speech is starting)
     let capturedTimestamp = null;
-    if (passiveSession.tabId) {
-      // Check extension context before sending message
-      if (!chrome?.runtime?.id) {
-        console.log('[Passive] Extension context invalidated, skipping timestamp capture');
-      } else {
-        try {
-          // Get timestamp without pausing video (passive mode)
-          const response = await Promise.race([
-            chrome.tabs.sendMessage(passiveSession.tabId, { action: 'get_timestamp' }),
-            new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000)),
-          ]);
+    if (!chrome?.runtime?.id) {
+      console.log('[Passive] Extension context invalidated, skipping timestamp capture');
+    } else {
+      try {
+        // Get timestamp without pausing video (passive mode)
+        const response = await Promise.race([
+          chrome.tabs.sendMessage(currentTabId, { action: 'get_timestamp' }),
+          new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000)),
+        ]);
 
-          if (response && response.success && response.timestamp != null) {
-            capturedTimestamp = response.timestamp;
-            console.log('[Passive] Captured timestamp:', capturedTimestamp);
-          }
-        } catch (err) {
-          if (err.message?.includes('Extension context invalidated')) {
-            console.log('[Passive] Extension context invalidated during timestamp capture');
-          } else {
-            console.log('[Passive] Failed to capture timestamp:', err.message);
-          }
+        if (response && response.success && response.timestamp != null) {
+          capturedTimestamp = response.timestamp;
+          console.log('[Passive] Captured timestamp:', capturedTimestamp);
+        }
+      } catch (err) {
+        if (err.message?.includes('Extension context invalidated')) {
+          console.log('[Passive] Extension context invalidated during timestamp capture');
+        } else {
+          console.log('[Passive] Failed to capture timestamp:', err.message);
         }
       }
     }
+
+    // Store the complete recording context (frozen for this utterance)
+    passiveSession.recordingContext = {
+      tabId: currentTabId,
+      videoDbId: currentVideoContext.videoDbId,
+      videoContext: currentVideoContext,
+      timestamp: capturedTimestamp,
+      startedAt: now
+    };
+
+    passiveSession.status = 'recording';
+    passiveSession.lastStartAt = now;
+    passiveSession.telemetry.speechDetections++;
 
     // Send timestamp to backend via persistent channel
     if (passiveSession.audioChannel && capturedTimestamp != null) {
@@ -1068,6 +1134,7 @@ async function handlePassiveEvent(event) {
     } catch (error) {
       console.error('[Passive] Failed to start recording:', error);
       passiveSession.status = 'observing';
+      passiveSession.recordingContext = null; // Clear context on error
     }
   } else if (event.type === 'speech_end' && passiveSession.status === 'recording') {
     const duration = now - passiveSession.lastStartAt;
@@ -1094,22 +1161,51 @@ async function handlePassiveEvent(event) {
       passiveSession.telemetry.avgLatencyMs =
         (passiveSession.telemetry.avgLatencyMs * (count - 1) + latency) / count;
 
-      // Enter cooldown
+      // Enter cooldown - recording context is PRESERVED until note arrives
+      // FIX: Don't clear context after cooldown, wait for note_created or timeout
       setTimeout(() => {
         if (passiveSession.status === 'cooldown') {
           passiveSession.status = 'observing';
           console.log('[Passive] Cooldown complete, resuming observation');
         }
       }, COOLDOWN_MS);
+
+      // Set a safety timeout to clear stale context (10 seconds)
+      // This handles cases where note_created never arrives (backend errors, etc.)
+      if (passiveSession.recordingContextTimeout) {
+        clearTimeout(passiveSession.recordingContextTimeout);
+      }
+      passiveSession.recordingContextTimeout = setTimeout(() => {
+        if (passiveSession.recordingContext) {
+          console.warn('[Passive] Recording context timeout - clearing stale context');
+          passiveSession.recordingContext = null;
+          passiveSession.recordingContextTimeout = null;
+        }
+      }, 10000); // 10 seconds safety timeout
     } else {
       passiveSession.telemetry.ignoredShort++;
       console.log('[Passive] Ignored short speech segment:', duration, 'ms');
       passiveSession.status = 'observing';
+      // Clear recording context immediately for ignored segments
+      passiveSession.recordingContext = null;
+      if (passiveSession.recordingContextTimeout) {
+        clearTimeout(passiveSession.recordingContextTimeout);
+        passiveSession.recordingContextTimeout = null;
+      }
     }
   } else if (event.type === 'error') {
     console.error('[Passive] VAD error:', event.data);
     passiveSession.vadEnabled = false;
     passiveSession.status = 'error';
+
+    // FIX #3: Clear recording context on error
+    if (passiveSession.recordingContext) {
+      passiveSession.recordingContext = null;
+    }
+    if (passiveSession.recordingContextTimeout) {
+      clearTimeout(passiveSession.recordingContextTimeout);
+      passiveSession.recordingContextTimeout = null;
+    }
 
     // Sprint 10: Notify sidepanel of error
     chrome.runtime.sendMessage({
@@ -1167,9 +1263,13 @@ async function startPassiveSession() {
     passiveSession.audioChannel.on('note_created', (payload) => {
       console.log('[Passive] Received structured note:', payload.id);
 
-      // Forward to content script for timeline marker
-      if (passiveSession.tabId) {
-        sendMessageToTab(passiveSession.tabId, {
+      // CRITICAL FIX: Route timeline marker to the tab where recording started,
+      // not the currently active tab. Use recordingContext if available.
+      const targetTabId = passiveSession.recordingContext?.tabId || passiveSession.tabId;
+
+      if (targetTabId) {
+        console.log('[Passive] Routing timeline marker to recording tab:', targetTabId);
+        sendMessageToTab(targetTabId, {
           action: 'note_created',
           data: {
             id: payload.id,
@@ -1178,6 +1278,22 @@ async function startPassiveSession() {
             timestamp_seconds: payload.timestamp_seconds,
           },
         });
+      } else {
+        console.warn('[Passive] No target tab for timeline marker, note:', payload.id);
+      }
+
+      // FIX #2: Clear recording context now that note has been delivered
+      // This ensures the context is preserved long enough for the note to arrive,
+      // even with slow backend responses
+      if (passiveSession.recordingContext) {
+        console.log('[Passive] Clearing recording context after note delivery');
+        passiveSession.recordingContext = null;
+
+        // Clear the safety timeout since note arrived successfully
+        if (passiveSession.recordingContextTimeout) {
+          clearTimeout(passiveSession.recordingContextTimeout);
+          passiveSession.recordingContextTimeout = null;
+        }
       }
     });
 
@@ -1272,6 +1388,19 @@ async function stopPassiveSession() {
     console.log('[Passive] Disconnecting persistent socket');
     passiveSession.socket.disconnect();
     passiveSession.socket = null;
+  }
+
+  // FIX #3: Clear recording context to prevent stale routing
+  // This handles cases where late note_created events arrive after session stops
+  if (passiveSession.recordingContext) {
+    console.log('[Passive] Clearing stale recording context');
+    passiveSession.recordingContext = null;
+  }
+
+  // Clear any pending timeout
+  if (passiveSession.recordingContextTimeout) {
+    clearTimeout(passiveSession.recordingContextTimeout);
+    passiveSession.recordingContextTimeout = null;
   }
 
   passiveSession.vadEnabled = false;

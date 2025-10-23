@@ -34,6 +34,7 @@ let scheduledTranscriptClear = null;
 // Sprint 12: Phoenix connection for real-time notes
 let notesSocket = null;
 let notesChannel = null;
+let pendingSubscription = null; // Video ID to subscribe to once socket connects
 
 const recordBtn = document.getElementById('recordBtn');
 const pauseBtn = document.getElementById('pauseBtn');
@@ -525,23 +526,12 @@ chrome.runtime.onMessage.addListener((message) => {
     highlightNote(message.noteId);
   }
 
-  // Listen for tab changes (debounced to handle rapid messages)
+  // Listen for tab changes
+  // Phase 3: Removed 100ms debounce - TabManager already deduplicates,
+  // and the debounce was causing Phoenix channel subscription to race with note broadcasts
   if (message.action === 'tab_changed') {
-    // Store the latest tab change
-    pendingTabChange = { tabId: message.tabId, videoContext: message.videoContext };
-
-    // Clear existing timer
-    if (tabChangedTimer) {
-      clearTimeout(tabChangedTimer);
-    }
-
-    // Debounce: only handle after 100ms of no new tab_changed messages
-    tabChangedTimer = setTimeout(() => {
-      console.log('[SidePanel] 🔄 TAB_CHANGED (debounced): Processing tab', pendingTabChange.tabId);
-      handleTabChanged(pendingTabChange.tabId, pendingTabChange.videoContext);
-      pendingTabChange = null;
-      tabChangedTimer = null;
-    }, 100);
+    console.log('[SidePanel] 🔄 TAB_CHANGED: Processing tab', message.tabId);
+    handleTabChanged(message.tabId, message.videoContext);
   }
 
   // Clear UI when content script initializes (new video loading)
@@ -641,56 +631,10 @@ async function handleTabChanged(tabId, videoContext) {
       console.log('[SidePanel] Could not get timestamp for new tab:', err);
     }
 
-    // If we're not currently displaying this video's notes, load them
-    if (!hadCachedNotes && (!isSameVideo || !hasCacheEntry)) {
-      console.log(
-        '[SidePanel] 🔄 Loading notes for video',
-        newVideoDbId,
-        '(was displaying:',
-        previousVideoDbId,
-        ')'
-      );
-
-      // Show loading state while we fetch notes
-      markTranscriptsLoading();
-      loadingSessionId++; // Invalidate any in-flight requests from previous video
-      const thisSessionId = loadingSessionId;
-      console.log(
-        '[SidePanel] 🔄 Started loading session',
-        thisSessionId,
-        'for video',
-        newVideoDbId
-      );
-
-      // Request notes for this video
-      try {
-        console.log('[SidePanel] 🔄 Requesting notes for video', newVideoDbId);
-        await chrome.runtime.sendMessage({
-          action: 'request_notes_for_sidepanel',
-          videoDbId: newVideoDbId,
-          tabId: tabId,
-          sessionId: thisSessionId,
-        });
-
-        // Check if we're still on the same session (user didn't navigate away)
-        if (loadingSessionId === thisSessionId) {
-          console.log('[SidePanel] ✅ Notes loaded successfully for session', thisSessionId);
-          if (transcriptsEl.classList.contains('is-loading')) {
-            finalizeTranscriptRender();
-          }
-        } else {
-          console.log(
-            '[SidePanel] ⚠️ Session',
-            thisSessionId,
-            'was invalidated (now on session',
-            loadingSessionId,
-            ')'
-          );
-        }
-      } catch (err) {
-        console.log('[SidePanel] ⚠️ Failed to request notes:', err);
-      }
-    }
+    // Phase 3 FIX: Notes are now loaded via Phoenix NotesChannel.get_notes
+    // (called inside subscribeToVideoNotes above). The old request_notes_for_sidepanel
+    // handler was removed in Sprint 12 and would cause loading states to hang.
+    // No additional loading logic needed here.
   } else {
     // No cached video context - trigger fresh detection on this tab
     console.log('[SidePanel] 🔍 No cached context for tab, triggering fresh detection...');
@@ -1259,6 +1203,7 @@ initPassiveMode();
 /**
  * Initialize Phoenix Socket connection for notes subscription.
  * This runs independently from the service worker's AudioChannel connection.
+ * Phase 3: Added reconnection handling to prevent silent failures.
  */
 function initNotesSocket() {
   console.log('[Notes] Initializing Phoenix Socket...');
@@ -1269,6 +1214,22 @@ function initNotesSocket() {
 
   notesSocket.onOpen(() => {
     console.log('[Notes] ✅ Connected to Phoenix');
+
+    // Phase 3: Handle pending subscription from when socket was connecting
+    if (pendingSubscription) {
+      console.log('[Notes] Processing pending subscription:', pendingSubscription);
+      const videoId = pendingSubscription;
+      pendingSubscription = null;
+      subscribeToVideoNotes(videoId);
+      return;
+    }
+
+    // Phase 3: Re-subscribe to current video on reconnect
+    // This ensures notes continue flowing after network drops
+    if (displayedVideoDbId && !notesChannel) {
+      console.log('[Notes] Re-subscribing to video after reconnect:', displayedVideoDbId);
+      subscribeToVideoNotes(displayedVideoDbId);
+    }
   });
 
   notesSocket.onError((error) => {
@@ -1277,6 +1238,7 @@ function initNotesSocket() {
 
   notesSocket.onClose(() => {
     console.log('[Notes] Socket closed, will auto-reconnect');
+    // Phoenix Socket has built-in reconnection logic
   });
 
   notesSocket.connect();
@@ -1285,6 +1247,7 @@ function initNotesSocket() {
 /**
  * Subscribe to notes for a specific video.
  * Automatically leaves previous channel before joining new one.
+ * Phase 3: Queues subscription if socket is still connecting.
  */
 function subscribeToVideoNotes(videoDbId) {
   if (!videoDbId) {
@@ -1292,8 +1255,16 @@ function subscribeToVideoNotes(videoDbId) {
     return;
   }
 
-  if (!notesSocket || !notesSocket.isConnected()) {
-    console.warn('[Notes] Socket not connected yet, skipping subscription');
+  if (!notesSocket) {
+    console.warn('[Notes] Socket not initialized, cannot subscribe');
+    return;
+  }
+
+  // Phase 3: If socket is still connecting, queue the subscription
+  if (!notesSocket.isConnected()) {
+    console.log('[Notes] Socket not connected yet, queueing subscription for:', videoDbId);
+    pendingSubscription = videoDbId;
+    // The onOpen callback will pick this up and call subscribeToVideoNotes again
     return;
   }
 

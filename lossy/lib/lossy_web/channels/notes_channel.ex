@@ -7,8 +7,8 @@ defmodule LossyWeb.NotesChannel do
 
   ## Topics
 
-  - `notes:video:#{video_id}` - Subscribe to notes for a specific video
-  - `notes:user:#{user_id}` - Subscribe to all notes for a user (future: library view)
+  - `notes:video:\#{video_id}` - Subscribe to notes for a specific video
+  - `notes:user:\#{user_id}` - Subscribe to all notes for a user (future: library view)
 
   ## Events
 

@@ -8,6 +8,7 @@ export class TabManager {
     this.activeTabId = null;
     this.recordingTabId = null;
     this.tabUpdateTimers = new Map(); // tabId → timeout for debouncing
+    this.pendingClearContext = new Map(); // tabId → boolean (track if we should clear context)
   }
 
   async init() {
@@ -75,6 +76,11 @@ export class TabManager {
       if (changeInfo.url || (changeInfo.status === 'complete' && tab.active)) {
         console.log('[TabManager] Tab updated:', tabId, changeInfo);
 
+        // If URL changed, mark that we need to clear context (track independently of closure)
+        if (changeInfo.url) {
+          this.pendingClearContext.set(tabId, true);
+        }
+
         // Clear existing debounce timer for this tab
         if (this.tabUpdateTimers.has(tabId)) {
           clearTimeout(this.tabUpdateTimers.get(tabId));
@@ -85,9 +91,10 @@ export class TabManager {
           console.log('[TabManager] Processing debounced tab update:', tabId);
           this.tabUpdateTimers.delete(tabId);
 
-          // If URL changed, clear the video context (new video might be detected)
-          if (changeInfo.url) {
+          // Check if we should clear context (URL changed at any point during debounce period)
+          if (this.pendingClearContext.get(tabId)) {
             this.clearVideoContext(tabId);
+            this.pendingClearContext.delete(tabId);
           }
 
           await this.onTabChanged(tabId);
@@ -106,6 +113,9 @@ export class TabManager {
         clearTimeout(this.tabUpdateTimers.get(tabId));
         this.tabUpdateTimers.delete(tabId);
       }
+
+      // Clear pending context clear flag
+      this.pendingClearContext.delete(tabId);
 
       this.removeTab(tabId);
     });
