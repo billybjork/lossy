@@ -37,6 +37,7 @@ const DEFAULT_SETTINGS = {
   features: {
     localSttEnabled: LOCAL_STT_MODES.AUTO,
     localVisionEnabled: LOCAL_VISION_MODES.AUTO,
+    passiveModeEnabled: false, // Sprint 10: Default OFF per spec
   },
 };
 
@@ -221,4 +222,31 @@ export async function allowCloudVisionFallback() {
 
   // Allow cloud fallback unless explicitly forced to local or disabled
   return mode !== LOCAL_VISION_MODES.FORCE_LOCAL && mode !== LOCAL_VISION_MODES.DISABLED;
+}
+
+// ========================================
+// Sprint 10: Passive Mode Settings
+// ========================================
+
+/**
+ * Get the current passive mode enabled state.
+ *
+ * @returns {Promise<boolean>} True if passive mode is enabled
+ */
+export async function getPassiveModeEnabled() {
+  const settings = await getSettings();
+  return settings.features.passiveModeEnabled ?? false; // Default OFF per Sprint 10 spec
+}
+
+/**
+ * Set the passive mode enabled state.
+ *
+ * @param {boolean} enabled - True to enable passive mode
+ */
+export async function setPassiveModeEnabled(enabled) {
+  return updateSettings({
+    features: {
+      passiveModeEnabled: Boolean(enabled),
+    },
+  });
 }

@@ -11,7 +11,13 @@
 //
 // See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
 
-import { getLocalSttMode, setLocalSttMode, LOCAL_STT_MODES } from '../shared/settings.js';
+import {
+  getLocalSttMode,
+  setLocalSttMode,
+  LOCAL_STT_MODES,
+  getPassiveModeEnabled,
+  setPassiveModeEnabled,
+} from '../shared/settings.js';
 
 console.log('Side panel loaded');
 
@@ -39,6 +45,19 @@ const timingInfo = document.getElementById('timingInfo');
 const modeAutoBtn = document.getElementById('modeAuto');
 const modeForceLocalBtn = document.getElementById('modeForceLocal');
 const modeForceCloudBtn = document.getElementById('modeForceCloud');
+
+// Sprint 10: Passive mode elements (Main UI)
+const passiveStatusMain = document.getElementById('passiveStatusMain');
+const passiveModeToggleMain = document.getElementById('passiveModeToggleMain');
+const debugToggleBtn = document.getElementById('debugToggleBtn');
+const passiveErrorMessage = document.getElementById('passiveErrorMessage');
+
+// Sprint 10: Debug drawer elements
+const debugDrawer = document.getElementById('debugDrawer');
+const telemetrySpeech = document.getElementById('telemetrySpeech');
+const telemetryShort = document.getElementById('telemetryShort');
+const telemetryCooldown = document.getElementById('telemetryCooldown');
+const telemetryLatency = document.getElementById('telemetryLatency');
 
 // Initialize LiveWaveform
 const waveformCanvas = document.getElementById('waveformCanvas');
@@ -311,6 +330,119 @@ recordBtn.addEventListener('click', toggleRecording);
 
 // Handle pause button (stops recording)
 pauseBtn.addEventListener('click', toggleRecording);
+
+// Sprint 10: Debug drawer toggle button
+debugToggleBtn.addEventListener('click', () => {
+  toggleDebugDrawer();
+});
+
+// Sprint 10: Passive mode toggle (Main UI)
+passiveModeToggleMain.addEventListener('click', async () => {
+  const isActive = passiveModeToggleMain.classList.contains('active');
+
+  if (isActive) {
+    // Disable passive mode
+    try {
+      await chrome.runtime.sendMessage({ action: 'stop_passive_session' });
+      passiveModeToggleMain.classList.remove('active');
+      updatePassiveStatus('idle');
+
+      // Sprint 10: Persist state to chrome.storage
+      await setPassiveModeEnabled(false);
+      console.log('[Passive] Passive mode disabled and saved to storage');
+    } catch (err) {
+      console.error('[Passive] Failed to stop passive session:', err);
+    }
+  } else {
+    // Enable passive mode
+    try {
+      await chrome.runtime.sendMessage({ action: 'start_passive_session' });
+      passiveModeToggleMain.classList.add('active');
+      updatePassiveStatus('observing');
+
+      // Sprint 10: Persist state to chrome.storage
+      await setPassiveModeEnabled(true);
+      console.log('[Passive] Passive mode enabled and saved to storage');
+    } catch (err) {
+      console.error('[Passive] Failed to start passive session:', err);
+
+      // Sprint 10: Show error in UI
+      passiveModeToggleMain.classList.remove('active');
+      updatePassiveStatus('error', null, err.message || 'Failed to start passive mode');
+
+      // Don't persist the enabled state since it failed
+      await setPassiveModeEnabled(false);
+    }
+  }
+});
+
+// Sprint 10: Toggle debug drawer visibility
+function toggleDebugDrawer() {
+  const isVisible = debugDrawer.classList.contains('visible');
+  if (isVisible) {
+    debugDrawer.classList.remove('visible');
+    debugDrawer.classList.add('hidden');
+  } else {
+    debugDrawer.classList.remove('hidden');
+    debugDrawer.classList.add('visible');
+  }
+}
+
+// Sprint 10: Update passive status chip
+function updatePassiveStatus(status, telemetry = null, errorMessage = null) {
+  passiveStatusMain.className = `passive-status ${status}`;
+  passiveStatusMain.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+
+  // Update telemetry if provided
+  if (telemetry) {
+    telemetrySpeech.textContent = telemetry.speechDetections || 0;
+    telemetryShort.textContent = telemetry.ignoredShort || 0;
+    telemetryCooldown.textContent = telemetry.ignoredCooldown || 0;
+    telemetryLatency.textContent = `${Math.round(telemetry.avgLatencyMs || 0)}ms`;
+  }
+
+  // Sprint 10: Show/hide error message
+  if (status === 'error' && errorMessage) {
+    passiveErrorMessage.textContent = getUserFriendlyErrorMessage(errorMessage);
+    passiveErrorMessage.classList.remove('hidden');
+  } else {
+    passiveErrorMessage.classList.add('hidden');
+  }
+
+  // Disable manual controls when passive mode is active
+  const isPassiveActive = passiveModeToggleMain.classList.contains('active');
+  if (isPassiveActive) {
+    recordBtn.disabled = true;
+    recordBtn.textContent = '🎤 Passive Mode Active';
+  } else {
+    recordBtn.disabled = false;
+    recordBtn.textContent = isRecording ? '⏸️ Pause' : '🎤 Start Listening';
+  }
+}
+
+// Sprint 10: Convert technical error messages to user-friendly ones
+function getUserFriendlyErrorMessage(errorMessage) {
+  const msg = errorMessage.toLowerCase();
+
+  if (msg.includes('permission') || msg.includes('denied') || msg.includes('notallowed')) {
+    return 'Microphone permission denied. Please allow microphone access and try again.';
+  }
+
+  if (msg.includes('notfound') || msg.includes('no device')) {
+    return 'No microphone found. Please connect a microphone and try again.';
+  }
+
+  if (msg.includes('audiocontext') || msg.includes('webaudio')) {
+    return 'Audio system unavailable. Your browser may not support this feature.';
+  }
+
+  if (msg.includes('onnx') || msg.includes('silero')) {
+    return 'VAD initialization failed. Try disabling "Silero Boost" in debug drawer.';
+  }
+
+  // Generic fallback
+  return `VAD initialization failed: ${errorMessage}`;
+}
 
 // Initialize side panel
 async function init() {
@@ -1077,6 +1209,21 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
+// Sprint 10: Listen for passive mode status updates
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'passive_status_update') {
+    updatePassiveStatus(message.status, message.telemetry, message.errorMessage);
+
+    // If error occurred, disable the toggle
+    if (message.status === 'error') {
+      passiveModeToggleMain.classList.remove('active');
+      setPassiveModeEnabled(false).catch((err) => {
+        console.error('[Passive] Failed to update persisted state:', err);
+      });
+    }
+  }
+});
+
 function updateTranscriptionStatus(status) {
   const { source, device, timingMs, stage } = status;
 
@@ -1116,6 +1263,34 @@ function updateTranscriptionStatus(status) {
 
 // Initialize transcription mode on load
 initTranscriptionMode();
+
+// Sprint 10: Initialize passive mode on load
+async function initPassiveMode() {
+  // Load persisted passive mode state
+  const enabled = await getPassiveModeEnabled();
+  console.log('[Passive] Loaded persisted state:', enabled ? 'enabled' : 'disabled');
+
+  if (enabled) {
+    // Restore passive mode
+    try {
+      await chrome.runtime.sendMessage({ action: 'start_passive_session' });
+      passiveModeToggleMain.classList.add('active');
+      updatePassiveStatus('observing');
+      console.log('[Passive] Restored passive mode from storage');
+    } catch (err) {
+      console.error('[Passive] Failed to restore passive session:', err);
+      // If restoration fails, reset the persisted state
+      await setPassiveModeEnabled(false);
+      updatePassiveStatus('idle');
+    }
+  } else {
+    // Ensure UI is in disabled state
+    passiveModeToggleMain.classList.remove('active');
+    updatePassiveStatus('idle');
+  }
+}
+
+initPassiveMode();
 
 // ============================================================================
 // Sprint 09: Video Library Management

@@ -34,6 +34,11 @@ defmodule Lossy.Agent.Session do
     GenServer.cast(via_tuple(session_id), {:frame_embedding, embedding, timestamp, opts})
   end
 
+  # Sprint 10: Update timestamp for passive mode
+  def set_timestamp(session_id, timestamp) when is_number(timestamp) do
+    GenServer.call(via_tuple(session_id), {:set_timestamp, timestamp})
+  end
+
   # Server Callbacks
 
   @impl true
@@ -120,7 +125,9 @@ defmodule Lossy.Agent.Session do
     # Move to structuring (skip transcription since we already have text)
     structure_note(state, text, source: source, opts: opts)
 
-    {:noreply, %{state | status: :structuring}}
+    # Sprint 10 FIX: Clear audio buffer after processing transcript
+    # This is critical for persistent audio channel in passive mode
+    {:noreply, %{state | status: :idle, audio_buffer: <<>>, audio_duration: 0}}
   end
 
   # Sprint 08: Handle frame embedding from visual intelligence
@@ -143,6 +150,14 @@ defmodule Lossy.Agent.Session do
     }
 
     {:noreply, Map.put(state, :pending_visual_context, visual_context)}
+  end
+
+  # Sprint 10: Handle timestamp update for passive mode
+  @impl true
+  def handle_call({:set_timestamp, timestamp}, _from, state) do
+    Logger.info("[#{state.session_id}] Updating timestamp: #{state.timestamp_seconds} → #{timestamp}")
+    new_state = %{state | timestamp_seconds: timestamp}
+    {:reply, :ok, new_state}
   end
 
   # State Transitions
@@ -230,47 +245,58 @@ defmodule Lossy.Agent.Session do
           "[#{state.session_id}] Note structured (source: #{source}): #{inspect(structured_note)}"
         )
 
-        # Store in database
-        {:ok, note} =
-          Videos.create_note(%{
-            raw_transcript: transcript_text,
-            text: structured_note.text,
-            category: structured_note.category,
-            confidence: structured_note.confidence,
-            status: "ghost",
-            timestamp_seconds: state.timestamp_seconds,
-            video_id: state.video_id,
-            session_id: state.session_id
+        # Sprint 10 FIX: Filter out low-confidence notes (junk/noise)
+        # Confidence 0.0 means GPT-4o-mini determined the transcript is meaningless
+        if structured_note.confidence < 0.3 do
+          Logger.info(
+            "[#{state.session_id}] Skipping low-confidence note (#{structured_note.confidence}): #{transcript_text}"
+          )
+
+          # Don't create the note, just return
+          :ok
+        else
+          # Store in database
+          {:ok, note} =
+            Videos.create_note(%{
+              raw_transcript: transcript_text,
+              text: structured_note.text,
+              category: structured_note.category,
+              confidence: structured_note.confidence,
+              status: "ghost",
+              timestamp_seconds: state.timestamp_seconds,
+              video_id: state.video_id,
+              session_id: state.session_id
+            })
+
+          # Sprint 09: Update video's last_viewed_at and auto-transition status
+          # (queued → in_progress when first note is created)
+          if state.video_id do
+            Videos.touch_video(state.video_id)
+          end
+
+          # Broadcast final result
+          broadcast_event(state.session_id, %{
+            type: :note_created,
+            note: note,
+            source: source
           })
 
-        # Sprint 09: Update video's last_viewed_at and auto-transition status
-        # (queued → in_progress when first note is created)
-        if state.video_id do
-          Videos.touch_video(state.video_id)
-        end
+          # Also broadcast to video topic
+          if state.video_id do
+            Phoenix.PubSub.broadcast(
+              Lossy.PubSub,
+              "video:#{state.video_id}",
+              {:new_note, note}
+            )
+          end
 
-        # Broadcast final result
-        broadcast_event(state.session_id, %{
-          type: :note_created,
-          note: note,
-          source: source
-        })
-
-        # Also broadcast to video topic
-        if state.video_id do
+          # Broadcast to notes:all for LiveView testing
           Phoenix.PubSub.broadcast(
             Lossy.PubSub,
-            "video:#{state.video_id}",
-            {:new_note, note}
+            "notes:all",
+            {:agent_event, %{type: :note_created, note: note}}
           )
         end
-
-        # Broadcast to notes:all for LiveView testing
-        Phoenix.PubSub.broadcast(
-          Lossy.PubSub,
-          "notes:all",
-          {:agent_event, %{type: :note_created, note: note}}
-        )
 
       {:error, reason} ->
         Logger.error("[#{state.session_id}] Note structuring failed: #{inspect(reason)}")

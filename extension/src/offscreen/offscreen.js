@@ -12,6 +12,11 @@
  * - Generates frame embeddings from ImageData
  * - Coordinates with Whisper via GPU job queue
  * - Sends embeddings to backend for note enrichment
+ *
+ * Sprint 10: Passive audio detection (VAD)
+ * - Runs Voice Activity Detection independently from recording
+ * - Emits speech_start/speech_end events to service worker
+ * - Supports energy-based and Silero ONNX detection
  */
 
 import {
@@ -29,6 +34,7 @@ import {
 } from './siglip-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { LOCAL_STT_MODES, LOCAL_VISION_MODES } from '../shared/settings.js';
+import { HybridVAD } from './vad-detector.js';
 
 let mediaRecorder = null;
 let audioContext = null;
@@ -40,6 +46,12 @@ let currentSttMode = LOCAL_STT_MODES.AUTO; // Default mode
 // Sprint 08: Vision state
 let localVisionEnabled = false;
 let currentVisionMode = LOCAL_VISION_MODES.AUTO; // Default mode
+
+// Sprint 10: VAD state
+let vadInstance = null;
+let vadAudioContext = null;
+let vadAudioStream = null;
+let vadEnabled = false;
 
 // Listen for commands from service worker
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -122,6 +134,38 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open for async response
+  }
+
+  // Sprint 10: Start VAD
+  if (message.action === 'start_vad') {
+    startVAD(message.config)
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[Offscreen] Failed to start VAD:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async response
+  }
+
+  // Sprint 10: Stop VAD
+  if (message.action === 'stop_vad') {
+    stopVAD()
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[Offscreen] Failed to stop VAD:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open for async response
+  }
+
+  // Sprint 10: Heartbeat
+  if (message.action === 'heartbeat') {
+    sendResponse({ alive: true, vadEnabled });
+    return true;
   }
 });
 
@@ -493,11 +537,177 @@ async function handleGenerateEmbedding(message) {
   };
 }
 
+/**
+ * Sprint 10: Start Voice Activity Detection
+ *
+ * Creates a separate audio stream for passive monitoring.
+ * VAD runs independently from recording and emits events to service worker.
+ *
+ * @param {Object} config - VAD configuration from service worker
+ */
+async function startVAD(config = {}) {
+  if (vadEnabled) {
+    console.log('[VAD] Already running');
+    return;
+  }
+
+  console.log('[VAD] Starting passive audio detection');
+
+  try {
+    // Request microphone access
+    vadAudioStream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        sampleRate: 16000,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+
+    // Create audio context for VAD
+    vadAudioContext = new AudioContext({ sampleRate: 16000 });
+    const source = vadAudioContext.createMediaStreamSource(vadAudioStream);
+
+    // Initialize HybridVAD with callbacks
+    vadInstance = new HybridVAD({
+      energyThreshold: config?.energyThreshold || 0.02,
+      useSilero: config?.useSilero || false,
+      onSpeechStart: (event) => {
+        console.log('[VAD] Speech detected, energy:', event.energy.toFixed(4));
+        // Send to service worker
+        chrome.runtime.sendMessage({
+          target: 'background',
+          action: 'passive_event',
+          type: 'speech_start',
+          data: {
+            timestamp: event.timestamp,
+            energy: event.energy,
+            source: event.source,
+          },
+        });
+      },
+      onSpeechEnd: (event) => {
+        console.log(
+          '[VAD] Speech ended, duration:',
+          event.duration.toFixed(0),
+          'ms, energy:',
+          event.energy.toFixed(4)
+        );
+        // Send to service worker
+        chrome.runtime.sendMessage({
+          target: 'background',
+          action: 'passive_event',
+          type: 'speech_end',
+          data: {
+            timestamp: event.timestamp,
+            duration: event.duration,
+            energy: event.energy,
+            source: event.source,
+          },
+        });
+      },
+    });
+
+    // Initialize VAD (loads Silero if requested)
+    await vadInstance.init();
+
+    // Create ScriptProcessor to feed audio to VAD
+    const bufferSize = 4096;
+    const processor = vadAudioContext.createScriptProcessor(bufferSize, 1, 1);
+
+    processor.onaudioprocess = (event) => {
+      if (!vadInstance) return;
+
+      // Feed audio to VAD
+      const inputData = event.inputBuffer.getChannelData(0);
+      vadInstance.processAudio(inputData);
+    };
+
+    source.connect(processor);
+    processor.connect(vadAudioContext.destination);
+
+    // Store processor for cleanup
+    vadInstance._audioProcessor = processor;
+    vadInstance._audioSource = source;
+
+    vadEnabled = true;
+    console.log('[VAD] Passive detection active (mode:', vadInstance.getMode(), ')');
+  } catch (error) {
+    console.error('[VAD] Failed to start:', error);
+
+    // Clean up on failure
+    if (vadAudioStream) {
+      vadAudioStream.getTracks().forEach((track) => track.stop());
+      vadAudioStream = null;
+    }
+    if (vadAudioContext) {
+      await vadAudioContext.close();
+      vadAudioContext = null;
+    }
+
+    // Notify service worker of failure
+    chrome.runtime.sendMessage({
+      target: 'background',
+      action: 'passive_event',
+      type: 'error',
+      data: {
+        message: error.message,
+        name: error.name,
+      },
+    });
+
+    throw error;
+  }
+}
+
+/**
+ * Sprint 10: Stop Voice Activity Detection
+ *
+ * Cleans up VAD audio stream and resources.
+ */
+async function stopVAD() {
+  if (!vadEnabled) {
+    console.log('[VAD] Not running');
+    return;
+  }
+
+  console.log('[VAD] Stopping passive detection');
+
+  // Cleanup audio processor
+  if (vadInstance?._audioProcessor) {
+    vadInstance._audioProcessor.disconnect();
+    vadInstance._audioSource.disconnect();
+  }
+
+  // Stop audio stream
+  if (vadAudioStream) {
+    vadAudioStream.getTracks().forEach((track) => track.stop());
+    vadAudioStream = null;
+  }
+
+  // Close audio context
+  if (vadAudioContext) {
+    await vadAudioContext.close();
+    vadAudioContext = null;
+  }
+
+  // Reset VAD instance
+  if (vadInstance) {
+    vadInstance.reset();
+    vadInstance = null;
+  }
+
+  vadEnabled = false;
+  console.log('[VAD] Stopped');
+}
+
 // Handle document visibility changes (for cleanup)
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
-    console.log('[Offscreen] Document hidden, unloading models');
+    console.log('[Offscreen] Document hidden, unloading models and stopping VAD');
     unloadModel(); // Whisper
     unloadVisionModel(); // SigLIP
+    stopVAD(); // VAD cleanup
   }
 });

@@ -14,6 +14,7 @@ const log = createLogger('[GenericAdapter]');
  * This is the catch-all adapter when no platform-specific adapter matches.
  *
  * Known Compatible Platforms:
+ * - Google Drive (drive.google.com) - HTML5 video inside iframe with YouTube-style controls
  * - Dropbox (dropbox.com) - Standard HTML5 video playback
  * - Dropbox Replay (replay.dropbox.com) - Video review platform with timeline markers
  * - Filestage (app.filestage.io) - Video review and approval platform with timeline markers
@@ -22,7 +23,7 @@ const log = createLogger('[GenericAdapter]');
  * - Ziflow (ziflow.io) - Video review and approval platform with timeline markers
  *
  * This adapter uses:
- * - Generic video element detection (VideoDetector)
+ * - Generic video element detection (VideoDetector) - searches iframes automatically
  * - Progress bar pattern matching (ProgressBarFinder)
  * - URL-based video ID generation (VideoIdGenerator)
  *

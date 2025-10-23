@@ -86,7 +86,14 @@ export class VideoLifecycleManager {
    */
   startHealthChecks() {
     this.healthCheckInterval = setInterval(() => {
-      if (!this.videoElement || !document.contains(this.videoElement)) {
+      // Check if video element is still valid
+      // For mock video elements (e.g., YouTube iframe), check isConnected property
+      // For real video elements, use document.contains()
+      const isConnected = this.videoElement?.__isYouTubeIframe
+        ? this.videoElement.isConnected && this.videoElement.iframe && document.contains(this.videoElement.iframe)
+        : this.videoElement && document.contains(this.videoElement);
+
+      if (!this.videoElement || !isConnected) {
         log.info('🏥 Video element replaced, recovering...');
         this.setState('error');
         this.stop();
@@ -94,8 +101,8 @@ export class VideoLifecycleManager {
         return;
       }
 
-      // Check if video is playable
-      if (this.videoElement.error) {
+      // Check if video is playable (skip for mock elements)
+      if (!this.videoElement.__isYouTubeIframe && this.videoElement.error) {
         log.info('🏥 Video error detected, recovering...');
         this.setState('error');
         this.stop();

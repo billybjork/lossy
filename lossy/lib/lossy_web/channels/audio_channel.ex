@@ -158,6 +158,25 @@ defmodule LossyWeb.AudioChannel do
     {:reply, {:ok, %{pong: true}}, socket}
   end
 
+  # Sprint 10: Handle timestamp update for passive mode
+  @impl true
+  def handle_in("set_timestamp", %{"timestamp" => timestamp}, socket)
+      when is_number(timestamp) do
+    session_id = socket.assigns.session_id
+
+    Logger.info("[#{session_id}] Setting timestamp to #{timestamp} seconds")
+
+    # Update the AgentSession's timestamp
+    case Lossy.Agent.Session.set_timestamp(session_id, timestamp) do
+      :ok ->
+        {:reply, :ok, socket}
+
+      {:error, reason} ->
+        Logger.error("[#{session_id}] Failed to set timestamp: #{inspect(reason)}")
+        {:reply, {:error, %{reason: "Failed to set timestamp"}}, socket}
+    end
+  end
+
   # Handle agent session events from PubSub
   @impl true
   def handle_info({:agent_event, %{type: :transcript_ready, text: _text}}, socket) do

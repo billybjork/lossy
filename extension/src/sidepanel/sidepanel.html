@@ -631,6 +631,263 @@
       color: #6b7280;
       font-size: 14px;
     }
+
+    /* Sprint 10: Passive Mode Control (Main UI) */
+    .passive-mode-control {
+      background: #f9fafb;
+      border: 2px solid #e5e7eb;
+      border-radius: 8px;
+      padding: 14px 16px;
+      margin-bottom: 12px;
+    }
+
+    .passive-mode-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .passive-mode-label {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #1f2937;
+    }
+
+    .passive-mode-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .debug-toggle-btn {
+      padding: 6px 12px;
+      font-size: 12px;
+      font-weight: 600;
+      border: 1px solid #d1d5db;
+      background: white;
+      color: #6b7280;
+      cursor: pointer;
+      transition: all 0.2s;
+      border-radius: 6px;
+    }
+
+    .debug-toggle-btn:hover {
+      background: #f9fafb;
+      border-color: #9ca3af;
+      color: #374151;
+    }
+
+    /* Sprint 10: Debug Drawer */
+    .debug-drawer {
+      background: #1f2937;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease;
+    }
+
+    .debug-drawer.visible {
+      max-height: 500px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+
+    .debug-drawer.hidden {
+      max-height: 0;
+      padding: 0 16px;
+      margin-bottom: 0;
+    }
+
+    .debug-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid #374151;
+    }
+
+    .debug-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #9ca3af;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .debug-shortcut {
+      font-size: 11px;
+      color: #6b7280;
+      font-family: 'SF Mono', 'Monaco', monospace;
+    }
+
+    .passive-status {
+      display: inline-flex;
+      align-items: center;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .passive-status.idle {
+      background: #374151;
+      color: #9ca3af;
+    }
+
+    .passive-status.observing {
+      background: #1e40af;
+      color: #93c5fd;
+    }
+
+    .passive-status.recording {
+      background: #dc2626;
+      color: #fca5a5;
+    }
+
+    .passive-status.cooldown {
+      background: #7c3aed;
+      color: #c4b5fd;
+    }
+
+    .passive-status.error {
+      background: #b91c1c;
+      color: #fecaca;
+    }
+
+    .passive-error-message {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #fef2f2;
+      border: 1px solid #fecaca;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #991b1b;
+      line-height: 1.4;
+    }
+
+    .passive-error-message.hidden {
+      display: none;
+    }
+
+    .debug-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .debug-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 12px;
+      background: #374151;
+      border-radius: 6px;
+    }
+
+    .debug-toggle-label {
+      font-size: 13px;
+      color: #e5e7eb;
+      font-weight: 500;
+    }
+
+    .debug-toggle-switch {
+      position: relative;
+      width: 44px;
+      height: 24px;
+      background: #4b5563;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .debug-toggle-switch.active {
+      background: #10b981;
+    }
+
+    .debug-toggle-switch::after {
+      content: '';
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      background: white;
+      border-radius: 50%;
+      top: 3px;
+      left: 3px;
+      transition: left 0.2s;
+    }
+
+    .debug-toggle-switch.active::after {
+      left: 23px;
+    }
+
+    .debug-buttons {
+      display: flex;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .debug-btn {
+      flex: 1;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      border: 1px solid #4b5563;
+      background: #374151;
+      color: #e5e7eb;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .debug-btn:hover:not(:disabled) {
+      background: #4b5563;
+      border-color: #6b7280;
+    }
+
+    .debug-btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .debug-btn.primary {
+      background: #dc2626;
+      border-color: #dc2626;
+      color: white;
+    }
+
+    .debug-btn.primary:hover:not(:disabled) {
+      background: #b91c1c;
+      border-color: #b91c1c;
+    }
+
+    .debug-telemetry {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: #111827;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #9ca3af;
+      font-family: 'SF Mono', 'Monaco', monospace;
+    }
+
+    .debug-telemetry-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 0;
+    }
+
+    .debug-telemetry-value {
+      color: #e5e7eb;
+      font-weight: 600;
+    }
   </style>
 </head>
 <body>
@@ -646,25 +903,69 @@
       <div class="status" id="status">Loading...</div>
       <div class="video-timestamp" id="videoTimestamp">Video: --:--</div>
 
-    <!-- Transcription Status (Sprint 07) -->
-    <div class="transcription-status" id="transcriptionStatus">
-      <div class="transcription-mode">
-        <span id="modeLabel">Transcription:</span>
-        <span class="mode-badge inactive" id="modeBadge">INACTIVE</span>
+      <!-- Sprint 10: Passive Mode Control (Main UI) -->
+      <div class="passive-mode-control">
+        <div class="passive-mode-header">
+          <div class="passive-mode-label">
+            <span>Passive Mode</span>
+            <div class="passive-status idle" id="passiveStatusMain">Idle</div>
+          </div>
+          <div class="passive-mode-actions">
+            <div class="debug-toggle-switch" id="passiveModeToggleMain"></div>
+            <button class="debug-toggle-btn" id="debugToggleBtn">Debug</button>
+          </div>
+        </div>
+        <!-- Sprint 10: Error message (hidden by default) -->
+        <div class="passive-error-message hidden" id="passiveErrorMessage"></div>
       </div>
-      <div class="transcription-timing" id="timingInfo">Ready</div>
-      <div class="mode-toggle">
-        <button id="modeAuto" class="active">Auto</button>
-        <button id="modeForceLocal">Force Local</button>
-        <button id="modeForceCloud">Force Cloud</button>
-      </div>
-    </div>
 
-      <!-- Waveform visualization -->
-      <div class="waveform-container" id="waveformContainer">
-        <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
-        <button id="recordBtn" class="waveform-start-button">🎤 Start Listening</button>
-        <button id="pauseBtn" class="waveform-pause-button">⏸️ Pause</button>
+      <!-- Sprint 10: Debug Drawer (Hidden by Default) -->
+      <div class="debug-drawer hidden" id="debugDrawer">
+        <div class="debug-header">
+          <span class="debug-title">Manual Recording Controls</span>
+          <span class="debug-shortcut">For testing/fallback only</span>
+        </div>
+
+        <!-- Transcription Status (Sprint 07) -->
+        <div class="transcription-status" id="transcriptionStatus">
+          <div class="transcription-mode">
+            <span id="modeLabel">Transcription:</span>
+            <span class="mode-badge inactive" id="modeBadge">INACTIVE</span>
+          </div>
+          <div class="transcription-timing" id="timingInfo">Ready</div>
+          <div class="mode-toggle">
+            <button id="modeAuto" class="active">Auto</button>
+            <button id="modeForceLocal">Force Local</button>
+            <button id="modeForceCloud">Force Cloud</button>
+          </div>
+        </div>
+
+        <!-- Waveform visualization (Manual mode) -->
+        <div class="waveform-container" id="waveformContainer">
+          <canvas id="waveformCanvas" class="waveform-canvas"></canvas>
+          <button id="recordBtn" class="waveform-start-button">🎤 Start Listening</button>
+          <button id="pauseBtn" class="waveform-pause-button">⏸️ Pause</button>
+        </div>
+
+        <!-- Telemetry -->
+        <div class="debug-telemetry">
+          <div class="debug-telemetry-row">
+            <span>Speech Detections:</span>
+            <span class="debug-telemetry-value" id="telemetrySpeech">0</span>
+          </div>
+          <div class="debug-telemetry-row">
+            <span>Ignored (Short):</span>
+            <span class="debug-telemetry-value" id="telemetryShort">0</span>
+          </div>
+          <div class="debug-telemetry-row">
+            <span>Ignored (Cooldown):</span>
+            <span class="debug-telemetry-value" id="telemetryCooldown">0</span>
+          </div>
+          <div class="debug-telemetry-row">
+            <span>Avg Latency:</span>
+            <span class="debug-telemetry-value" id="telemetryLatency">0ms</span>
+          </div>
+        </div>
       </div>
     </div>
 

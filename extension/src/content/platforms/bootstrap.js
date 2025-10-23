@@ -21,6 +21,6 @@ PlatformRegistry.register(AirAdapter);
 PlatformRegistry.register(WipsterAdapter);
 PlatformRegistry.register(IconikAdapter);
 PlatformRegistry.register(TikTokAdapter);
-PlatformRegistry.register(GenericAdapter); // Always last
+PlatformRegistry.register(GenericAdapter); // Always last (includes Google Drive)
 
 console.log('[Bootstrap] Registered', PlatformRegistry.adapters.length, 'platform adapters');

@@ -1,6 +1,7 @@
 // Service Worker for Voice Video Companion
 // Sprint 01: Audio streaming to Phoenix
 // Sprint 03.5: Tab Management
+// Sprint 10: Always-On Passive Audio
 
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
@@ -17,6 +18,56 @@ let messageRouter = null;
 
 // Track side panel state per window: windowId → port
 const openPanels = new Map();
+
+// Sprint 10: Passive session coordinator
+const MIN_DURATION_MS = 500;
+const COOLDOWN_MS = 500;
+
+const passiveSession = {
+  tabId: null,
+  status: 'idle', // 'idle' | 'observing' | 'recording' | 'cooldown' | 'error'
+  vadEnabled: false, // Default OFF per Sprint 10 spec
+  lastStartAt: 0,
+
+  // Sprint 10 Fix: Persistent audio channel for passive mode
+  socket: null,
+  audioChannel: null,
+  sessionId: null,
+
+  // Telemetry (console only)
+  telemetry: {
+    speechDetections: 0,
+    ignoredShort: 0,
+    ignoredCooldown: 0,
+    avgLatencyMs: 0,
+  },
+};
+
+let heartbeatInterval = null;
+
+/**
+ * Sprint 10 Fix: Safe wrapper for sending messages to tabs
+ * Handles extension context invalidation gracefully
+ */
+function sendMessageToTab(tabId, message) {
+  // Check if extension context is valid
+  if (!chrome?.runtime?.id) {
+    console.log('[ServiceWorker] Extension context invalidated, skipping message to tab');
+    return;
+  }
+
+  chrome.tabs.sendMessage(tabId, message).catch((err) => {
+    // Silently handle common errors
+    if (err.message?.includes('Extension context invalidated')) {
+      console.log('[ServiceWorker] Extension context invalidated while sending message');
+    } else if (err.message?.includes('Receiving end does not exist')) {
+      // Content script not loaded yet or tab closed - this is normal
+      console.log('[ServiceWorker] No content script on tab', tabId);
+    } else {
+      console.log('[ServiceWorker] Failed to send message to tab:', err.message);
+    }
+  });
+}
 
 // Initialize TabManager and MessageRouter
 (async () => {
@@ -237,6 +288,38 @@ function extractExternalId(url, platform) {
 
 // Handle messages from extension pages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // Sprint 10: Handle passive VAD events from offscreen
+  if (message.action === 'passive_event' && sender.url?.includes('offscreen.html')) {
+    handlePassiveEvent(message);
+    return false; // No async response needed
+  }
+
+  // Sprint 10: Start passive session (from sidepanel)
+  if (message.action === 'start_passive_session') {
+    startPassiveSession()
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[Passive] Failed to start passive session:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open
+  }
+
+  // Sprint 10: Stop passive session (from sidepanel)
+  if (message.action === 'stop_passive_session') {
+    stopPassiveSession()
+      .then(() => {
+        sendResponse({ success: true });
+      })
+      .catch((error) => {
+        console.error('[Passive] Failed to stop passive session:', error);
+        sendResponse({ success: false, error: error.message });
+      });
+    return true; // Keep channel open
+  }
+
   // Handle messages from sidepanel
   if (message.action === 'toggle_recording' && !sender.url?.includes('offscreen.html')) {
     toggleRecording()
@@ -249,10 +332,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Handle audio chunks from offscreen document
   if (message.action === 'audio_chunk' && sender.url?.includes('offscreen.html')) {
-    if (audioChannel) {
+    // Sprint 10 Fix: Route chunks to correct channel (passive vs manual)
+    const targetChannel = passiveSession.status === 'recording'
+      ? passiveSession.audioChannel
+      : audioChannel;
+
+    if (targetChannel) {
       // Send binary audio to Phoenix as plain Array (not Uint8Array)
       // Phoenix.js doesn't properly serialize Uint8Array, so keep it as Array
-      audioChannel
+      targetChannel
         .push('audio_chunk', { data: message.data })
         .receive('error', (err) => console.error('Failed to send chunk:', err));
     }
@@ -272,8 +360,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'transcript_final' && sender.url?.includes('offscreen.html')) {
     console.log('[Lossy] Local transcript received:', message.text.substring(0, 50) + '...');
 
-    if (audioChannel) {
-      audioChannel
+    // Sprint 10 Fix: Route transcript to correct channel (passive vs manual)
+    const targetChannel = passiveSession.status === 'recording' || passiveSession.status === 'cooldown'
+      ? passiveSession.audioChannel
+      : audioChannel;
+
+    if (targetChannel) {
+      targetChannel
         .push('transcript_final', {
           text: message.text,
           source: message.source,
@@ -318,8 +411,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       `[Lossy] Frame embedding received: ${message.embedding.length} dims at ${message.timestamp}s`
     );
 
-    if (audioChannel) {
-      audioChannel
+    // Sprint 10 Fix: Route embedding to correct channel (passive vs manual)
+    const targetChannel = passiveSession.status === 'recording'
+      ? passiveSession.audioChannel
+      : audioChannel;
+
+    if (targetChannel) {
+      targetChannel
         .push('frame_embedding', {
           embedding: message.embedding,
           timestamp: message.timestamp,
@@ -494,6 +592,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Get current video timestamp (for side panel display)
   if (message.action === 'get_video_timestamp') {
+    // Sprint 10 Fix: Check extension context before proceeding
+    if (!chrome?.runtime?.id) {
+      sendResponse({
+        success: false,
+        timestamp: null,
+        timecodeUnavailable: true,
+        error: 'Extension context invalidated',
+      });
+      return false;
+    }
+
     chrome.tabs.query({ active: true, currentWindow: true }, async (tabs) => {
       if (tabs[0]?.id) {
         try {
@@ -726,8 +835,10 @@ async function toggleRecording() {
   }
 }
 
-async function startRecording() {
-  console.log('Starting recording...');
+async function startRecording(options = {}) {
+  const { pauseVideo = true } = options; // Default true for manual mode
+
+  console.log('[Lossy] Starting recording (pauseVideo:', pauseVideo, ')');
 
   // 1. Get active tab and check recording state
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -749,24 +860,34 @@ async function startRecording() {
     tabManager.startRecording(tab.id);
   }
 
-  // 2. Notify content script to pause video and capture timestamp
+  // 2. Capture timestamp (pause video if manual mode, just get timestamp if passive)
   let capturedTimestamp = null;
 
   if (tab?.id) {
-    try {
-      // Wait for timestamp response with timeout
-      const response = await Promise.race([
-        chrome.tabs.sendMessage(tab.id, { action: 'recording_started' }),
-        new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000)),
-      ]);
+    // Sprint 10 Fix: Check extension context before sending message
+    if (!chrome?.runtime?.id) {
+      console.log('[Lossy] Extension context invalidated, skipping timestamp capture');
+    } else {
+      try {
+        // Wait for timestamp response with timeout
+        const action = pauseVideo ? 'recording_started' : 'get_timestamp';
+        const response = await Promise.race([
+          chrome.tabs.sendMessage(tab.id, { action }),
+          new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000)),
+        ]);
 
-      if (response && response.success && response.timestamp != null) {
-        console.log('[Lossy] Captured timestamp from content script:', response.timestamp);
-        capturedTimestamp = response.timestamp;
-        currentTimestamp = response.timestamp; // Also store globally
+        if (response && response.success && response.timestamp != null) {
+          console.log('[Lossy] Captured timestamp from content script:', response.timestamp);
+          capturedTimestamp = response.timestamp;
+          currentTimestamp = response.timestamp; // Also store globally
+        }
+      } catch (err) {
+        if (err.message?.includes('Extension context invalidated')) {
+          console.log('[Lossy] Extension context invalidated during timestamp capture');
+        } else {
+          console.log('[Lossy] No content script on this page or timeout');
+        }
       }
-    } catch (err) {
-      console.log('[Lossy] No content script on this page or timeout');
     }
   }
 
@@ -819,17 +940,15 @@ async function startRecording() {
 
     // Forward to content script for timeline marker
     if (tab?.id) {
-      chrome.tabs
-        .sendMessage(tab.id, {
-          action: 'note_created',
-          data: {
-            id: payload.id,
-            text: payload.text,
-            category: payload.category,
-            timestamp_seconds: payload.timestamp_seconds,
-          },
-        })
-        .catch((err) => console.log('[Lossy] No content script on this page'));
+      sendMessageToTab(tab.id, {
+        action: 'note_created',
+        data: {
+          id: payload.id,
+          text: payload.text,
+          category: payload.category,
+          timestamp_seconds: payload.timestamp_seconds,
+        },
+      });
     }
 
     // Now we can safely cleanup the channel
@@ -901,9 +1020,7 @@ async function stopRecording() {
   }
 
   // 2. Notify content script to resume video
-  chrome.tabs
-    .sendMessage(recordingTabId, { action: 'recording_stopped' })
-    .catch((err) => console.log('[Lossy] No content script on this page'));
+  sendMessageToTab(recordingTabId, { action: 'recording_stopped' });
 
   // 2. Stop audio capture and attempt local transcription
   let localTranscriptSent = false;
@@ -996,6 +1113,317 @@ async function hasOffscreenDocument() {
     contextTypes: ['OFFSCREEN_DOCUMENT'],
   });
   return contexts.length > 0;
+}
+
+/**
+ * Sprint 10: Handle passive VAD event from offscreen document
+ *
+ * Sprint 10 Fix: Uses persistent audio channel instead of creating new sessions
+ * Applies debounce/min-duration rules and triggers recording for valid speech segments.
+ */
+async function handlePassiveEvent(event) {
+  if (!passiveSession.vadEnabled) {
+    console.log('[Passive] VAD disabled, ignoring event');
+    return;
+  }
+
+  const now = Date.now();
+
+  if (event.type === 'speech_start' && passiveSession.status !== 'recording') {
+    // Ignore if in cooldown
+    if (passiveSession.status === 'cooldown') {
+      passiveSession.telemetry.ignoredCooldown++;
+      console.log('[Passive] Ignored speech during cooldown');
+      return;
+    }
+
+    console.log('[Passive] Speech detected (latency:', event.data?.timestamp || 'unknown', 'ms)');
+    passiveSession.status = 'recording';
+    passiveSession.lastStartAt = now;
+    passiveSession.telemetry.speechDetections++;
+
+    // CRITICAL FIX: Capture video timestamp when speech starts
+    let capturedTimestamp = null;
+    if (passiveSession.tabId) {
+      // Check extension context before sending message
+      if (!chrome?.runtime?.id) {
+        console.log('[Passive] Extension context invalidated, skipping timestamp capture');
+      } else {
+        try {
+          // Get timestamp without pausing video (passive mode)
+          const response = await Promise.race([
+            chrome.tabs.sendMessage(passiveSession.tabId, { action: 'get_timestamp' }),
+            new Promise((resolve) => setTimeout(() => resolve({ success: false }), 1000)),
+          ]);
+
+          if (response && response.success && response.timestamp != null) {
+            capturedTimestamp = response.timestamp;
+            console.log('[Passive] Captured timestamp:', capturedTimestamp);
+          }
+        } catch (err) {
+          if (err.message?.includes('Extension context invalidated')) {
+            console.log('[Passive] Extension context invalidated during timestamp capture');
+          } else {
+            console.log('[Passive] Failed to capture timestamp:', err.message);
+          }
+        }
+      }
+    }
+
+    // Send timestamp to backend via persistent channel
+    if (passiveSession.audioChannel && capturedTimestamp != null) {
+      passiveSession.audioChannel
+        .push('set_timestamp', { timestamp: capturedTimestamp })
+        .receive('ok', () => {
+          console.log('[Passive] Timestamp sent to backend:', capturedTimestamp);
+        })
+        .receive('error', (err) => {
+          console.error('[Passive] Failed to send timestamp:', err);
+        });
+    }
+
+    // Start recording in offscreen (audio flows to persistent channel)
+    try {
+      const sttMode = await getLocalSttMode();
+      await chrome.runtime.sendMessage({
+        target: 'offscreen',
+        action: 'start_recording',
+        sttMode: sttMode,
+      });
+      console.log('[Passive] Recording started successfully');
+    } catch (error) {
+      console.error('[Passive] Failed to start recording:', error);
+      passiveSession.status = 'observing';
+    }
+  } else if (event.type === 'speech_end' && passiveSession.status === 'recording') {
+    const duration = now - passiveSession.lastStartAt;
+
+    if (duration >= MIN_DURATION_MS) {
+      console.log('[Passive] Speech ended, duration:', duration, 'ms');
+
+      // Stop recording in offscreen
+      try {
+        await chrome.runtime.sendMessage({
+          target: 'offscreen',
+          action: 'stop_recording',
+        });
+        console.log('[Passive] Recording stopped successfully');
+      } catch (error) {
+        console.error('[Passive] Failed to stop recording:', error);
+      }
+
+      passiveSession.status = 'cooldown';
+
+      // Log latency
+      const latency = event.data?.timestamp || 0;
+      const count = passiveSession.telemetry.speechDetections;
+      passiveSession.telemetry.avgLatencyMs =
+        (passiveSession.telemetry.avgLatencyMs * (count - 1) + latency) / count;
+
+      // Enter cooldown
+      setTimeout(() => {
+        if (passiveSession.status === 'cooldown') {
+          passiveSession.status = 'observing';
+          console.log('[Passive] Cooldown complete, resuming observation');
+        }
+      }, COOLDOWN_MS);
+    } else {
+      passiveSession.telemetry.ignoredShort++;
+      console.log('[Passive] Ignored short speech segment:', duration, 'ms');
+      passiveSession.status = 'observing';
+    }
+  } else if (event.type === 'error') {
+    console.error('[Passive] VAD error:', event.data);
+    passiveSession.vadEnabled = false;
+    passiveSession.status = 'error';
+
+    // Sprint 10: Notify sidepanel of error
+    chrome.runtime.sendMessage({
+      action: 'passive_status_update',
+      status: 'error',
+      errorMessage: event.data?.message || 'VAD initialization failed',
+    }).catch(() => {
+      // Sidepanel may not be open, ignore
+    });
+
+    stopPassiveSession();
+  }
+}
+
+/**
+ * Sprint 10: Start passive session (VAD + heartbeat + persistent audio channel)
+ *
+ * Sprint 10 Fix: Creates ONE persistent audio channel that stays open
+ * across multiple speech segments (no reconnecting on each segment).
+ */
+async function startPassiveSession() {
+  console.log('[Passive] Starting passive session');
+
+  try {
+    // Get active tab for video context
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!tab?.id) {
+      throw new Error('No active tab');
+    }
+
+    passiveSession.tabId = tab.id;
+
+    // Ensure offscreen document exists
+    await createOffscreenDocument();
+
+    // Sprint 10 Fix: Create persistent socket and audio channel
+    console.log('[Passive] Creating persistent audio channel');
+    passiveSession.sessionId = crypto.randomUUID();
+    passiveSession.socket = new Socket('ws://localhost:4000/socket', {
+      params: {},
+    });
+    passiveSession.socket.connect();
+
+    // Get video context from TabManager
+    const videoContext = tabManager ? tabManager.getVideoContext(tab.id) : null;
+
+    // Create audio channel with video context (timestamp will be added per speech segment)
+    passiveSession.audioChannel = passiveSession.socket.channel(`audio:${passiveSession.sessionId}`, {
+      video_id: videoContext?.videoDbId,
+      passive_mode: true, // Flag to indicate this is a persistent passive session
+    });
+
+    // Listen for note_created events on the persistent channel
+    passiveSession.audioChannel.on('note_created', (payload) => {
+      console.log('[Passive] Received structured note:', payload);
+
+      // Forward to sidepanel
+      if (passiveSession.tabId && messageRouter) {
+        messageRouter.routeToSidePanel(
+          {
+            action: 'transcript',
+            data: {
+              id: payload.id,
+              text: payload.text,
+              category: payload.category,
+              confidence: payload.confidence,
+              timestamp_seconds: payload.timestamp_seconds,
+              raw_transcript: payload.raw_transcript,
+              timestamp: payload.timestamp,
+              video_id: videoContext?.videoDbId,
+            },
+          },
+          passiveSession.tabId
+        );
+      }
+
+      // Forward to content script for timeline marker
+      if (passiveSession.tabId) {
+        sendMessageToTab(passiveSession.tabId, {
+          action: 'note_created',
+          data: {
+            id: payload.id,
+            text: payload.text,
+            category: payload.category,
+            timestamp_seconds: payload.timestamp_seconds,
+          },
+        });
+      }
+    });
+
+    // Join the persistent channel
+    await new Promise((resolve, reject) => {
+      passiveSession.audioChannel
+        .join()
+        .receive('ok', () => {
+          console.log('[Passive] Persistent audio channel joined');
+          resolve();
+        })
+        .receive('error', (err) => {
+          console.error('[Passive] Failed to join audio channel:', err);
+          reject(err);
+        });
+    });
+
+    // Start VAD in offscreen
+    await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'start_vad',
+      config: {
+        energyThreshold: 0.02,
+        sileroConfidence: 0.5,
+        useSilero: false, // Start with energy-only for Sprint 10
+      },
+    });
+
+    // Start heartbeat
+    heartbeatInterval = setInterval(async () => {
+      try {
+        await chrome.runtime.sendMessage({
+          target: 'offscreen',
+          action: 'heartbeat',
+        });
+      } catch (err) {
+        console.error('[Passive] Heartbeat failed:', err);
+        // Note: No automatic restart in Sprint 10
+      }
+    }, 5000);
+
+    passiveSession.vadEnabled = true;
+    passiveSession.status = 'observing';
+    console.log('[Passive] Session active with persistent audio channel');
+  } catch (error) {
+    console.error('[Passive] Failed to start session:', error);
+    // Clean up on error
+    if (passiveSession.audioChannel) {
+      passiveSession.audioChannel.leave();
+      passiveSession.audioChannel = null;
+    }
+    if (passiveSession.socket) {
+      passiveSession.socket.disconnect();
+      passiveSession.socket = null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Sprint 10: Stop passive session
+ *
+ * Sprint 10 Fix: Tears down persistent audio channel and cleans up resources.
+ */
+async function stopPassiveSession() {
+  console.log('[Passive] Stopping passive session');
+
+  // Clear heartbeat
+  if (heartbeatInterval) {
+    clearInterval(heartbeatInterval);
+    heartbeatInterval = null;
+  }
+
+  // Stop VAD in offscreen
+  try {
+    await chrome.runtime.sendMessage({
+      target: 'offscreen',
+      action: 'stop_vad',
+    });
+  } catch (err) {
+    console.log('[Passive] Could not stop VAD (offscreen may be gone):', err.message);
+  }
+
+  // Sprint 10 Fix: Tear down persistent audio channel
+  if (passiveSession.audioChannel) {
+    console.log('[Passive] Leaving persistent audio channel');
+    passiveSession.audioChannel.leave();
+    passiveSession.audioChannel = null;
+  }
+
+  if (passiveSession.socket) {
+    console.log('[Passive] Disconnecting persistent socket');
+    passiveSession.socket.disconnect();
+    passiveSession.socket = null;
+  }
+
+  passiveSession.vadEnabled = false;
+  passiveSession.status = 'idle';
+  passiveSession.tabId = null;
+  passiveSession.sessionId = null;
+  console.log('[Passive] Session stopped and cleaned up');
 }
 
 /**
@@ -1294,6 +1722,11 @@ async function handleTriggerVideoDetection() {
 async function ensureContentScriptInjected(tabId) {
   console.log('[ServiceWorker] 🔍 Ensuring content script is injected in tab:', tabId);
 
+  // Sprint 10 Fix: Check extension context
+  if (!chrome?.runtime?.id) {
+    throw new Error('Extension context invalidated');
+  }
+
   // Try to ping the content script first
   try {
     const response = await Promise.race([
@@ -1306,6 +1739,9 @@ async function ensureContentScriptInjected(tabId) {
       return; // Already injected
     }
   } catch (err) {
+    if (err.message?.includes('Extension context invalidated')) {
+      throw err;
+    }
     console.log('[ServiceWorker] Content script not present, injecting...');
   }
 
@@ -1410,6 +1846,12 @@ async function handleRefineNoteWithVision(noteId, timestamp) {
 
   // Request frame capture from content script
   console.log('[ServiceWorker] Requesting frame capture from content script...');
+
+  // Sprint 10 Fix: Check extension context
+  if (!chrome?.runtime?.id) {
+    throw new Error('Extension context invalidated');
+  }
+
   const captureResponse = await chrome.tabs.sendMessage(tab.id, {
     action: 'capture_frame',
     timestamp: timestamp,

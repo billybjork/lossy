@@ -510,6 +510,22 @@ function listenForEvents() {
       return true; // Keep channel open for async response
     }
 
+    // Sprint 10: Get timestamp without pausing (for passive mode)
+    if (message.action === 'get_timestamp') {
+      videoController
+        .getCurrentTime()
+        .then((timestamp) => {
+          console.log('[Lossy] Timestamp requested (passive mode):', timestamp);
+          // DON'T pause - passive mode keeps video playing
+          sendResponse({ success: true, timestamp: timestamp });
+        })
+        .catch((err) => {
+          console.error('[Lossy] Error getting timestamp:', err);
+          sendResponse({ success: false, error: err.message });
+        });
+      return true; // Keep channel open for async response
+    }
+
     if (message.action === 'recording_stopped') {
       console.log('[Lossy] Recording stopped');
 
