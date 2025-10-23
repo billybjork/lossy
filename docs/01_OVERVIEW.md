@@ -12,6 +12,7 @@ Build a **voice-first browser extension** that captures natural speech while rev
 ### The Problem
 
 Video editors and reviewers waste time:
+
 - Typing detailed feedback with precise timestamps
 - Context-switching between video player and comment interface
 - Losing flow state to write clear, actionable notes
@@ -20,8 +21,9 @@ Video editors and reviewers waste time:
 ### The Solution
 
 Speak naturally while watching. The system:
+
 1. **Captures** your voice with sub-second visual feedback (emoji chips)
-2. **Transcribes** speech to text locally (WASM-first, private by default)
+2. **Transcribes** speech to text locally (WebGPU/WASM, 100% private)
 3. **Structures** raw transcripts into clear, actionable notes (LLM)
 4. **Anchors** feedback to exact video timestamps and frames
 5. **Posts** automatically to the video platform (Browserbase automation)
@@ -32,57 +34,60 @@ Speak naturally while watching. The system:
 
 ### Frontend: Browser Extension (MV3)
 
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| **Extension Framework** | Chrome MV3 | Side Panel API, modern security |
-| **UI - Popup** | Phoenix LiveView | Real-time agent progress streaming |
-| **UI - Side Panel** | Phoenix LiveView | Persistent note list with live updates |
-| **UI - Overlays** | Shadow DOM + Vanilla JS | On-video ghost comments, emoji chips |
-| **Voice Capture** | MediaRecorder + VAD | @ricky0123/vad-web for speech detection |
-| **Local STT** | Transformers.js (Whisper) | WebGPU → WASM (local-only, Sprint 11) |
-| **Emoji Chips** (Planned) | Text classification | Keyword/embedding-based on transcription |
-| **Bundler** | Webpack 5 | Local bundling of phoenix.js |
+| Component                 | Technology                | Why                                      |
+| ------------------------- | ------------------------- | ---------------------------------------- |
+| **Extension Framework**   | Chrome MV3                | Side Panel API, modern security          |
+| **UI - Popup**            | Phoenix LiveView          | Real-time agent progress streaming       |
+| **UI - Side Panel**       | Phoenix LiveView          | Persistent note list with live updates   |
+| **UI - Overlays**         | Shadow DOM + Vanilla JS   | On-video ghost comments, emoji chips     |
+| **Voice Capture**         | MediaRecorder + VAD       | @ricky0123/vad-web for speech detection  |
+| **Local STT**             | Transformers.js (Whisper) | WebGPU → WASM (local-only)               |
+| **Emoji Chips** (Planned) | Text classification       | Keyword/embedding-based on transcription |
+| **Bundler**               | Webpack 5                 | Local bundling of phoenix.js             |
 
 **Technology Fallback Hierarchy:**
 
-*Transcription (STT):*
+_Transcription (STT):_
+
 1. **Best**: Local WASM Whisper with WebGPU acceleration (Sprint 11: local-only)
 2. **Fallback**: Local WASM Whisper with CPU (ONNX Runtime auto-selects)
 3. **Privacy**: Transcription always happens locally (audio may be uploaded for playback/review)
 
-*Emoji Chips (Text-based, Planned):*
+_Emoji Chips (Text-based, Planned):_
+
 1. **Best**: Keyword-based classification (<10ms, simple)
 2. **Good**: Lightweight text embeddings (~50ms, more accurate)
 3. **Fallback**: Skip emoji chips (not critical for core functionality)
 4. **Decision**: Based on transcription fragment availability
 
-*Memory Considerations:*
+_Memory Considerations:_
+
 - Local Whisper: ~300MB model + ~200MB runtime
 - Emoji chips: No additional models needed (uses transcription text)
 
 ### Backend: Phoenix/Elixir
 
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| **Web Framework** | Phoenix 1.7 | LiveView, Channels, PubSub |
-| **Real-time** | Phoenix Channels | Binary WebSocket for audio streaming |
-| **UI Framework** | Phoenix LiveView | Streaming timelines, reactive updates |
-| **Agent State** | GenServer + PubSub | Supervised, observable sessions |
-| **Database** | PostgreSQL | Structured storage, vector embeddings |
-| **Background Jobs** | Oban | Note posting queue |
-| **LLM** | OpenAI GPT-4o-mini | Note structuring, intent extraction |
-| **Optional Local** | Rustler NIFs | whisper.cpp/llama.cpp acceleration |
+| Component           | Technology         | Why                                   |
+| ------------------- | ------------------ | ------------------------------------- |
+| **Web Framework**   | Phoenix 1.7        | LiveView, Channels, PubSub            |
+| **Real-time**       | Phoenix Channels   | Binary WebSocket for audio streaming  |
+| **UI Framework**    | Phoenix LiveView   | Streaming timelines, reactive updates |
+| **Agent State**     | GenServer + PubSub | Supervised, observable sessions       |
+| **Database**        | PostgreSQL         | Structured storage, vector embeddings |
+| **Background Jobs** | Oban               | Note posting queue                    |
+| **LLM**             | OpenAI GPT-4o-mini | Note structuring, intent extraction   |
+| **Optional Local**  | Rustler NIFs       | whisper.cpp/llama.cpp acceleration    |
 
 ### Computer Use: Local Browser Agent
 
-| Component | Technology | Why |
-|-----------|-----------|-----|
-| **Primary** | Local Chrome (dedicated profile) | Already authenticated, zero latency |
-| **Automation** | Playwright via CDP | Proven reliability, platform-specific selectors |
-| **AI Fallback** | Gemini 2.5 Computer Use API | Vision-based navigation for complex/unknown UIs |
-| **Auth Management** | Persistent Chrome profile | Cookies/localStorage persist across sessions |
-| **Fallback** | Browserbase (optional) | Cloud posting when machine offline |
-| **Platform Adapters** | Existing video/timeline finders | Reusable for selector discovery |
+| Component             | Technology                       | Why                                             |
+| --------------------- | -------------------------------- | ----------------------------------------------- |
+| **Primary**           | Local Chrome (dedicated profile) | Already authenticated, zero latency             |
+| **Automation**        | Playwright via CDP               | Proven reliability, platform-specific selectors |
+| **AI Fallback**       | Gemini 2.5 Computer Use API      | Vision-based navigation for complex/unknown UIs |
+| **Auth Management**   | Persistent Chrome profile        | Cookies/localStorage persist across sessions    |
+| **Fallback**          | Browserbase (optional)           | Cloud posting when machine offline              |
+| **Platform Adapters** | Existing video/timeline finders  | Reusable for selector discovery                 |
 
 ---
 
@@ -91,17 +96,20 @@ Speak naturally while watching. The system:
 ### MVP (Milestone 1)
 
 1. **Voice Capture & Transcription**
+
    - Push-to-talk in popup/side panel
    - Local Whisper transcription (WASM)
    - Real-time transcript display
 
 2. **Ghost Comments**
+
    - LLM structures raw speech into clear notes
    - Pinned to video timestamp
    - "Scratch that" to cancel
    - Confidence-based opacity
 
 3. **Side Panel Note List**
+
    - LiveView streaming updates
    - Filter by video/category/status
    - Click to seek video timestamp
@@ -127,13 +135,13 @@ Speak naturally while watching. The system:
 
 Based on blueprint and research:
 
-| Metric | Target | Notes |
-|--------|--------|-------|
-| **Listening Indicator** | ≤100ms | Video pause + anchor display |
-| **Emoji Chips (Text)** | <10ms | Keyword-based classification from transcript |
-| **Ghost Comment** | 0.8-1.3s | Local transcription + LLM structuring |
-| **Note Posting** | 5-10s | Local browser automation |
-| **Frame Capture** | 20-60ms | Grab → scale → WebP encode |
+| Metric                  | Target   | Notes                                        |
+| ----------------------- | -------- | -------------------------------------------- |
+| **Listening Indicator** | ≤100ms   | Video pause + anchor display                 |
+| **Emoji Chips (Text)**  | <10ms    | Keyword-based classification from transcript |
+| **Ghost Comment**       | 0.8-1.3s | Local transcription + LLM structuring        |
+| **Note Posting**        | 5-10s    | Local browser automation                     |
+| **Frame Capture**       | 20-60ms  | Grab → scale → WebP encode                   |
 
 ---
 
@@ -251,7 +259,7 @@ lossy/
 From research and prototype:
 
 1. **Local-first computer use** - User's authenticated browser, zero latency
-2. **WASM-first transcription** - Privacy + speed (vs. cloud STT)
+2. **Local-only transcription** - WebGPU-first (70%), WASM fallback (30%), 100% private
 3. **LiveView for extension UI** - Real-time streaming perfect for agent progress
 4. **Chained architecture** - OpenAI guidance, easier than realtime voice
 5. **Persistent Chrome profile** - Auth persists, no credential management
