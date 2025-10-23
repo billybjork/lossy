@@ -1,20 +1,23 @@
 // Extension Side Panel JavaScript (extension/src/sidepanel/)
 //
 // Purpose: Client-side UI for extension side panel
-// - Currently: Vanilla JS communicating with service worker
-// - Future: Will bundle phoenix.js and connect to LiveView backend via WebSocket
 //
-// Architecture:
-// - Runs in extension context (chrome-extension:// origin)
-// - Communicates with service worker (chrome.runtime.sendMessage)
-// - Will connect to Phoenix backend at wss://... for LiveView streaming
+// Architecture (Sprint 11.5):
+// - Service Worker: Audio streaming via AudioChannel (chrome.runtime + Phoenix Channel)
+// - Sidepanel: Notes subscription via NotesChannel (Phoenix Channel direct)
+// - Chrome APIs: Tab management, recording controls, storage
 //
-// See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
+// Data Flow:
+// - Audio: Mic → Service Worker → AudioChannel → Phoenix → AgentSession
+// - Notes: AgentSession → PubSub → NotesChannel → Sidepanel (this file)
 
 import {
   getPassiveModeEnabled,
   setPassiveModeEnabled,
 } from '../shared/settings.js';
+
+// Sprint 11.5: Phoenix Socket for direct notes subscription
+import { Socket } from 'phoenix';
 
 console.log('Side panel loaded');
 
@@ -28,6 +31,10 @@ let pendingTabChange = null; // Store pending tab change data
 const notesCache = new Map(); // Persist notes per video to avoid flicker on reloads
 const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
+
+// Sprint 11.5: Phoenix connection for real-time notes
+let notesSocket = null;
+let notesChannel = null;
 
 const recordBtn = document.getElementById('recordBtn');
 const pauseBtn = document.getElementById('pauseBtn');
@@ -596,6 +603,9 @@ async function handleTabChanged(tabId, videoContext) {
       hadCachedNotes = !!(cachedNotes && cachedNotes.length > 0);
     }
 
+    // Sprint 11.5: Subscribe to Phoenix Channel for this video's notes
+    subscribeToVideoNotes(newVideoDbId);
+
     // Request current timestamp for the newly active tab
     // This also serves as a liveness check for the content script
     console.log('[SidePanel] 🔄 Requesting timestamp for new active tab');
@@ -724,16 +734,9 @@ async function handleTabChanged(tabId, videoContext) {
               if (videoDbId) {
                 displayedVideoDbId = videoDbId;
                 loadingSessionId++;
-                const thisSessionId = loadingSessionId;
 
-                chrome.runtime
-                  .sendMessage({
-                    action: 'request_notes_for_sidepanel',
-                    videoDbId: videoDbId,
-                    tabId: tabId,
-                    sessionId: thisSessionId,
-                  })
-                  .catch((err) => console.log('[SidePanel] Failed to load notes:', err));
+                // Sprint 11.5: Subscribe to Phoenix Channel for notes (replaces service worker relay)
+                subscribeToVideoNotes(videoDbId);
               }
             } else {
               console.log('[SidePanel] No video detected on this tab');
@@ -1253,6 +1256,111 @@ async function initPassiveMode() {
 }
 
 initPassiveMode();
+
+// ============================================================================
+// Sprint 11.5: Phoenix Socket for Real-Time Notes
+// ============================================================================
+
+/**
+ * Initialize Phoenix Socket connection for notes subscription.
+ * This runs independently from the service worker's AudioChannel connection.
+ */
+function initNotesSocket() {
+  console.log('[Notes] Initializing Phoenix Socket...');
+
+  notesSocket = new Socket('ws://localhost:4000/socket', {
+    params: {}, // TODO: Add auth token when auth is implemented (Sprint TBD)
+  });
+
+  notesSocket.onOpen(() => {
+    console.log('[Notes] ✅ Connected to Phoenix');
+  });
+
+  notesSocket.onError((error) => {
+    console.error('[Notes] ❌ Socket error:', error);
+  });
+
+  notesSocket.onClose(() => {
+    console.log('[Notes] Socket closed, will auto-reconnect');
+  });
+
+  notesSocket.connect();
+}
+
+/**
+ * Subscribe to notes for a specific video.
+ * Automatically leaves previous channel before joining new one.
+ */
+function subscribeToVideoNotes(videoDbId) {
+  if (!videoDbId) {
+    console.log('[Notes] No video ID, skipping subscription');
+    return;
+  }
+
+  if (!notesSocket || !notesSocket.isConnected()) {
+    console.warn('[Notes] Socket not connected yet, skipping subscription');
+    return;
+  }
+
+  // Leave old channel if exists
+  if (notesChannel) {
+    console.log('[Notes] Leaving previous channel');
+    notesChannel.leave();
+    notesChannel = null;
+  }
+
+  // Join new video's channel
+  console.log(`[Notes] Joining channel for video: ${videoDbId}`);
+  notesChannel = notesSocket.channel(`notes:video:${videoDbId}`, {});
+
+  // Listen for real-time note_created events
+  notesChannel.on('note_created', (note) => {
+    console.log('[Notes] 📝 Received real-time note:', note);
+
+    // Only append if we're still viewing this video
+    if (displayedVideoDbId === note.video_id) {
+      appendNote({
+        action: 'transcript',
+        data: note,
+      });
+    } else {
+      console.log('[Notes] Ignoring note for different video:', note.video_id);
+    }
+  });
+
+  // Join channel and load existing notes
+  notesChannel
+    .join()
+    .receive('ok', () => {
+      console.log(`[Notes] ✅ Joined channel for video: ${videoDbId}`);
+
+      // Load existing notes from backend
+      notesChannel
+        .push('get_notes', { video_id: videoDbId })
+        .receive('ok', ({ notes }) => {
+          console.log(`[Notes] 📚 Loaded ${notes.length} existing notes`);
+
+          if (notes.length > 0) {
+            // Update cache
+            notesCache.set(videoDbId, notes);
+
+            // Render notes if this is still the current video
+            if (displayedVideoDbId === videoDbId) {
+              renderNotesFromCache(videoDbId);
+            }
+          }
+        })
+        .receive('error', (err) => {
+          console.error('[Notes] ❌ Failed to get notes:', err);
+        });
+    })
+    .receive('error', (err) => {
+      console.error('[Notes] ❌ Failed to join channel:', err);
+    });
+}
+
+// Initialize Phoenix Socket on load
+initNotesSocket();
 
 // ============================================================================
 // Sprint 09: Video Library Management

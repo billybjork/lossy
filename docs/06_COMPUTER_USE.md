@@ -1,8 +1,5 @@
 # Computer Use Integration - Local-First Browser Agents
 
-**Last Updated:** 2025-10-22
-**Status:** Pre-Implementation
-
 ---
 
 ## 🎯 Overview

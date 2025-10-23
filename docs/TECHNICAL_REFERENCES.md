@@ -1,7 +1,5 @@
 # Technical References
 
-**Last Updated:** 2025-10-20
-
 ---
 
 ## Overview

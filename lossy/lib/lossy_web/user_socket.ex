@@ -4,6 +4,7 @@ defmodule LossyWeb.UserSocket do
   # Channels
   channel "audio:*", LossyWeb.AudioChannel
   channel "video:*", LossyWeb.VideoChannel
+  channel "notes:*", LossyWeb.NotesChannel
 
   @impl true
   def connect(_params, socket, _connect_info) do

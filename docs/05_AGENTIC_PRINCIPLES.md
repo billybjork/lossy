@@ -1,6 +1,5 @@
 # Agentic Principles & Architecture
 
-**Last Updated:** 2025-10-22
 **Status:** Design Document - Guiding Vision
 
 ---

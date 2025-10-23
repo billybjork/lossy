@@ -892,29 +892,11 @@ async function startRecording(options = {}) {
     timestamp: capturedTimestamp,
   });
 
-  // Listen for structured note events (we only send the final structured note, not raw transcript)
+  // Listen for structured note events
+  // Sprint 11.5: Sidepanel now subscribes directly to NotesChannel via Phoenix Socket
+  // Service worker only forwards to content script for timeline markers
   audioChannel.on('note_created', (payload) => {
-    console.log('Received structured note:', payload);
-
-    // Forward to sidepanel with video context (only if panel is viewing this tab)
-    if (tab?.id && messageRouter) {
-      messageRouter.routeToSidePanel(
-        {
-          action: 'transcript',
-          data: {
-            id: payload.id,
-            text: payload.text,
-            category: payload.category,
-            confidence: payload.confidence,
-            timestamp_seconds: payload.timestamp_seconds,
-            raw_transcript: payload.raw_transcript,
-            timestamp: payload.timestamp,
-            video_id: videoContext?.videoDbId, // Add video context
-          },
-        },
-        tab.id
-      );
-    }
+    console.log('[ServiceWorker] Received structured note:', payload.id);
 
     // Forward to content script for timeline marker
     if (tab?.id) {

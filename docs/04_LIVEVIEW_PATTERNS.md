@@ -1,7 +1,5 @@
 # Phoenix LiveView in Browser Extensions
 
-**Last Updated:** 2025-10-14
-
 ---
 
 ## Overview
