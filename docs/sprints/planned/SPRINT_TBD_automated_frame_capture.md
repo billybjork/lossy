@@ -1,15 +1,18 @@
-# Sprint 11: Automated Frame Capture Strategy
+# Sprint TBD: Automated Frame Capture Strategy
 
-**Status:** 📋 Planned
-**Priority:** High
+**Status:** 🔄 Deferred (was Sprint 11, now TBD)
+**Priority:** Medium (deferred in favor of Sprint 11: Passive Mode Polish)
 **Owner:** TBD
 **Progress:** 0%
 
 **Related Sprints**
 - ✅ Sprint 08 – Visual Intelligence (manual "Refine with Vision" button)
 - ✅ Sprint 10 – Always-On Foundations (passive audio VAD)
+- 🔜 Sprint 11 – Passive Mode Polish (Silero VAD)
 - 🔜 Sprint 12 – Continuous Session Persistence
 - 🔜 Sprint 13+ – Diffusion Refinement & Cost Governance
+
+**Note:** This sprint has been deferred to prioritize improving passive mode quality with Silero VAD. Frame capture will be revisited after continuous session persistence is established.
 
 ---
 

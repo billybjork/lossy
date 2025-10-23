@@ -1,4 +1,4 @@
-# Sprint 13: Continuous Session Persistence
+# Sprint 12: Continuous Session Persistence
 
 **Status:** 📋 Planned
 **Priority:** High
@@ -7,9 +7,8 @@
 
 **Related Sprints**
 - ✅ Sprint 10 – Always-On Foundations (passive audio VAD)
-- 🔜 Sprint 11 – Automated Frame Capture
-- 🔜 Sprint 12 – Passive Mode Polish
-- 🔜 Sprint 14+ – Diffusion Refinement & Cost Governance
+- 🔜 Sprint 11 – Passive Mode Polish (Silero VAD)
+- 🔜 Sprint 13+ – Automated Frame Capture & Diffusion Refinement
 
 ---
 
