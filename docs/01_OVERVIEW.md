@@ -31,16 +31,16 @@ Speak naturally while watching. The system:
 
 ### Frontend: Browser Extension (MV3)
 
-| Component                 | Technology                | Why                                      |
-| ------------------------- | ------------------------- | ---------------------------------------- |
-| **Extension Framework**   | Chrome MV3                | Side Panel API, modern security          |
-| **UI - Popup**            | Phoenix LiveView          | Real-time agent progress streaming       |
-| **UI - Side Panel**       | Phoenix LiveView          | Persistent note list with live updates   |
-| **UI - Overlays**         | Shadow DOM + Vanilla JS   | On-video ghost comments, emoji chips     |
-| **Voice Capture**         | MediaRecorder + VAD       | Silero VAD (onnxruntime-web, Sprint 12)  |
-| **Local STT**             | Transformers.js (Whisper) | WebGPU → WASM (local-only)               |
-| **Emoji Chips** (Planned) | Text classification       | Keyword/embedding-based on transcription |
-| **Bundler**               | Webpack 5                 | Local bundling of phoenix.js             |
+| Component                 | Technology                    | Why                                      |
+| ------------------------- | ----------------------------- | ---------------------------------------- |
+| **Extension Framework**   | Chrome MV3                    | Side Panel API, modern security          |
+| **UI - Popup**            | Vanilla JS                    | Simple controls, Chrome extension APIs   |
+| **UI - Side Panel**       | Vanilla JS + Phoenix Channels | Real-time notes via direct WebSocket subscription |
+| **UI - Overlays**         | Shadow DOM + Vanilla JS       | On-video ghost comments, emoji chips     |
+| **Voice Capture**         | MediaRecorder + VAD           | Silero VAD (onnxruntime-web, Sprint 12)  |
+| **Local STT**             | Transformers.js (Whisper)     | WebGPU → WASM (local-only)               |
+| **Emoji Chips** (Planned) | Text classification           | Keyword/embedding-based on transcription |
+| **Bundler**               | Webpack 5                     | Bundles phoenix.js for WebSocket client  |
 
 **Technology Fallback Hierarchy:**
 
@@ -66,9 +66,9 @@ _Memory Considerations:_
 
 | Component           | Technology         | Why                                   |
 | ------------------- | ------------------ | ------------------------------------- |
-| **Web Framework**   | Phoenix 1.7        | LiveView, Channels, PubSub            |
-| **Real-time**       | Phoenix Channels   | Binary WebSocket for audio streaming  |
-| **UI Framework**    | Phoenix LiveView   | Streaming timelines, reactive updates |
+| **Web Framework**   | Phoenix 1.7        | Channels, PubSub, LiveView (test pages) |
+| **Real-time**       | Phoenix Channels   | WebSocket for audio streaming + notes |
+| **UI Framework**    | Phoenix LiveView   | Test/debug pages (not extension UI)  |
 | **Agent State**     | GenServer + PubSub | Supervised, observable sessions       |
 | **Database**        | PostgreSQL         | Structured storage, vector embeddings |
 | **Background Jobs** | Oban               | Note posting queue                    |
@@ -229,7 +229,7 @@ From research and prototype:
 
 ---
 
-## ⚡ Quick Start (After Implementation)
+## ⚡ Quick Start
 
 ```bash
 # Backend
