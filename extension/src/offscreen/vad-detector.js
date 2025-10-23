@@ -1,5 +1,42 @@
 import * as ort from 'onnxruntime-web';
+import { VAD_CONFIG } from '../shared/shared-constants.js';
 
+/**
+ * Silero VAD Detector (V5)
+ *
+ * Voice Activity Detection using Silero V5 model via ONNX Runtime WebAssembly.
+ *
+ * Configuration:
+ * All tunable parameters are defined in VAD_CONFIG (shared-constants.js).
+ * For tuning guidance and troubleshooting, see: docs/VAD_TUNING_GUIDE.md
+ *
+ * State Machine Flow:
+ *
+ * SILENCE (initial state)
+ *   │
+ *   ├─ confidence >= START_THRESHOLD ──► SPEECH
+ *   │
+ * SPEECH
+ *   │
+ *   ├─ confidence <= END_THRESHOLD ──► MAYBE_SILENCE
+ *   ├─ duration >= MAX_SPEECH_DURATION_MS ──► Force END (safety guard)
+ *   ├─ no high confidence for STUCK_STATE_TIMEOUT_MS ──► Force END (stuck state)
+ *   │
+ * MAYBE_SILENCE
+ *   │
+ *   ├─ confidence >= START_THRESHOLD ──► SPEECH (revert)
+ *   ├─ confidence in middle zone (early period) ──► SPEECH (revert)
+ *   ├─ silence >= MIN_SILENCE_DURATION_MS ──► SILENCE (natural end)
+ *   └─ silence >= MIN_SILENCE * EXTENDED_SILENCE_MULTIPLIER ──► Force END
+ *
+ * Key Behaviors:
+ * - Middle zone reversion: Prevents premature speech_end during brief pauses
+ * - Stuck state guard: Forces end if no high confidence for 2s
+ * - Extended silence multiplier: Safety fallback for edge cases
+ * - RNN state persistence: State tensor persists across utterances for better accuracy
+ */
+
+// ONNX model constants (fixed, not tunable)
 const SAMPLE_RATE = 16000;
 const FRAME_SIZE = 512;
 const HOP_SIZE = 160; // 10ms @ 16kHz
@@ -7,12 +44,7 @@ const HOP_MS = (HOP_SIZE / SAMPLE_RATE) * 1000;
 const STATE_SIZE = 2 * 1 * 128;
 const STATE_SHAPE = [2, 1, 128];
 
-const MIN_SPEECH_DURATION_MS = 250; // Reduced from 500ms - faster reaction
-const MIN_SILENCE_DURATION_MS = 2000; // Increased to 2s - more tolerance for pauses
-const MAX_SPEECH_DURATION_MS = 30000; // 30 seconds absolute max
-const START_THRESHOLD = 0.45; // Lowered from 0.5 - more sensitive to speech start
-const END_THRESHOLD = 0.40; // Raised from 0.35 - tighter middle zone, cleaner end detection
-const MIDDLE_ZONE_REVERT_THRESHOLD = 0.4; // Only revert in first 40% of silence period (800ms)
+// State machine states
 const STATE_SILENCE = 'silence';
 const STATE_SPEECH = 'speech';
 const STATE_MAYBE_SILENCE = 'maybe_silence';
@@ -27,10 +59,11 @@ export class SileroVAD {
     this.onMetrics = options.onMetrics || (() => {});
     this.onError = options.onError || (() => {});
 
-    this.startThreshold = options.startThreshold || START_THRESHOLD;
-    this.endThreshold = options.endThreshold || END_THRESHOLD;
-    this.minSpeechDurationMs = options.minSpeechDurationMs || MIN_SPEECH_DURATION_MS;
-    this.minSilenceDurationMs = options.minSilenceDurationMs || MIN_SILENCE_DURATION_MS;
+    // Use VAD_CONFIG defaults (can be overridden via options)
+    this.startThreshold = options.startThreshold || VAD_CONFIG.START_THRESHOLD;
+    this.endThreshold = options.endThreshold || VAD_CONFIG.END_THRESHOLD;
+    this.minSpeechDurationMs = options.minSpeechDurationMs || VAD_CONFIG.MIN_SPEECH_DURATION_MS;
+    this.minSilenceDurationMs = options.minSilenceDurationMs || VAD_CONFIG.MIN_SILENCE_DURATION_MS;
 
     this.session = null;
     this.stateTensor = null;
@@ -204,7 +237,7 @@ export class SileroVAD {
       this.silenceDurationMs = 0;
 
       // Absolute max duration guard
-      if (this.speechDurationMs >= MAX_SPEECH_DURATION_MS) {
+      if (this.speechDurationMs >= VAD_CONFIG.MAX_SPEECH_DURATION_MS) {
         console.warn('[VAD] Forcing speech_end after max duration:', this.speechDurationMs);
         this.onSpeechEnd({
           confidence,
@@ -256,7 +289,7 @@ export class SileroVAD {
     // MIDDLE ZONE: 0.40 < confidence < 0.45
     // Less aggressive reversion: only reset if we're early in the silence period
     if (this.state === STATE_MAYBE_SILENCE) {
-      const silenceRevertThreshold = this.minSilenceDurationMs * MIDDLE_ZONE_REVERT_THRESHOLD;
+      const silenceRevertThreshold = this.minSilenceDurationMs * VAD_CONFIG.MIDDLE_ZONE_REVERT_THRESHOLD;
 
       // Only revert to SPEECH if we haven't accumulated much silence yet
       if (this.silenceDurationMs < silenceRevertThreshold) {
@@ -284,10 +317,10 @@ export class SileroVAD {
     if (this.state === STATE_SPEECH) {
       this.speechDurationMs += HOP_MS;
 
-      // Force end if no high confidence for 2 seconds (stuck state guard)
+      // Force end if no high confidence for STUCK_STATE_TIMEOUT_MS (stuck state guard)
       if (
         this.lastHighConfidenceTimestamp !== null &&
-        now - this.lastHighConfidenceTimestamp >= 2000
+        now - this.lastHighConfidenceTimestamp >= VAD_CONFIG.STUCK_STATE_TIMEOUT_MS
       ) {
         console.warn('[VAD] Forcing speech_end: no high confidence for 2s (stuck state)');
         this.onSpeechEnd({
@@ -306,7 +339,7 @@ export class SileroVAD {
     if (
       (this.state === STATE_SPEECH || this.state === STATE_MAYBE_SILENCE) &&
       this.speechStartTimestamp !== null &&
-      this.silenceDurationMs >= this.minSilenceDurationMs * 3
+      this.silenceDurationMs >= this.minSilenceDurationMs * VAD_CONFIG.EXTENDED_SILENCE_MULTIPLIER
     ) {
       const duration = this.speechDurationMs;
       console.warn('[VAD] Forcing speech_end after extended silence:', this.silenceDurationMs);

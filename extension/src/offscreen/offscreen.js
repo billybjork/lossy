@@ -16,6 +16,7 @@
 import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './whisper-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { SileroVAD } from './vad-detector.js';
+import { VAD_CONFIG, PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
 
 const TARGET_SAMPLE_RATE = 16000;
 
@@ -386,10 +387,10 @@ async function startVAD(config = {}) {
     const METRICS_INTERVAL_MS = 250;
 
     vadInstance = new SileroVAD({
-      minSpeechDurationMs: config?.minSpeechDurationMs || 500,
-      minSilenceDurationMs: config?.minSilenceDurationMs || 500,
-      startThreshold: config?.sileroConfidence || 0.5,
-      endThreshold: config?.sileroNegativeThreshold || 0.35,
+      minSpeechDurationMs: config?.minSpeechDurationMs || VAD_CONFIG.MIN_SPEECH_DURATION_MS,
+      minSilenceDurationMs: config?.minSilenceDurationMs || VAD_CONFIG.MIN_SILENCE_DURATION_MS,
+      startThreshold: config?.sileroConfidence || VAD_CONFIG.START_THRESHOLD,
+      endThreshold: config?.sileroNegativeThreshold || VAD_CONFIG.END_THRESHOLD,
       onSpeechStart: (event) => {
         console.log('[VAD] Speech detected (confidence:', event.confidence.toFixed(3), ')');
         chrome.runtime.sendMessage({

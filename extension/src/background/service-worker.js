@@ -6,6 +6,7 @@
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
+import { VAD_CONFIG, PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
 
 let socket = null;
 let audioChannel = null;
@@ -19,11 +20,7 @@ let messageRouter = null;
 const openPanels = new Map();
 
 // Sprint 10: Passive session coordinator
-const MIN_DURATION_MS = 500;
-const COOLDOWN_MS = 500;
-const AUTO_RESUME_DELAY_MS = 500;
 const AUTO_PAUSE_DEFAULT = true;
-const HEARTBEAT_INTERVAL_MS = 5000;
 
 const passiveSession = {
   tabId: null,
@@ -64,15 +61,15 @@ const passiveSession = {
 
   settings: {
     autoPauseVideo: AUTO_PAUSE_DEFAULT,
-    autoResumeDelayMs: AUTO_RESUME_DELAY_MS,
+    autoResumeDelayMs: PASSIVE_SESSION_CONFIG.AUTO_RESUME_DELAY_MS,
   },
 
   circuitBreaker: {
     state: 'closed',
     restartCount: 0,
     lastRestartAt: 0,
-    maxRestarts: 3,
-    resetWindowMs: 60000,
+    maxRestarts: PASSIVE_SESSION_CONFIG.MAX_RESTARTS,
+    resetWindowMs: PASSIVE_SESSION_CONFIG.RESET_WINDOW_MS,
   },
 
   heartbeatFailures: 0,
@@ -1335,7 +1332,7 @@ async function handlePassiveEvent(event) {
       const contextAge = Date.now() - passiveSession.recordingContext.startedAt;
 
       // If context is older than 2s, assume backend is stuck - clear and proceed
-      if (contextAge > 2000) {
+      if (contextAge > PASSIVE_SESSION_CONFIG.STALE_CONTEXT_THRESHOLD_MS) {
         console.warn('[Passive] Stale recording context (', contextAge, 'ms) - clearing and proceeding');
         passiveSession.recordingContext = null;
         if (passiveSession.recordingContextTimeout) {
@@ -1477,7 +1474,7 @@ async function handlePassiveEvent(event) {
       wasPlaying: passiveSession.recordingContext?.autoPause?.wasPlaying,
     };
 
-    if (duration >= MIN_DURATION_MS) {
+    if (duration >= VAD_CONFIG.MIN_SPEECH_DURATION_MS) {
       console.log('[Passive] Speech ended, duration:', duration, 'ms');
 
       // Stop recording in offscreen
@@ -1508,7 +1505,7 @@ async function handlePassiveEvent(event) {
           console.log('[Passive] Cooldown complete, resuming observation');
           broadcastPassiveStatus();
         }
-      }, COOLDOWN_MS);
+      }, PASSIVE_SESSION_CONFIG.COOLDOWN_MS);
 
       // Set a safety timeout to clear stale context (5 seconds)
       // This handles cases where note_created never arrives (backend errors, etc.)
@@ -1522,7 +1519,7 @@ async function handlePassiveEvent(event) {
           passiveSession.recordingContext = null;
           passiveSession.recordingContextTimeout = null;
         }
-      }, 5000); // 5 seconds safety timeout
+      }, PASSIVE_SESSION_CONFIG.RECORDING_CONTEXT_TIMEOUT_MS);
 
       schedulePassiveResume(resumeInfo.tabId, resumeInfo.wasPlaying);
     } else {
@@ -1689,7 +1686,7 @@ async function startPassiveSession() {
       } catch (err) {
         await handleHeartbeatFailure(err);
       }
-    }, HEARTBEAT_INTERVAL_MS);
+    }, PASSIVE_SESSION_CONFIG.HEARTBEAT_INTERVAL_MS);
 
     passiveSession.vadEnabled = true;
     passiveSession.status = 'observing';
@@ -1697,14 +1694,14 @@ async function startPassiveSession() {
     broadcastPassiveStatus();
     console.log('[Passive] Session active with persistent audio channel');
 
-    // Auto-start behavior: Stop session if no speech detected within 10 seconds
+    // Auto-start behavior: Stop session if no speech detected within configured timeout
     // This prevents forgotten sidepanels from recording indefinitely
     passiveSession.firstSpeechTimeout = setTimeout(async () => {
       if (passiveSession.telemetry.speechDetections === 0) {
-        console.log('[Passive] No speech detected in first 10 seconds - auto-stopping');
+        console.log('[Passive] No speech detected in first', PASSIVE_SESSION_CONFIG.FIRST_SPEECH_TIMEOUT_MS / 1000, 'seconds - auto-stopping');
         await stopPassiveSession();
       }
-    }, 10000);
+    }, PASSIVE_SESSION_CONFIG.FIRST_SPEECH_TIMEOUT_MS);
   } catch (error) {
     console.error('[Passive] Failed to start session:', error);
     // Clean up on error
