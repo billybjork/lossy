@@ -1,4 +1,4 @@
-# Sprint 11: Passive Mode Quality & Polish
+# Sprint 12: Passive Mode Quality & Polish
 
 **Status:** 📋 Planned
 **Priority:** High
@@ -7,8 +7,9 @@
 
 **Related Sprints**
 - ✅ Sprint 10 – Always-On Foundations (passive audio VAD baseline)
-- 🔜 Sprint 12 – Continuous Session Persistence
-- 🔜 Sprint 13+ – Automated Frame Capture & Diffusion
+- 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
+- 🔜 Sprint 13 – Continuous Session Persistence
+- 🔜 Sprint 14+ – Automated Frame Capture & Diffusion
 
 ---
 
@@ -16,7 +17,7 @@
 
 Improve passive mode quality, accuracy, and user experience through ML-based VAD (Silero ONNX), visual status indicators, waveform visualizer, and automatic restart capabilities. These enhancements will reduce false positives from ~10-20% to <5%, provide better visibility into system state, and improve reliability.
 
-**Scope:** Passive mode quality improvements only. Does NOT include frame capture or continuous sessions (deferred to Sprint 12+).
+**Scope:** Passive mode quality improvements only. Does NOT include frame capture or continuous sessions (deferred to Sprint 13+).
 
 ---
 
@@ -100,27 +101,59 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 
 **Architecture:**
 ```
-AudioWorklet
+AudioWorklet (in offscreen.js)
     │
-    ├─ Capture audio frames (30ms chunks)
-    ├─ Send to offscreen document
-    │
-    ▼
-Offscreen document (Silero ONNX via WebAssembly)
-    │
-    ├─ Run inference (~1ms per 30ms frame)
-    ├─ Confidence > 0.5? ──► speech_start
+    ├─ Capture audio frames (128 samples, 8ms @ 16kHz)
+    ├─ Send to offscreen document via postMessage
     │
     ▼
-Service worker (passive event handler)
+Offscreen Document - SileroVAD
+    │
+    ├─ Buffer audio until 512 samples available (32ms @ 16kHz)
+    ├─ Run ONNX inference (<1ms per 512-sample frame)
+    ├─ Maintain LSTM states (h, c) between frames
+    ├─ Speech probability > 0.5? ──► speech_start event
+    ├─ Speech probability < 0.35 for 500ms? ──► speech_end event
+    │
+    ▼
+Service Worker (passive event handler)
+    │
+    ├─ On speech_start: Start recording, pause video
+    ├─ On speech_end: Stop recording, resume video
+    └─ Send audio to backend for transcription
 ```
 
 **Implementation Steps:**
-1. Load Silero ONNX model (v5) in offscreen document using onnxruntime-web
-2. Configure ONNX Runtime to use WebAssembly backend
-3. Add Silero inference function (takes Float32Array PCM at 16kHz, returns confidence 0-1)
-4. Modify AudioWorklet to send audio frames to offscreen via postMessage
-5. Handle model loading failures with user-facing error message (no silent fallback)
+1. **Install dependencies:**
+   - `npm install onnxruntime-web@1.22.0` - ONNX Runtime for WebAssembly
+   - `npm install @ricky0123/vad-web@0.0.28` - For Silero v5 model file
+
+2. **Configure webpack:**
+   - Add CopyWebpackPlugin to copy `silero_vad_v5.onnx` to `dist/models/`
+   - Copy ONNX Runtime WASM files to `dist/wasm/`
+   - See "Research Findings" section for webpack config example
+
+3. **Update manifest.json:**
+   - Add `models/silero_vad_v5.onnx` and `wasm/*.wasm` to `web_accessible_resources`
+   - Ensure CSP allows `wasm-unsafe-eval` if needed
+
+4. **Implement SileroVAD class in vad-detector.js:**
+   - `loadModel()` - Initialize ONNX Runtime with WebAssembly backend
+   - `processAudio()` - Buffer 128-sample chunks until 512 samples available
+   - `processFrame()` - Run inference on 512-sample frames with LSTM state management
+   - `resetState()` - Reset LSTM h/c states to zeros
+   - See "Research Findings" for complete code example
+
+5. **Update HybridVAD:**
+   - Remove energy-based fallback (per Sprint 12 goals)
+   - Use Silero as primary VAD (no hybrid mode)
+   - Handle model loading failures with clear error message
+
+6. **Test and validate:**
+   - Verify model loads successfully in offscreen document
+   - Test speech detection with background noise (keyboard, breathing)
+   - Confirm speech_end fires within 500ms of silence (fixes infinite recording bug)
+   - Measure inference latency (<5ms target)
 
 **Acceptance Criteria:**
 - Silero loads successfully on Chrome 57+ (100% of potential extension users)
@@ -412,8 +445,24 @@ async function handleHeartbeatFailure() {
 ## Implementation Phases
 
 ### Phase 1: Silero VAD Integration (1-2 weeks)
-- Week 1: ONNX Runtime Web setup, model loading, inference pipeline
-- Week 2: AudioWorklet integration, testing, performance tuning
+
+**Week 1: Foundation Setup**
+- Day 1-2: Install dependencies, configure webpack, update manifest.json
+- Day 3-4: Implement SileroVAD.loadModel() with ONNX Runtime Web initialization
+- Day 5: Implement audio buffering (128 → 512 samples) and LSTM state management
+
+**Week 2: Integration & Testing**
+- Day 1-2: Implement SileroVAD.processFrame() with inference pipeline
+- Day 3: Integrate with existing AudioWorklet in offscreen.js
+- Day 4: Update HybridVAD to use Silero (remove energy fallback)
+- Day 5: Testing and performance tuning (measure latency, test background noise handling)
+
+**Key Deliverables:**
+- ✅ Model loads from bundled extension file
+- ✅ 512-sample frame buffering working
+- ✅ LSTM states maintained between frames, reset on silence
+- ✅ Infinite recording bug fixed (proper speech_end detection)
+- ✅ Inference latency <5ms per frame
 
 ### Phase 2: Visual Indicators & Auto-Pause (1 week)
 - Status badge in sidepanel
@@ -441,7 +490,7 @@ async function handleHeartbeatFailure() {
 
 ---
 
-## Deferred Items (Sprint 12+)
+## Deferred Items (Sprint 13+)
 
 ### VAD Tuning UI (Deferred - Not Currently Needed)
 - User-adjustable sensitivity/threshold sliders
@@ -509,28 +558,204 @@ async function handleHeartbeatFailure() {
 
 ---
 
-## Decisions Made
+## Research Findings & Implementation Decisions
 
-Based on research (see conversation history for details):
+**Research Date:** 2025-10-22
+**Research Summary:** Comprehensive investigation into ONNX Runtime Web + Silero VAD integration for Chrome MV3 extensions
 
-1. **Silero model hosting:** CDN recommended (Silero team uses CDN, 2MB is manageable)
-2. **WebGPU support:** NO - unnecessary. Silero is optimized for CPU, <1ms inference per 30ms frame on single thread
-3. **WebAssembly fallback:** NO - 99% browser support, Chrome 57+ (March 2017) has full support
-4. **Waveform location:** Debug drawer - reduces clutter, available when needed for troubleshooting
-5. **VAD Tuning UI:** Deferred - not currently needed, Silero defaults should work well
-6. **Telemetry dashboard:** Deferred - focus on basic debug drawer metrics only
+### Key Decisions Made
 
-## Open Questions
+1. **✅ Silero model hosting:** Self-host (bundle with extension via webpack)
+   - **NOT CDN** - ensures reliability, offline support, privacy, and no CORS issues
+   - Model bundled in `extension/dist/models/silero_vad_v5.onnx` (~2MB)
+   - Browser automatically caches extension files (no IndexedDB needed)
 
-1. **Silero confidence threshold:** Use default 0.5 or tune for our use case?
-2. **Model caching:** IndexedDB vs browser cache for the 2MB model?
-3. **Sample rate conversion:** Do in AudioWorklet or offscreen document?
-4. **False positive threshold:** What % is acceptable to users? (targeting <5%)
+2. **✅ Model version:** Silero VAD v5 from `@ricky0123/vad-web@0.0.28`
+   - v5 is proven stable (3x faster than v4, 6000+ languages)
+   - v6 exists but v5 is battle-tested in production
+   - Model file: `silero_vad_v5.onnx` (~2MB ONNX opset 15/16)
+
+3. **✅ ONNX Runtime version:** `onnxruntime-web@1.22.0` (latest stable as of Jan 2025)
+
+4. **✅ WebAssembly backend only:** NO WebGPU
+   - Silero optimized for CPU (<1ms inference)
+   - WebAssembly universally supported (Chrome 57+, 99% coverage)
+   - Configuration: `numThreads: 1` (required for Chrome extensions), `simd: true`
+
+5. **✅ Chrome MV3 compatibility:** Offscreen document architecture
+   - Service workers have "no available backend found" errors with ONNX
+   - Our existing offscreen document bypasses this limitation
+   - WASM files served via `web_accessible_resources` in manifest.json
+
+6. **✅ Frame size:** 512 samples (32ms at 16kHz)
+   - Silero v5 requires exactly 512-sample frames (vs 1536 for legacy model)
+   - AudioWorklet produces 128-sample chunks → buffer until 512 samples available
+   - Processing ~31 frames/second at 16kHz
+
+7. **✅ Confidence threshold:** 0.5 (recommended for v5)
+   - Based on @ricky0123/vad defaults for Silero v5
+   - Negative/silence threshold: 0.35
+   - Can tune after initial testing if needed
+
+8. **✅ LSTM state management:** Maintain hidden/cell states between frames
+   - Input states: `h` [2,1,64], `c` [2,1,64] (initialized to zeros)
+   - Output states: `hn` [2,1,64], `cn` [2,1,64] (feed back as next input)
+   - Reset to zeros when speech ends (isolate utterances)
+
+9. **✅ Model caching:** Browser cache (automatic for extension files)
+   - No IndexedDB implementation needed
+   - Extension files cached by Chrome automatically
+   - Model loads from disk on offscreen document creation
+
+10. **✅ Waveform location:** Debug drawer only (reduces clutter)
+
+11. **✅ VAD Tuning UI:** Deferred (Silero defaults work well)
+
+12. **✅ Telemetry dashboard:** Deferred (focus on basic debug metrics)
+
+### Model Specifications (Silero VAD v5)
+
+**Input Tensors:**
+- `input`: Float32Array, shape `[1, 512]` - normalized audio samples [-1.0, 1.0]
+- `sr`: Int64Array, shape `[1]` - sample rate (always 16000)
+- `h`: Float32Array, shape `[2, 1, 64]` - LSTM hidden state
+- `c`: Float32Array, shape `[2, 1, 64]` - LSTM cell state
+
+**Output Tensors:**
+- `output`: Float32Array, shape `[1, 1]` - speech confidence [0.0, 1.0]
+- `hn`: Float32Array, shape `[2, 1, 64]` - updated hidden state
+- `cn`: Float32Array, shape `[2, 1, 64]` - updated cell state
+
+**Performance:**
+- Inference latency: <1ms per 512-sample frame
+- Model size: ~2MB
+- Sample rate: 16kHz (also supports 8kHz)
+- Languages: 6000+
+
+### Implementation Architecture
+
+**Model Loading:**
+```javascript
+// In offscreen document
+import * as ort from 'onnxruntime-web';
+
+// Configure for Chrome extension
+ort.env.wasm.numThreads = 1; // Required for extensions
+ort.env.wasm.simd = true;
+ort.env.wasm.wasmPaths = chrome.runtime.getURL('wasm/');
+
+// Load model
+const modelPath = chrome.runtime.getURL('models/silero_vad_v5.onnx');
+const session = await ort.InferenceSession.create(modelPath, {
+  executionProviders: ['wasm'],
+  graphOptimizationLevel: 'all'
+});
+```
+
+**Audio Processing Flow:**
+```
+AudioWorklet (128 samples @ 16kHz, 8ms chunks)
+    ↓
+Buffer accumulator (until 512 samples available)
+    ↓
+Silero inference (512 samples → confidence score)
+    ↓
+State machine (silence → speech → maybe_silence → silence)
+    ↓
+Events: speech_start / speech_end
+```
+
+**Webpack Configuration:**
+```javascript
+// Copy model and WASM files to dist/
+new CopyWebpackPlugin({
+  patterns: [
+    {
+      from: 'node_modules/@ricky0123/vad-web/dist/silero_vad_v5.onnx',
+      to: 'models/silero_vad_v5.onnx'
+    },
+    {
+      from: 'node_modules/onnxruntime-web/dist/*.wasm',
+      to: 'wasm/[name][ext]'
+    }
+  ]
+})
+```
+
+**Manifest.json Updates:**
+```json
+{
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "models/silero_vad_v5.onnx",
+        "wasm/*.wasm"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
+```
+
+### Reference Implementation
+
+**Proven working implementation:** `@ricky0123/vad` (GitHub: ricky0123/vad)
+- Production-ready browser VAD using ONNX Runtime Web + Silero
+- Successfully handles Chrome extension constraints
+- Source available for reference
+
+**Model URLs (for reference):**
+- npm package: `@ricky0123/vad-web@0.0.28/dist/silero_vad_v5.onnx`
+- CDN: `https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.28/dist/silero_vad_v5.onnx`
+- GitHub: `https://github.com/ricky0123/vad/blob/master/silero_vad_v5.onnx`
+- Official: `https://github.com/snakers4/silero-vad` (original source)
+
+### Chrome Extension Challenges & Solutions
+
+**Challenge 1:** Service workers can't initialize ONNX Runtime WASM backend
+- **Error:** "no available backend found", "import() is disallowed on ServiceWorkerGlobalScope"
+- **Solution:** Use offscreen document (already implemented in Sprint 10)
+
+**Challenge 2:** WASM files fail to load in extension context
+- **Error:** "Failed to fetch" for .wasm files
+- **Solution:** Configure `web_accessible_resources` + `ort.env.wasm.wasmPaths`
+
+**Challenge 3:** Multithreading breaks in extension environment
+- **Error:** SharedArrayBuffer / Web Workers unavailable in some contexts
+- **Solution:** Set `numThreads: 1` (Silero is fast enough single-threaded)
+
+### Answered Questions
+
+1. **✅ Silero confidence threshold:** 0.5 (default for v5, can tune later)
+2. **✅ Model caching:** Browser cache (automatic, no IndexedDB)
+3. **✅ Sample rate conversion:** Not needed (AudioWorklet already at 16kHz)
+4. **✅ False positive threshold:** <5% is achievable with Silero v5
+5. **✅ Model hosting:** Self-host bundled with extension (NOT CDN)
+
+### Remaining Open Questions
+
+1. **Parameter tuning:** Should we adjust `minSpeechDurationMs` or `minSilenceDurationMs` for Silero?
+   - Current: 500ms speech minimum, 500ms silence to trigger speech_end
+   - Silero may allow shorter thresholds due to better accuracy
+
+2. **Negative threshold:** Use 0.35 for negative/silence detection (from @ricky0123/vad)?
+   - Could help with faster speech_end detection
+
+3. **State reset timing:** Reset LSTM states on every silence, or maintain across session?
+   - Current plan: Reset on speech_end (isolate utterances)
+   - Alternative: Maintain states across entire session
 
 ---
 
-**Document Version:** 2.1 (Added Auto-Pause)
+**Document Version:** 3.0 (Research Findings & Implementation Decisions)
 **Last Updated:** 2025-10-22
 **Author:** Claude Code
+**Changes from v2.1:** Added comprehensive "Research Findings & Implementation Decisions" section with:
+- ONNX Runtime Web + Silero VAD v5 integration research
+- Detailed model specifications (input/output tensors, LSTM states)
+- Chrome MV3 extension challenges & solutions
+- Self-host model decision (bundled via webpack, NOT CDN)
+- Complete implementation architecture with code examples
+- Answered all open questions from previous versions
 **Changes from v2.0:** Added auto-pause video during speech (deliverable #3)
 **Changes from v1.0:** Removed energy-based fallback (unnecessary with 99% WebAssembly support), removed WebGPU (Silero optimized for CPU), deferred VAD Tuning UI and full Telemetry Dashboard (not currently needed), reduced timeline from 6-7 weeks to 4-5 weeks
