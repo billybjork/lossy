@@ -80,6 +80,10 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 **Current State:**
 - Energy-based RMS detection (threshold 0.02)
 - ~10-20% false positive rate in noisy environments
+- **Critical bug:** VAD often never detects `speech_end` in presence of background noise
+  - Background noise (keyboard, breathing, room tone) keeps energy > threshold
+  - Recording continues indefinitely until max duration (100s) forces transcription
+  - Results in logs showing continuous "Max duration reached" warnings
 - Fast (<5ms per frame) but not very accurate
 
 **Proposed Solution:**
@@ -87,6 +91,12 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 - Use `onnxruntime-web` directly (note: `@ricky0123/vad-web` is deprecated)
 - WebAssembly-only (no WebGPU - unnecessary for VAD's <1ms inference time)
 - Inference in offscreen document (AudioWorklet can't run ONNX)
+
+**Why This Fixes the Bug:**
+- **ML-trained speech/silence discrimination:** Silero distinguishes actual speech from background noise
+- **Proper speech boundaries:** Returns confidence scores that clearly indicate speech vs silence
+- **No energy threshold ambiguity:** ML model trained on thousands of hours of real-world audio
+- **Result:** Reliable `speech_start` AND `speech_end` events, recordings stop properly
 
 **Architecture:**
 ```
@@ -115,6 +125,8 @@ Service worker (passive event handler)
 **Acceptance Criteria:**
 - Silero loads successfully on Chrome 57+ (100% of potential extension users)
 - False positive rate <5% in controlled testing
+- **Proper speech boundary detection:** `speech_end` reliably detected within 500ms of actual silence
+- No more "infinite recording" bug (recordings stop properly when user finishes speaking)
 - Inference latency <5ms per 30ms audio frame
 - Clear error message if model fails to load (with troubleshooting instructions)
 
@@ -478,7 +490,9 @@ async function handleHeartbeatFailure() {
 
 ### Quality
 - False positive rate <5% (down from 10-20% with energy-only)
+- **Infinite recording bug eliminated:** 0% of recordings hit max duration timeout
 - VAD detection latency <10ms median (Silero inference + overhead)
+- Proper speech boundary detection: speech_end fires within 500ms of actual silence
 - Silero uptime >99% (model loading success rate)
 
 ### User Experience
