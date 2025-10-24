@@ -465,7 +465,11 @@ export async function handlePassiveEvent(event) {
     if (duration >= VAD_CONFIG.MIN_SPEECH_DURATION_MS) {
       console.log('[Passive] Speech ended, duration:', duration, 'ms');
 
-      // Stop recording in offscreen
+      // Transition immediately so UI reflects cooldown while transcription completes
+      passiveSession.status = 'cooldown';
+      broadcastPassiveStatus();
+
+      // Stop recording in offscreen (may take time due to transcription)
       try {
         await chrome.runtime.sendMessage({
           target: 'offscreen',
@@ -476,12 +480,12 @@ export async function handlePassiveEvent(event) {
         console.error('[Passive] Failed to stop recording:', error);
       }
 
-      passiveSession.status = 'cooldown';
-
       // Update telemetry
       const count = passiveSession.telemetry.speechDetections;
-      passiveSession.telemetry.avgLatencyMs =
-        (passiveSession.telemetry.avgLatencyMs * (count - 1) + latencyMs) / count;
+      if (count > 0) {
+        passiveSession.telemetry.avgLatencyMs =
+          (passiveSession.telemetry.avgLatencyMs * (count - 1) + latencyMs) / count;
+      }
       passiveSession.telemetry.lastConfidence = confidence;
       passiveSession.telemetry.lastLatencyMs = latencyMs;
 
@@ -508,6 +512,8 @@ export async function handlePassiveEvent(event) {
       }, PASSIVE_SESSION_CONFIG.RECORDING_CONTEXT_TIMEOUT_MS);
 
       schedulePassiveResume(resumeInfo.tabId, resumeInfo.wasPlaying);
+      // Broadcast once more to publish updated telemetry (status remains cooldown)
+      broadcastPassiveStatus();
     } else {
       passiveSession.telemetry.ignoredShort++;
       console.log('[Passive] Ignored short speech segment:', duration, 'ms');
@@ -520,9 +526,8 @@ export async function handlePassiveEvent(event) {
       }
 
       schedulePassiveResume(resumeInfo.tabId, resumeInfo.wasPlaying);
+      broadcastPassiveStatus();
     }
-
-    broadcastPassiveStatus();
   } else if (event.type === 'error') {
     console.error('[Passive] VAD error:', event.data);
     passiveSession.vadEnabled = false;
