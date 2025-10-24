@@ -51,6 +51,7 @@ export function resetPassiveTelemetry() {
   passiveSession.telemetry.ignoredShort = 0;
   passiveSession.telemetry.ignoredCooldown = 0;
   passiveSession.telemetry.ignoredPendingNote = 0;
+  passiveSession.telemetry.ignoredNoContext = 0;
   passiveSession.telemetry.avgLatencyMs = 0;
   passiveSession.telemetry.lastConfidence = 0;
   passiveSession.telemetry.lastLatencyMs = 0;
@@ -633,10 +634,10 @@ export async function startPassiveSession() {
     });
 
     passiveSession.vadConfig = {
-      minSpeechDurationMs: 250,
-      minSilenceDurationMs: 2000,
-      sileroConfidence: 0.45,
-      sileroNegativeThreshold: 0.40,
+      minSpeechDurationMs: VAD_CONFIG.MIN_SPEECH_DURATION_MS,
+      minSilenceDurationMs: VAD_CONFIG.MIN_SILENCE_DURATION_MS,
+      sileroConfidence: VAD_CONFIG.START_THRESHOLD,
+      sileroNegativeThreshold: VAD_CONFIG.END_THRESHOLD,
     };
 
     // Start VAD in offscreen

@@ -467,8 +467,10 @@ async function startVAD(config = {}) {
     await vadInstance.loadModel();
 
     // Use AudioWorklet (modern) or fallback to ScriptProcessor (deprecated)
+    let audioBridgeInitialized = false;
+
     if (USE_AUDIO_WORKLET) {
-      console.log('[VAD] Using AudioWorklet for audio processing');
+      console.log('[VAD] Attempting AudioWorklet for audio processing');
 
       // Create AudioWorklet bridge
       const workletBridge = new VadWorkletBridge(vadAudioContext, (audioFrame) => {
@@ -481,13 +483,29 @@ async function startVAD(config = {}) {
         }
       });
 
-      // Initialize and connect the worklet
-      await workletBridge.init(source);
+      try {
+        // Initialize and connect the worklet
+        await workletBridge.init(source);
+        audioBridgeInitialized = true;
 
-      // Store bridge for cleanup
-      vadInstance._audioBridge = workletBridge;
-      vadInstance._audioSource = source;
-    } else {
+        // Store bridge for cleanup
+        vadInstance._audioBridge = workletBridge;
+        vadInstance._audioSource = source;
+
+        console.log('[VAD] AudioWorklet initialized successfully');
+      } catch (error) {
+        console.warn('[VAD] AudioWorklet initialization failed, falling back to ScriptProcessor:', error);
+        // Clean up partial initialization (ignore errors)
+        try {
+          workletBridge.disconnect();
+        } catch (disconnectError) {
+          console.warn('[VAD] Failed to disconnect worklet during cleanup:', disconnectError);
+        }
+        // audioBridgeInitialized remains false, so we'll use ScriptProcessor below
+      }
+    }
+
+    if (!audioBridgeInitialized) {
       console.log('[VAD] Using ScriptProcessor (deprecated) for audio processing');
 
       // Fallback: Create ScriptProcessor to feed audio to VAD
