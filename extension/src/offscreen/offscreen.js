@@ -17,8 +17,13 @@ import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { SileroVAD } from './vad-detector.js';
 import { VAD_CONFIG, PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
+import { VadWorkletBridge } from './vad-worklet-bridge.js';
 
 const TARGET_SAMPLE_RATE = 16000;
+
+// Feature flag: Use AudioWorklet instead of deprecated ScriptProcessor
+// Can be disabled to fallback to ScriptProcessor if issues arise
+const USE_AUDIO_WORKLET = true;
 
 let mediaRecorder = null;
 let audioContext = null;
@@ -461,30 +466,55 @@ async function startVAD(config = {}) {
 
     await vadInstance.loadModel();
 
-    // Create ScriptProcessor to feed audio to VAD
-    const bufferSize = 1024;
-    const processor = vadAudioContext.createScriptProcessor(bufferSize, 1, 1);
+    // Use AudioWorklet (modern) or fallback to ScriptProcessor (deprecated)
+    if (USE_AUDIO_WORKLET) {
+      console.log('[VAD] Using AudioWorklet for audio processing');
 
-    processor.onaudioprocess = (event) => {
-      if (!vadInstance) return;
+      // Create AudioWorklet bridge
+      const workletBridge = new VadWorkletBridge(vadAudioContext, (audioFrame) => {
+        if (!vadInstance) return;
 
-      const inputData = event.inputBuffer.getChannelData(0);
-      const copy = new Float32Array(inputData.length);
-      copy.set(inputData);
+        const sourceSampleRate = vadAudioContext.sampleRate || TARGET_SAMPLE_RATE;
+        const processed = resampleIfNeeded(audioFrame, sourceSampleRate, TARGET_SAMPLE_RATE);
+        if (processed && processed.length > 0) {
+          vadInstance.enqueueAudio(processed);
+        }
+      });
 
-      const sourceSampleRate = vadAudioContext.sampleRate || TARGET_SAMPLE_RATE;
-      const processed = resampleIfNeeded(copy, sourceSampleRate, TARGET_SAMPLE_RATE);
-      if (processed && processed.length > 0) {
-        vadInstance.enqueueAudio(processed);
-      }
-    };
+      // Initialize and connect the worklet
+      await workletBridge.init(source);
 
-    source.connect(processor);
-    processor.connect(vadAudioContext.destination);
+      // Store bridge for cleanup
+      vadInstance._audioBridge = workletBridge;
+      vadInstance._audioSource = source;
+    } else {
+      console.log('[VAD] Using ScriptProcessor (deprecated) for audio processing');
 
-    // Store processor for cleanup
-    vadInstance._audioProcessor = processor;
-    vadInstance._audioSource = source;
+      // Fallback: Create ScriptProcessor to feed audio to VAD
+      const bufferSize = 1024;
+      const processor = vadAudioContext.createScriptProcessor(bufferSize, 1, 1);
+
+      processor.onaudioprocess = (event) => {
+        if (!vadInstance) return;
+
+        const inputData = event.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(inputData.length);
+        copy.set(inputData);
+
+        const sourceSampleRate = vadAudioContext.sampleRate || TARGET_SAMPLE_RATE;
+        const processed = resampleIfNeeded(copy, sourceSampleRate, TARGET_SAMPLE_RATE);
+        if (processed && processed.length > 0) {
+          vadInstance.enqueueAudio(processed);
+        }
+      };
+
+      source.connect(processor);
+      processor.connect(vadAudioContext.destination);
+
+      // Store processor for cleanup
+      vadInstance._audioProcessor = processor;
+      vadInstance._audioSource = source;
+    }
 
     vadEnabled = true;
     console.log('[VAD] Passive detection active (mode: silero)');
@@ -529,8 +559,12 @@ async function stopVAD() {
 
   console.log('[VAD] Stopping passive detection');
 
-  // Cleanup audio processor
-  if (vadInstance?._audioProcessor) {
+  // Cleanup audio processor or worklet bridge
+  if (vadInstance?._audioBridge) {
+    // AudioWorklet cleanup
+    vadInstance._audioBridge.disconnect();
+  } else if (vadInstance?._audioProcessor) {
+    // ScriptProcessor cleanup (fallback)
     vadInstance._audioProcessor.disconnect();
     vadInstance._audioSource.disconnect();
   }

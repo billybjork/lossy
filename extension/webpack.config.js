@@ -36,6 +36,8 @@ module.exports = (env, argv) => {
           { from: 'public', to: '', noErrorOnMissing: true, globOptions: { dot: true, ignore: ['**/.gitkeep'] } },
           { from: 'src/sidepanel/sidepanel.html', to: 'sidepanel.html' },
           { from: 'src/offscreen/offscreen.html', to: 'offscreen.html' },
+          // Copy AudioWorklet processor (must be a separate file, not bundled)
+          { from: 'src/offscreen/audio-worklet-vad.js', to: 'offscreen/audio-worklet-vad.js' },
           {
             from: 'public/models/silero_vad_v5.onnx',
             to: 'models/silero_vad_v5.onnx',
