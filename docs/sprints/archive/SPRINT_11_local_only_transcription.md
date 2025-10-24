@@ -7,7 +7,7 @@
 
 **Related Sprints**
 - ✅ Sprint 07 – Local Transcription (hybrid local/cloud)
-- 🔜 Sprint 14 – Passive Mode Polish
+- 🔜 Sprint 14 – Voice Mode Mode Polish
 - 🔜 Sprint 15 – Continuous Session Persistence
 
 ---
@@ -19,7 +19,7 @@ Simplify transcription architecture by removing cloud fallback and UI mode selec
 **Rationale:**
 - **WebGPU support:** 70% of users (Chrome 113+, April 2023)
 - **WebAssembly support:** 99% of users (Chrome 57+, March 2017)
-- **WASM performance acceptable:** 1-3x realtime for passive mode (10-30s transcription for 10s audio)
+- **WASM performance acceptable:** 1-3x realtime for voice mode mode (10-30s transcription for 10s audio)
 - **Cloud fallback adds unnecessary complexity:** Network coordination, buffering overhead, privacy concerns
 - **Cloud transcription likely slower than WASM** for short clips due to network latency
 
@@ -176,7 +176,7 @@ Simplify transcription architecture by removing cloud fallback and UI mode selec
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| **WASM too slow on old devices** | Poor UX for 30% of users | Test on low-end devices; WASM still faster than typing; acceptable for passive mode |
+| **WASM too slow on old devices** | Poor UX for 30% of users | Test on low-end devices; WASM still faster than typing; acceptable for voice mode mode |
 | **ONNX model fails to load** | Transcription broken entirely | Show clear error message; provide troubleshooting steps; extremely rare with 99% WASM support |
 | **Breaking existing users** | Users relying on cloud mode frustrated | Validate WASM performance is acceptable; communicate change if extension is public |
 
@@ -192,7 +192,7 @@ Simplify transcription architecture by removing cloud fallback and UI mode selec
 2. **WASM fallback (30% of users):**
    - Test on older Chrome (pre-113) or with WebGPU disabled
    - Measure latency (should be 10-30s for 10s audio)
-   - Verify still usable for passive mode
+   - Verify still usable for voice mode mode
 
 3. **Error handling:**
    - Simulate ONNX model load failure
@@ -200,7 +200,7 @@ Simplify transcription architecture by removing cloud fallback and UI mode selec
    - Confirm no silent failures
 
 4. **Regression testing:**
-   - Verify passive mode still works end-to-end
+   - Verify voice mode mode still works end-to-end
    - Verify note creation with transcripts
    - Verify timestamp accuracy preserved
 
@@ -231,7 +231,7 @@ Simplify transcription architecture by removing cloud fallback and UI mode selec
 
 **Why remove cloud fallback?**
 1. WASM has 99% browser support (same as WebAssembly for VAD)
-2. WASM performance (1-3x realtime) is acceptable for passive mode
+2. WASM performance (1-3x realtime) is acceptable for voice mode mode
 3. Cloud adds significant complexity without meaningful benefit
 4. Cloud likely slower than WASM for short clips (network overhead)
 5. Privacy: Everything stays local

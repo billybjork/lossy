@@ -94,7 +94,7 @@ export async function startRecording(options = {}) {
     tabManager.startRecording(tab.id);
   }
 
-  // 2. Capture timestamp (pause video if manual mode, just get timestamp if passive)
+  // 2. Capture timestamp (pause video if manual mode, just get timestamp if voice mode)
   let capturedTimestamp = null;
 
   if (tab?.id) {
@@ -311,7 +311,7 @@ export async function hasOffscreenDocument() {
 }
 
 /**
- * Get audio channel for passive mode to use
+ * Get audio channel for voice mode to use
  */
 export function getAudioChannel() {
   return audioChannel;

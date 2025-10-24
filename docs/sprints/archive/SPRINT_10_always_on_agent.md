@@ -18,7 +18,7 @@
 
 ## Purpose
 
-Establish a passive audio capture path that triggers the existing recording pipeline automatically, while keeping manual controls available behind a debug drawer. This sprint focuses **purely on audio/VAD** - automated frame capture, continuous sessions, and diffusion refinement are deferred to future sprints.
+Establish a voice mode audio capture path that triggers the existing recording pipeline automatically, while keeping manual controls available behind a debug drawer. This sprint focuses **purely on audio/VAD** - automated frame capture, continuous sessions, and diffusion refinement are deferred to future sprints.
 
 **Key Scope Constraint:** Sprint 08's manual "Refine with Vision" button remains unchanged. Users can still manually enhance individual notes with visual context on demand.
 
@@ -31,25 +31,25 @@ Establish a passive audio capture path that triggers the existing recording pipe
 1. **Passive Audio Detection Pipeline**
    - Run lightweight WebRTC/energy-based VAD inside the offscreen document's audio worklet
    - Optionally upgrade to Silero ONNX inference (in the offscreen context, not inside the worklet) when device capabilities allow
-   - Expose a per-session toggle for passive mode via `chrome.storage` so users can disable VAD when needed
-   - **PROVISIONAL DECISION:** Default passive mode to OFF (users must enable in debug drawer)
+   - Expose a per-session toggle for voice mode via `chrome.storage` so users can disable VAD when needed
+   - **PROVISIONAL DECISION:** Default voice mode to OFF (users must enable in debug drawer)
    - **PROVISIONAL DECISION:** Silero confidence threshold = 0.5, energy threshold ≈ 0.02 (using Silero recommended defaults)
 
 2. **Service Worker Integration**
-   - Add a `passiveSession` coordinator that receives VAD events, applies debounce/min-duration rules, and invokes existing `startRecording/stopRecording` helpers so backend semantics remain intact
+   - Add a `voice modeSession` coordinator that receives VAD events, applies debounce/min-duration rules, and invokes existing `startRecording/stopRecording` helpers so backend semantics remain intact
    - **PROVISIONAL DECISION:** Passive mode does NOT pause video (use `startRecording({ pauseVideo: false })` parameter)
    - Route messages through `chrome.runtime.sendMessage`; the service worker must not attempt DOM operations
    - Emit telemetry to console only (no Phoenix PubSub) for speech detection latency, ignored segments, and fallbacks
 
 3. **Debug / Manual Control Surface**
-   - Introduce a hidden "Debug" drawer in the side panel with the legacy start/stop controls, a "Force record" button, and passive-mode status indicators (`observing`, `recording`, `cooldown`, `error`)
+   - Introduce a hidden "Debug" drawer in the side panel with the legacy start/stop controls, a "Force record" button, and voice mode-mode status indicators (`observing`, `recording`, `cooldown`, `error`)
    - Gate the drawer behind a keyboard shortcut (e.g., `⌘⇧D`) and persist the setting
-   - Ensure manual controls work exactly as before when passive mode is off
+   - Ensure manual controls work exactly as before when voice mode is off
    - **PROVISIONAL DECISION:** Minimum viable drawer (status + toggles + manual buttons only, no telemetry graphs or threshold sliders)
 
 4. **Fallback Behaviour**
-   - Detect when local VAD cannot initialize (missing WebAudio, denied mic permissions, ONNX failures) and automatically disable passive mode while surfacing the error in the debug drawer
-   - Validate that cloud transcription fallback from Sprint 07 remains operational when passive mode is disabled
+   - Detect when local VAD cannot initialize (missing WebAudio, denied mic permissions, ONNX failures) and automatically disable voice mode while surfacing the error in the debug drawer
+   - Validate that cloud transcription fallback from Sprint 07 remains operational when voice mode is disabled
 
 5. **Basic Heartbeat**
    - Implement simple heartbeat ping every 5s from service worker to offscreen document to prevent browser from killing the offscreen context
@@ -73,12 +73,12 @@ Establish a passive audio capture path that triggers the existing recording pipe
 1. **✅ Passive Audio Detection Pipeline**
    - Energy-based VAD using RMS threshold (0.02)
    - Hybrid VAD architecture with Silero ONNX placeholder for future upgrade
-   - Persisted passive mode toggle in `chrome.storage.local` (default OFF)
+   - Persisted voice mode toggle in `chrome.storage.local` (default OFF)
    - VAD runs in offscreen document with event-based callbacks
 
 2. **✅ Service Worker Integration**
-   - `passiveSession` coordinator with debounce/min-duration rules (MIN_DURATION_MS=500, COOLDOWN_MS=500)
-   - `startRecording({ pauseVideo: false })` for non-interrupting passive mode
+   - `voice modeSession` coordinator with debounce/min-duration rules (MIN_DURATION_MS=500, COOLDOWN_MS=500)
+   - `startRecording({ pauseVideo: false })` for non-interrupting voice mode
    - **Critical architectural fix**: Persistent audio channel that stays open across multiple speech segments
    - Telemetry logging to console (speech detections, ignored segments, avg latency)
 
@@ -86,7 +86,7 @@ Establish a passive audio capture path that triggers the existing recording pipe
    - Debug drawer accessible via "Debug" button (not keyboard shortcut per user request)
    - Passive mode controls in main UI (toggle switch + status chip)
    - Status indicators: `idle`, `observing`, `recording`, `cooldown`, `error`
-   - Manual controls work when passive mode OFF
+   - Manual controls work when voice mode OFF
    - **UI Design Decision**: Passive mode is main UI, manual controls in debug drawer (reversed from original spec per user feedback)
 
 4. **✅ Fallback Behaviour**
@@ -104,7 +104,7 @@ Establish a passive audio capture path that triggers the existing recording pipe
 
 **Persistent Audio Channel (Critical Fix)**
 - Problem: Initial implementation created new WebSocket connection per speech segment
-- Solution: ONE persistent `audio:${sessionId}` channel created on passive session start
+- Solution: ONE persistent `audio:${sessionId}` channel created on voice mode session start
 - Impact: Eliminates connection churn, prepares foundation for Sprint 15 continuous sessions
 
 **chrome.storage Persistence**
@@ -114,7 +114,7 @@ Establish a passive audio capture path that triggers the existing recording pipe
 
 **Error Handling**
 - Offscreen document catches VAD init failures and sends error events
-- Service worker broadcasts `passive_status_update` to sidepanel
+- Service worker broadcasts `voice mode_status_update` to sidepanel
 - Sidepanel displays user-friendly error messages with actionable guidance
 
 ---
@@ -125,8 +125,8 @@ Establish a passive audio capture path that triggers the existing recording pipe
 - [x] Passive mode can be toggled on/off in the main UI; disabling it restores manual controls immediately ✅
 - [x] Telemetry logged to console (median detection latency verified in testing: ~127ms) ✅
 - [x] No regressions in note creation latency (local transcription: 427-545ms observed) ✅
-- [x] Manual "Force record" path works in debug drawer when passive mode OFF ✅
-- [x] Video playback continues uninterrupted during passive recording (no pausing) ✅
+- [x] Manual "Force record" path works in debug drawer when voice mode OFF ✅
+- [x] Video playback continues uninterrupted during voice mode recording (no pausing) ✅
 - [x] Documentation updated with implementation summary and troubleshooting guide ✅
 
 Nice-to-have (deferred to future sprints):
@@ -143,7 +143,7 @@ Nice-to-have (deferred to future sprints):
 |------|-----------|-------|
 | **WebRTC/energy threshold** | Default baseline | Runs entirely in AudioWorklet, low CPU, works offline |
 | **Silero ONNX (ort-web)** | Capability probe passes (WebAssembly/WebGPU available) | Run inference in offscreen document; AudioWorklet shuttles PCM frames via `port.postMessage`. Expect ~15–20 ms per 10 ms frame on M1-class hardware |
-| **Cloud/manual fallback** | Local init fails or user disables passive mode | Revert to existing manual controls; no automatic triggers |
+| **Cloud/manual fallback** | Local init fails or user disables voice mode | Revert to existing manual controls; no automatic triggers |
 
 VAD policy parameters:
 - Minimum speech duration: `MIN_DURATION_MS = 500`
@@ -157,16 +157,16 @@ VAD policy parameters:
 AudioWorklet (energy threshold) ──► Offscreen document (Silero optional)
       │                                 │
       └─ postMessage frames ────────────┘
-                    │  chrome.runtime.sendMessage({target: 'background', action: 'passive_event', ...})
+                    │  chrome.runtime.sendMessage({target: 'background', action: 'voice mode_event', ...})
                     ▼
-Service worker passiveSession coordinator ──► startRecording({pauseVideo: false}) / stopRecording()
+Service worker voice modeSession coordinator ──► startRecording({pauseVideo: false}) / stopRecording()
                     ▼
 Phoenix AudioChannel / AgentSession ──► existing note pipeline (unchanged)
                     ▼
 Side panel UI ──► status badge + debug drawer
 ```
 
-**Key Architectural Decision:** Passive coordinator is a thin routing layer. Backend AgentSession sees no difference between manual and passive triggers.
+**Key Architectural Decision:** Passive coordinator is a thin routing layer. Backend AgentSession sees no difference between manual and voice mode triggers.
 
 ### C. Passive Session Coordinator (Sketch)
 
@@ -174,7 +174,7 @@ Side panel UI ──► status badge + debug drawer
 const MIN_DURATION_MS = 500;
 const COOLDOWN_MS = 500;
 
-const passiveSession = {
+const voice modeSession = {
   tabId: null,
   status: 'idle',
   vadEnabled: false,  // Default OFF
@@ -190,44 +190,44 @@ const passiveSession = {
 };
 
 function handlePassiveEvent(event) {
-  if (!passiveSession.vadEnabled) return;
+  if (!voice modeSession.vadEnabled) return;
 
-  if (event.type === 'speech_start' && passiveSession.status !== 'recording') {
-    passiveSession.status = 'recording';
-    passiveSession.lastStartAt = Date.now();
+  if (event.type === 'speech_start' && voice modeSession.status !== 'recording') {
+    voice modeSession.status = 'recording';
+    voice modeSession.lastStartAt = Date.now();
 
-    // CRITICAL: Don't pause video in passive mode
+    // CRITICAL: Don't pause video in voice mode
     startRecording({ pauseVideo: false });
 
     broadcastStatus('recording');
-    passiveSession.telemetry.speechDetections++;
-  } else if (event.type === 'speech_end' && passiveSession.status === 'recording') {
-    const duration = Date.now() - passiveSession.lastStartAt;
+    voice modeSession.telemetry.speechDetections++;
+  } else if (event.type === 'speech_end' && voice modeSession.status === 'recording') {
+    const duration = Date.now() - voice modeSession.lastStartAt;
 
     if (duration >= MIN_DURATION_MS) {
       stopRecording();
-      passiveSession.status = 'cooldown';
+      voice modeSession.status = 'cooldown';
 
       // Log latency
       const latency = event.detectionLatency || 0;
-      passiveSession.telemetry.avgLatencyMs =
-        (passiveSession.telemetry.avgLatencyMs * (passiveSession.telemetry.speechDetections - 1) + latency) /
-        passiveSession.telemetry.speechDetections;
+      voice modeSession.telemetry.avgLatencyMs =
+        (voice modeSession.telemetry.avgLatencyMs * (voice modeSession.telemetry.speechDetections - 1) + latency) /
+        voice modeSession.telemetry.speechDetections;
 
       setTimeout(() => {
-        if (passiveSession.status === 'cooldown') {
-          passiveSession.status = 'observing';
+        if (voice modeSession.status === 'cooldown') {
+          voice modeSession.status = 'observing';
           broadcastStatus('observing');
         }
       }, COOLDOWN_MS);
     } else {
-      passiveSession.telemetry.ignoredShort++;
+      voice modeSession.telemetry.ignoredShort++;
       console.log('[Passive] Ignored short speech segment:', duration, 'ms');
       broadcastStatus('ignored');
     }
   } else if (event.type === 'error') {
-    passiveSession.vadEnabled = false;
-    passiveSession.status = 'error';
+    voice modeSession.vadEnabled = false;
+    voice modeSession.status = 'error';
     broadcastStatus('error', event.detail);
   }
 }
@@ -261,8 +261,8 @@ async function startPassiveSession() {
     }
   }, 5000);
 
-  passiveSession.vadEnabled = true;
-  passiveSession.status = 'observing';
+  voice modeSession.vadEnabled = true;
+  voice modeSession.status = 'observing';
 }
 
 async function stopPassiveSession() {
@@ -274,8 +274,8 @@ async function stopPassiveSession() {
     action: 'stop_vad'
   });
 
-  passiveSession.vadEnabled = false;
-  passiveSession.status = 'idle';
+  voice modeSession.vadEnabled = false;
+  voice modeSession.status = 'idle';
 }
 ```
 
@@ -284,11 +284,11 @@ async function stopPassiveSession() {
 **Minimum Viable (Sprint 10):**
 - Live status chip (`idle`, `observing`, `recording`, `cooldown`, `error`)
 - Toggle switches:
-  - "Enable Passive Mode" (default OFF)
+  - "Enable Voice Mode" (default OFF)
   - "Enable Silero Boost" (default OFF if energy-only is working)
 - Manual control buttons:
-  - "Start Recording" (works when passive OFF)
-  - "Stop Recording" (works when passive OFF)
+  - "Start Recording" (works when voice mode OFF)
+  - "Stop Recording" (works when voice mode OFF)
   - "Force Recording" (emergency override)
 - Keyboard shortcut: `⌘⇧D` or `Ctrl+Shift+D` to toggle drawer visibility
 
@@ -391,7 +391,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   - Speak very quietly → VAD detects or ignores based on threshold
 
 - [ ] **Manual fallback:**
-  - Disable passive mode → manual buttons still work
+  - Disable voice mode → manual buttons still work
   - Mic permission denied → error shown in debug drawer, manual mode available
 
 - [ ] **Multi-tab behavior:**
@@ -399,7 +399,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 - [ ] **Cleanup:**
   - Close side panel mid-recording → recording stops gracefully
-  - Browser restart → passive mode setting persists
+  - Browser restart → voice mode setting persists
 
 ### 2. Automation
 
@@ -409,7 +409,7 @@ describe('Passive Event Coordinator', () => {
   test('ignores speech < MIN_DURATION_MS', () => {
     handlePassiveEvent({type: 'speech_start'});
     handlePassiveEvent({type: 'speech_end', duration: 300});
-    expect(passiveSession.telemetry.ignoredShort).toBe(1);
+    expect(voice modeSession.telemetry.ignoredShort).toBe(1);
   });
 
   test('enforces cooldown between recordings', async () => {
@@ -419,14 +419,14 @@ describe('Passive Event Coordinator', () => {
 
     // Immediate retry during cooldown
     handlePassiveEvent({type: 'speech_start'});
-    expect(passiveSession.status).toBe('cooldown');
+    expect(voice modeSession.status).toBe('cooldown');
   });
 });
 ```
 
 **ExUnit integration tests:**
 ```elixir
-describe "passive trigger compatibility" do
+describe "voice mode trigger compatibility" do
   test "handles rapid VAD start/stop" do
     {:ok, _pid} = Session.start_link(session_id: sid, video_id: 123)
 
@@ -486,9 +486,9 @@ end
 | **Mic permission denial** | Show error in debug drawer, keep manual buttons active, prompt user to grant permission |
 | **Background tab throttling** | Send heartbeat from offscreen document every 5s; log failures (no auto-restart in Sprint 10) |
 | **False positives** | Provide threshold tuning via debug drawer toggles, minimum duration filter (500ms), log telemetry for future adjustment |
-| **Multiple tabs recording** | Reuse existing `TabManager` guard—passive session honors single active recording invariant |
-| **Offscreen document killed** | Heartbeat detects failure; user must manually restart passive mode (automatic restart in Sprint 11) |
-| **Video pause confusion** | Clearly document that passive mode does NOT pause video; add tooltip in debug drawer |
+| **Multiple tabs recording** | Reuse existing `TabManager` guard—voice mode session honors single active recording invariant |
+| **Offscreen document killed** | Heartbeat detects failure; user must manually restart voice mode (automatic restart in Sprint 11) |
+| **Video pause confusion** | Clearly document that voice mode does NOT pause video; add tooltip in debug drawer |
 
 ---
 
@@ -500,7 +500,7 @@ Before tackling automated frame capture we need:
 - [ ] Average VAD detection latency (target: <150ms achieved?)
 - [ ] False positive rate (target: <2% achieved?)
 - [ ] Average speech segment duration (informs frame capture frequency)
-- [ ] User feedback on passive mode UX (too aggressive? not responsive enough?)
+- [ ] User feedback on voice mode UX (too aggressive? not responsive enough?)
 
 **Technical decisions for Sprint 11:**
 - [ ] Frame capture trigger strategy (VAD-only vs multi-trigger)
@@ -509,7 +509,7 @@ Before tackling automated frame capture we need:
 - [ ] Upload retry and error handling patterns
 
 **UX research:**
-- [ ] Sign-off on passive mode indicator design
+- [ ] Sign-off on voice mode indicator design
 - [ ] Approval for debug drawer as primary control surface
 - [ ] User testing feedback on "no video pause" behavior
 
@@ -524,7 +524,7 @@ Before tackling automated frame capture we need:
    - *May change if:* Users expect always-on behavior, false positive rate < 1%
 
 2. **Video Pause:** Passive mode does NOT pause video
-   - *Rationale:* Non-interrupting UX is core to "passive" concept
+   - *Rationale:* Non-interrupting UX is core to "voice mode" concept
    - *May change if:* Users prefer video pausing for better timestamp accuracy
 
 3. **Telemetry:** Console logging only, no Phoenix PubSub
@@ -561,7 +561,7 @@ Before tackling automated frame capture we need:
 1. Click the microphone icon in Chrome's address bar
 2. Select "Always allow" for microphone access
 3. Refresh the page
-4. Re-enable passive mode in the side panel
+4. Re-enable voice mode in the side panel
 
 **Prevention:** Grant microphone permission when first prompted.
 
@@ -577,7 +577,7 @@ Before tackling automated frame capture we need:
 1. Check that a microphone is connected and enabled in System Preferences
 2. Verify Chrome can access the mic: chrome://settings/content/microphone
 3. Try restarting Chrome
-4. Re-enable passive mode after connecting microphone
+4. Re-enable voice mode after connecting microphone
 
 ---
 
@@ -638,7 +638,7 @@ Before tackling automated frame capture we need:
 
 **Solution:**
 1. Check console for heartbeat failures
-2. Disable passive mode and re-enable to restart VAD
+2. Disable voice mode and re-enable to restart VAD
 3. **Note:** Automatic restart will be added in Sprint 11
 
 ---
@@ -646,19 +646,19 @@ Before tackling automated frame capture we need:
 #### 7. Video Pauses During Passive Recording
 
 **Symptoms:**
-- Video pauses when passive mode detects speech (unexpected)
+- Video pauses when voice mode detects speech (unexpected)
 
-**Expected Behavior:** Video should **NOT** pause in passive mode. This is a critical design decision.
+**Expected Behavior:** Video should **NOT** pause in voice mode. This is a critical design decision.
 
 **If video is pausing:**
-1. Check that passive mode is actually enabled (toggle switch active)
-2. Verify debug drawer shows passive mode, not manual recording
+1. Check that voice mode is actually enabled (toggle switch active)
+2. Verify debug drawer shows voice mode, not manual recording
 3. Check console for `startRecording({ pauseVideo: false })` calls
 4. Report as bug - this shouldn't happen
 
 ---
 
-#### 8. Passive Mode Doesn't Persist After Reload
+#### 8. Voice Mode Doesn't Persist After Reload
 
 **Symptoms:**
 - Passive mode disabled after closing/reopening side panel
@@ -669,33 +669,33 @@ Before tackling automated frame capture we need:
 **Solution:**
 1. Check browser console for storage errors
 2. Verify Chrome has storage permissions
-3. Try manually toggling passive mode on again
+3. Try manually toggling voice mode on again
 4. Check `chrome.storage.local` in DevTools: `chrome.storage.local.get('settings', console.log)`
 
 ---
 
 ### Debug Console Commands
 
-**Check passive session state:**
+**Check voice mode session state:**
 ```javascript
 // Run in side panel console
-chrome.runtime.sendMessage({ action: 'get_passive_session_state' }, console.log);
+chrome.runtime.sendMessage({ action: 'get_voice mode_session_state' }, console.log);
 ```
 
 **Check persisted settings:**
 ```javascript
 chrome.storage.local.get('settings', (result) => {
-  console.log('Passive mode enabled:', result.settings?.features?.passiveModeEnabled);
+  console.log('Passive mode enabled:', result.settings?.features?.voiceModeEnabled);
 });
 ```
 
 **Manual VAD restart:**
 ```javascript
 // Disable
-chrome.runtime.sendMessage({ action: 'stop_passive_session' });
+chrome.runtime.sendMessage({ action: 'stop_voice mode_session' });
 
 // Enable
-chrome.runtime.sendMessage({ action: 'start_passive_session' });
+chrome.runtime.sendMessage({ action: 'start_voice mode_session' });
 ```
 
 ---

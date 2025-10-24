@@ -1,6 +1,6 @@
 # VAD Tuning Guide
 
-Voice Activity Detection (VAD) configuration for Lossy passive mode.
+Voice Activity Detection (VAD) configuration for Lossy voice mode.
 
 ## Default Thresholds
 
@@ -253,7 +253,7 @@ A: No, VAD settings are global. Consider using manual recording mode for specifi
 A: Very low thresholds (< 0.30) cause excessive false positives. The Silero model is not designed for such sensitivity.
 
 **Q: Can I disable VAD entirely?**
-A: Yes, just don't start passive mode. Use manual recording (click microphone button) instead.
+A: Yes, just don't start voice mode. Use manual recording (click microphone button) instead.
 
 **Q: How do I enable debug logging?**
 A: Debug logging is controlled by `logger.debug()` calls. Currently gated by settings (future enhancement). For now, check browser console.

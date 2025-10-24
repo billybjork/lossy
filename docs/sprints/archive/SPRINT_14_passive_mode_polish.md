@@ -1,4 +1,4 @@
-# Sprint 14: Passive Mode Quality & Polish
+# Sprint 14: Voice Mode Quality & Polish
 
 **Status:** ✅ Completed (2025-10-23)
 **Priority:** High
@@ -32,7 +32,7 @@
    - Auto-restart on transient failures
    - User notifications for permanent failures
 
-4. **Passive Mode Feedback & Telemetry** - COMPLETE
+4. **Voice Mode Feedback & Telemetry** - COMPLETE
    - Badge updates working (note count + status color)
    - Telemetry data collection working
    - Status chip updating in real-time
@@ -42,7 +42,7 @@
 
 **Refactor Results (Commits: 104ab6c → 106c755):**
 - **Service worker decomposition:** 2368 → 1055 lines (55% reduction)
-- **5 focused modules extracted:** passive-session-manager, recording-manager, socket-manager, video-context-manager, note-manager
+- **5 focused modules extracted:** voice-session-manager, recording-manager, socket-manager, video-context-manager, note-manager
 - **Frozen config constants:** All VAD tunables centralized in VAD_CONFIG, PASSIVE_SESSION_CONFIG
 - **Production logging:** Centralized logger with DEBUG gating (off by default)
 - **Zero lint warnings:** All eslint warnings resolved
@@ -69,7 +69,7 @@
 
 **Functionality:**
 - [x] Passive mode smoke test: 100% pass
-- [x] Start passive → observing state
+- [x] Start voice mode → observing state
 - [x] Speak → recording starts, note created
 - [x] Switch tabs during recording → note routes to correct video
 - [x] Auto-pause/resume works (video pauses on speech, resumes after)
@@ -103,7 +103,7 @@ After refactoring, responsibilities are clearly separated:
 | Module | Owns | Does NOT Own |
 |--------|------|--------------|
 | `vad-detector.js` | Silero inference, state machine, speech events | Audio capture, Chrome APIs |
-| `passive-session-manager.js` | Passive session lifecycle, VAD event handling, circuit breaker | Manual recording, video detection |
+| `voice-session-manager.js` | Passive session lifecycle, VAD event handling, circuit breaker | Manual recording, video detection |
 | `recording-manager.js` | Manual recording, offscreen lifecycle | Passive mode, VAD events |
 | `video-context-manager.js` | Video detection, content script injection | Recording, notes |
 | `note-manager.js` | Note CRUD, marker sync | Recording, video context |
@@ -119,7 +119,7 @@ After refactoring, responsibilities are clearly separated:
 ### Sprint 14 Core Features (Phases 1-5)
 - `104ab6c` - Phase 1: VAD config + shared constants (frozen configs)
 - `7e020de` - Phase 2: Centralized logger with DEBUG gating
-- `2bc6ece` - Phase 3 Pass 1: Pure state helpers (passive-session-state, recording-context-state)
+- `2bc6ece` - Phase 3 Pass 1: Pure state helpers (voice mode-session-state, recording-context-state)
 - `cee5960` - Phase 3 Pass 2: Passive session manager extraction (735 lines)
 - `a642e6f` - Phase 3 Pass 2: Fix broadcastsSetUp variable declaration bug
 - `37a3269` - Phase 3 Pass 3: Extract 4 modules (recording, socket, video-context, notes)
@@ -148,7 +148,7 @@ User verified working after each phase with complete smoke tests showing:
 ---
 
 **Related Sprints**
-- ✅ Sprint 10 – Always-On Foundations (passive audio VAD baseline)
+- ✅ Sprint 10 – Always-On Foundations (voice mode audio VAD baseline)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
 - 🔜 Sprint 14 – Continuous Session Persistence
 - 🔜 Sprint 15+ – Automated Frame Capture & Diffusion
@@ -157,7 +157,7 @@ User verified working after each phase with complete smoke tests showing:
 
 ## Purpose
 
-Improve passive mode quality, accuracy, and user experience through ML-based VAD (Silero ONNX), visual status indicators, waveform visualizer, and automatic restart capabilities. These enhancements will reduce false positives from ~10-20% to <5%, provide better visibility into system state, and improve reliability.
+Improve voice mode quality, accuracy, and user experience through ML-based VAD (Silero ONNX), visual status indicators, waveform visualizer, and automatic restart capabilities. These enhancements will reduce false positives from ~10-20% to <5%, provide better visibility into system state, and improve reliability.
 
 **Scope:** Passive mode quality improvements only. Does NOT include frame capture or continuous sessions (deferred to Sprint 14+).
 
@@ -173,8 +173,8 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
    - Surface clear errors + auto-retries when Silero cannot initialize (graceful degradation)
    - Target: <5% false positive rate (down from 10-20%) and reliable `speech_end` detection
 
-2. **Passive Mode Feedback & Telemetry**
-   - Reuse the existing passive status chip and waveform, wiring them to live Silero telemetry
+2. **Voice Mode Feedback & Telemetry**
+   - Reuse the existing voice mode status chip and waveform, wiring them to live Silero telemetry
    - Add Chrome action badge updates (recording state + note count)
    - Surface initialization / error states in the side panel and debug drawer
    - Optional lightweight video overlay remains deferred unless needed
@@ -195,7 +195,7 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 5. **Debug Drawer Instrumentation**
    - Wire the existing debug drawer elements to real metrics (latency, detections, errors)
    - Display current session statistics and last Silero confidence score
-   - Provide quick actions for manual recovery when passive mode has failed
+   - Provide quick actions for manual recovery when voice mode has failed
 
 ### Success Criteria
 
@@ -224,7 +224,7 @@ Improve passive mode quality, accuracy, and user experience through ML-based VAD
 - Bundle the Silero v5 ONNX model (~2 MB) with the extension and run it via `onnxruntime-web`
 - Keep inference inside the offscreen document, using a dedicated `AudioContext` + `ScriptProcessor` to feed frames
 - Maintain a lightweight frame buffer (160-sample chunks → 512-sample tensors) and persist Silero LSTM state between calls
-- Treat Silero as the single source of truth; if initialization fails, surface the error, stop passive mode, and offer retry guidance
+- Treat Silero as the single source of truth; if initialization fails, surface the error, stop voice mode, and offer retry guidance
 
 **Why This Fixes the Bug:**
 - **ML-trained speech/silence discrimination:** Silero distinguishes actual speech from background noise
@@ -259,10 +259,10 @@ SileroVAD (onnxruntime-web, WASM)
    - Frame buffering utilities (160 → 512 samples)
    - LSTM state lifecycle + reset on silence or explicit stop
    - Confidence/latency reporting hooks for telemetry
-   - Adjust the passive `ScriptProcessor` to `bufferSize = 1024` and feed the frame buffer continuously
+   - Adjust the voice mode `ScriptProcessor` to `bufferSize = 1024` and feed the frame buffer continuously
 5. **Retire HybridVAD:** Replace the current hybrid orchestrator with a single Silero-backed controller. On load failure:
-   - Emit a `passive_event` error to the service worker
-   - Stop passive mode, show actionable UI, and wait for user retry or automatic restart policy
+   - Emit a `voice mode_event` error to the service worker
+   - Stop voice mode, show actionable UI, and wait for user retry or automatic restart policy
 6. **Test and validate:**
    - Confirm model loads in the offscreen document and respects MV3 sandboxing
    - Measure detection quality in quiet vs noisy environments (<5% false positives)
@@ -279,35 +279,35 @@ SileroVAD (onnxruntime-web, WASM)
 
 ---
 
-### 2. Passive Mode Feedback & Telemetry
+### 2. Voice Mode Feedback & Telemetry
 
 **Current State:**
-- Main side panel already shows a passive status chip + waveform container
+- Main side panel already shows a voice mode status chip + waveform container
 - Waveform component runs locally but is not connected to real VAD telemetry
 - Chrome action badge is unused, and debug drawer values are static placeholders
 
 **Proposed Solution:**
 
 **A. Wire existing UI to live data**
-- Drive the passive status chip (`idle | observing | recording | cooldown | error`) directly from service-worker telemetry events
+- Drive the voice mode status chip (`idle | observing | recording | cooldown | error`) directly from service-worker telemetry events
 - Toggle the waveform container based on Silero state and update styling when recording
 - Display last inference latency and Silero confidence under the debug drawer telemetry rows
 
 **B. Chrome action badge**
 - Show active recording count on the extension icon
 - Highlight recording state (e.g., red badge background) while speech is in progress
-- Clear badge when passive mode is idle or disabled
+- Clear badge when voice mode is idle or disabled
 
 **C. Error surfacing**
-- Reuse `passiveErrorMessage` element to show actionable Silero initialization failures
-- Provide “Retry” / “Disable passive mode” quick actions inside the debug drawer
+- Reuse `voice modeErrorMessage` element to show actionable Silero initialization failures
+- Provide “Retry” / “Disable voice mode” quick actions inside the debug drawer
 - Log failures with timestamps for easier debugging
 
 **Implementation Steps:**
-1. Extend `passive_status_update` payloads to include state, last latency, confidence, and note count.
+1. Extend `voice mode_status_update` payloads to include state, last latency, confidence, and note count.
 2. Update `sidepanel.js` to hydrate the status chip, waveform, telemetry rows, and error area with those values.
-3. Hook `chrome.action.setBadgeText()` / `setBadgeBackgroundColor()` into the service worker whenever passive state changes.
-4. Add debug drawer buttons for “Retry VAD” and “Disable passive mode”, wiring them to service-worker commands.
+3. Hook `chrome.action.setBadgeText()` / `setBadgeBackgroundColor()` into the service worker whenever voice mode state changes.
+4. Add debug drawer buttons for “Retry VAD” and “Disable voice mode”, wiring them to service-worker commands.
 
 **Acceptance Criteria:**
 - Status chip, waveform, and badge update within 100 ms of state changes
@@ -380,7 +380,7 @@ Content script (video control)
 **Current State:**
 - Heartbeat detects VAD failures (logged to console)
 - No automatic restart
-- User must manually restart passive mode
+- User must manually restart voice mode
 
 **Proposed Solution:**
 
@@ -466,7 +466,7 @@ async function handleHeartbeatFailure() {
 - Show real-time detection metrics (latency, confidence scores)
 - Session statistics (notes created, detection count, uptime, restart attempts)
 - Error logging with timestamps + remediation shortcuts
-- Manual controls for retrying Silero or disabling passive mode
+- Manual controls for retrying Silero or disabling voice mode
 
 **Debug Metrics to Display:**
 ```javascript
@@ -476,7 +476,7 @@ async function handleHeartbeatFailure() {
   lastConfidence: 0.85,              // Last Silero confidence score
   sessionsCreated: 12,               // Notes created this session
   detectionCount: 15,                // Total speech detections
-  uptime: "45min",                   // How long passive mode running
+  uptime: "45min",                   // How long voice mode running
   restartAttempts: 1,                // Auto-restart count during session
   errors: [                          // Recent errors with timestamps
     { time: "14:32:15", msg: "Model load failed" }
@@ -514,7 +514,7 @@ async function handleHeartbeatFailure() {
 
 ### Phase 3: Auto-Pause Video (0.5 week)
 - Add playback state capture + pause/resume helpers to platform adapters
-- Integrate with passive event handler (500 ms resume debounce, respect manual pauses)
+- Integrate with voice mode event handler (500 ms resume debounce, respect manual pauses)
 - Provide user setting + onboarding tip
 
 ### Phase 4: Reliability Guardrails (0.5 week)
@@ -549,8 +549,8 @@ async function handleHeartbeatFailure() {
 - Machine learning-based threshold optimization
 
 ### Privacy Controls
-- Pause/resume passive mode per tab
-- Exclude domains from passive mode
+- Pause/resume voice mode per tab
+- Exclude domains from voice mode
 - Audio sample review before upload (paranoid mode)
 
 ### Full Telemetry Dashboard (Deferred)
@@ -565,11 +565,11 @@ async function handleHeartbeatFailure() {
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| **Silero model fails to load** | VAD unusable, passive mode broken | Clear error message with troubleshooting steps, retry logic |
+| **Silero model fails to load** | VAD unusable, voice mode broken | Clear error message with troubleshooting steps, retry logic |
 | **Silero inference slower than expected** | Increased latency, missed speech | Profile in real-world conditions, optimize sample rate conversion |
 | **Auto-pause annoys users** | Users disable feature, poor UX | Make configurable (default ON), 500ms debounce, respect manual pause state |
 | **Platform adapter pause/play fails** | Auto-pause doesn't work on some sites | Graceful degradation, test across all platforms, log failures |
-| **Telemetry UI perf** | High CPU usage, battery drain | Throttle waveform updates, reuse existing canvas, only render when passive mode active |
+| **Telemetry UI perf** | High CPU usage, battery drain | Throttle waveform updates, reuse existing canvas, only render when voice mode active |
 | **Circuit breaker too aggressive** | VAD disabled when it could work | Conservative limits (3 restarts, 1min window), user can override |
 | **WebAssembly compatibility** | Model won't run | Extremely low risk (99% browser support), but detect and show error if needed |
 

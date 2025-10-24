@@ -6,9 +6,9 @@
 **Progress:** 0%
 
 **Related Sprints**
-- ✅ Sprint 10 – Always-On Foundations (passive audio VAD)
+- ✅ Sprint 10 – Always-On Foundations (voice mode audio VAD)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
-- 🔜 Sprint 14 – Passive Mode Polish (Silero VAD)
+- 🔜 Sprint 14 – Voice Mode Mode Polish (Silero VAD)
 - 🔜 Sprint 15 – Continuous Session Persistence (evidence ledger, context windowing)
 - 🔜 Sprint TBD – Automated Frame Capture (ledger-compatible frame ingestion)
 

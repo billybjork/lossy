@@ -6,7 +6,7 @@
 **Progress:** 0%
 
 **Related Sprints**
-- ✅ Sprint 10 – Always-On Foundations (passive audio VAD)
+- ✅ Sprint 10 – Always-On Foundations (voice mode audio VAD)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
 - 🔜 Sprint 14 – Passive Mode Polish (Silero VAD)
 - 🔜 Sprint 15+ – Automated Frame Capture & Diffusion Refinement
@@ -21,7 +21,7 @@ Transform AgentSession from ephemeral (per-recording) to continuous (long-lived 
 - Foundation for diffusion-based refinement (Sprint 15+)
 - Better conversation continuity for the agent
 
-**Key Insight:** Current architecture creates a new session per recording. For passive mode to feel like a continuous assistant, the session must persist across the entire video viewing session.
+**Key Insight:** Current architecture creates a new session per recording. For voice mode mode to feel like a continuous assistant, the session must persist across the entire video viewing session.
 
 ---
 

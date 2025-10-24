@@ -15,7 +15,7 @@ Establish a unified analytics and telemetry layer covering both the Chrome exten
 
 | Area | Current State | Gap |
 |------|---------------|-----|
-| Passive mode VAD (Sprint 10) | Debug drawer counters (`speechDetections`, `ignoredShort`, `avgLatencyMs`) updated in-memory | No persistence, no historical tracking, no alerting |
+| Voice Mode mode VAD (Sprint 10) | Debug drawer counters (`speechDetections`, `ignoredShort`, `avgLatencyMs`) updated in-memory | No persistence, no historical tracking, no alerting |
 | Local transcription (Sprint 07) | TODO to emit `[:lossy, :stt, ...]` telemetry events | Events never shipped; success/fallback rate unknown |
 | Continuous sessions (Sprint 15 planned) | Design references mailbox depth telemetry | Implementation pending |
 | IndexedDB cache (Sprint 13) | Console logs for cache hits/prunes | No metrics for hit rate, eviction frequency, quota usage |
@@ -28,11 +28,11 @@ Establish a unified analytics and telemetry layer covering both the Chrome exten
 ## Deliverables
 
 - [ ] Extension telemetry module (`extension/src/shared/telemetry.js`) with buffered, reliable event dispatch.
-- [ ] Phoenix telemetry router (`lossy/lib/lossy/telemetry.ex`) attaching to core processes (STT, passive agent, cache eviction).
+- [ ] Phoenix telemetry router (`lossy/lib/lossy/telemetry.ex`) attaching to core processes (STT, voice mode agent, cache eviction).
 - [ ] Event schema catalog (YAML/JSON) describing payloads, PII handling, sampling rules.
 - [ ] Storage/transport: initial implementation via Phoenix Channel -> Oban job -> PostgreSQL `analytics_events` table.
 - [ ] Grafana/LiveDashboard boards for:
-  - Passive mode detection quality (latency, ignored segments, false positives).
+  - Voice Mode mode detection quality (latency, ignored segments, false positives).
   - STT success rate (local vs fallback).
   - Cache health (IndexedDB hit rate, eviction counts, quota usage).
 - [ ] Debug drawer updates surfacing aggregated metrics (past 5 minutes window) to developers.
@@ -54,7 +54,7 @@ Establish a unified analytics and telemetry layer covering both the Chrome exten
   - Offline buffer in IndexedDB (`telemetry_events` store) with retry.
   - Rate limiting/batching per event family.
 - Instrument existing hotspots:
-  - Passive session counters (`extension/src/background/service-worker.js`).
+  - Voice Mode session counters (`extension/src/background/service-worker.js`).
   - Notes cache hits/misses & evictions (`extension/src/sidepanel/sidepanel.js`).
   - Library fetch durations & error rates.
 
@@ -66,13 +66,13 @@ Establish a unified analytics and telemetry layer covering both the Chrome exten
 
 ### Task 4: Visualization & Alerts
 - Create Grafana/Prometheus integration (or LiveDashboard pages) for:
-  - Passive mode detection KPIs.
+  - Voice Mode mode detection KPIs.
   - STT local vs fallback success.
   - Cache eviction rate & storage usage.
 - Define alert thresholds (e.g., fallback rate > 20%, cache eviction spike) with playbooks.
 
 ### Task 5: Developer Experience
-- Extend passive mode debug drawer to display rolling averages (using telemetry subscriber).
+- Extend voice mode mode debug drawer to display rolling averages (using telemetry subscriber).
 - Add CLI task `mix telemetry.dump --since 1h` for quick inspection.
 - Document onboarding: how to add new events, test locally, and validate in staging.
 
@@ -82,8 +82,8 @@ Establish a unified analytics and telemetry layer covering both the Chrome exten
 
 | Event | Source | Key Fields | Purpose |
 |-------|--------|------------|---------|
-| `lossy.passive.speech_detected` | Background SW | latency_ms, amplitude, ignored (bool), session_id | Monitor VAD performance |
-| `lossy.passive.segment_ignored` | Background SW | reason (`short`, `cooldown`, `noise`), duration_ms | Tune thresholds |
+| `lossy.voice mode.speech_detected` | Background SW | latency_ms, amplitude, ignored (bool), session_id | Monitor VAD performance |
+| `lossy.voice mode.segment_ignored` | Background SW | reason (`short`, `cooldown`, `noise`), duration_ms | Tune thresholds |
 | `lossy.stt.request` / `lossy.stt.completed` / `lossy.stt.fallback` | Backend | mode (`local_webgpu`, `local_wasm`), duration_ms, error_msg | Local STT health |
 | `lossy.cache.notes_hit` / `miss` / `evicted` | Sidepanel | video_id hash, warm_start (bool), evicted_count | Cache effectiveness |
 | `lossy.cache.videos_evicted` | Sidepanel | evicted_count | Track library churn |
@@ -95,9 +95,9 @@ Establish a unified analytics and telemetry layer covering both the Chrome exten
 ## Testing & Validation
 
 - Unit tests for telemetry buffer edge cases (backoff, offline mode).
-- Integration test: simulate passive session and assert metrics written to `analytics_events`.
+- Integration test: simulate voice mode session and assert metrics written to `analytics_events`.
 - Manual smoke:
-  1. Trigger passive mode, verify dashboard updates.
+  1. Trigger voice mode mode, verify dashboard updates.
   2. Force cache eviction and confirm metric increments.
   3. Disconnect network, emit events, reconnect → ensure queued events flush.
 - Load test: fire 1k events/min to ensure Oban ingestion keeps up (<10% drop).

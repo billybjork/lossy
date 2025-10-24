@@ -19,7 +19,7 @@ import { telemetryEmitter } from './telemetry-emitter.js';
  *
  *   // Log messages with context
  *   logger.debug('VAD', 'Processing frame', frameData);
- *   logger.info('Passive', 'Session started');
+ *   logger.info('Voice Mode', 'Session started');
  *   logger.warn('CircuitBreaker', 'Restart attempt', attemptCount);
  *   logger.error('Recording', error, 'Failed to start recording');
  */
@@ -53,7 +53,7 @@ export const logger = {
    * Debug level logging (verbose, gated by settings)
    * Only logs when debugEnabled is true
    *
-   * @param {string} context - Context/module name (e.g., 'VAD', 'Passive', 'Recording')
+   * @param {string} context - Context/module name (e.g., 'VAD', 'Voice Mode', 'Recording')
    * @param {...any} args - Arguments to log
    */
   debug: (context, ...args) => {

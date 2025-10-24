@@ -11,7 +11,7 @@
 // - Audio: Mic → Service Worker → AudioChannel → Phoenix → AgentSession
 // - Notes: AgentSession → PubSub → NotesChannel → Sidepanel (this file)
 
-import { getPassiveModeEnabled, setPassiveModeEnabled } from '../shared/settings.js';
+import { getVoiceModeEnabled, setVoiceModeEnabled } from '../shared/settings.js';
 import db from '../shared/db.js';
 
 // Sprint 12: Phoenix Socket for direct notes subscription
@@ -161,7 +161,7 @@ let notesSocket = null;
 let notesChannel = null;
 let pendingSubscription = null; // Video ID to subscribe to once socket connects
 
-// Removed: Manual recording buttons (replaced by passive mode toggle in main UI)
+// Removed: Manual recording buttons (replaced by voice mode toggle in main UI)
 // const recordBtn = document.getElementById('recordBtn');
 // const pauseBtn = document.getElementById('pauseBtn');
 // const waveformContainer = document.getElementById('waveformContainer');
@@ -174,11 +174,11 @@ const videoTimestampEl = document.getElementById('videoTimestamp');
 const modeBadge = document.getElementById('modeBadge');
 const timingInfo = document.getElementById('timingInfo');
 
-// Sprint 10: Passive mode elements (Main UI)
-const passiveStatusMain = document.getElementById('passiveStatusMain');
-const passiveModeToggleMain = document.getElementById('passiveModeToggleMain');
+// Sprint 10: Voice mode elements (Main UI)
+const voiceStatusMain = document.getElementById('voiceStatusMain');
+const voiceModeToggleMain = document.getElementById('voiceModeToggleMain');
 const debugToggleBtn = document.getElementById('debugToggleBtn');
-const passiveErrorMessage = document.getElementById('passiveErrorMessage');
+const voiceErrorMessage = document.getElementById('voiceErrorMessage');
 
 // Sprint 10: Debug drawer elements
 const debugDrawer = document.getElementById('debugDrawer');
@@ -195,7 +195,7 @@ const telemetryCountersLabel = document.getElementById('telemetryCounters');
 const refreshTelemetryBtn = document.getElementById('refreshTelemetryBtn');
 
 const retryVADBtn = document.getElementById('retryVADBtn');
-const disablePassiveBtn = document.getElementById('disablePassiveBtn');
+const disableVoiceBtn = document.getElementById('disableVoiceBtn');
 
 // Initialize LiveWaveform
 const waveformCanvas = document.getElementById('waveformCanvas');
@@ -410,7 +410,7 @@ class LiveWaveform {
   }
 }
 
-// Removed: Manual recording button and toggleRecording function (replaced by passive mode toggle in main UI)
+// Removed: Manual recording button and toggleRecording function (replaced by voice mode toggle in main UI)
 // recordBtn.addEventListener('click', toggleRecording);
 // pauseBtn.addEventListener('click', toggleRecording);
 
@@ -425,42 +425,42 @@ if (refreshTelemetryBtn) {
   });
 }
 
-// Sprint 10: Passive mode toggle (Main UI)
-passiveModeToggleMain.addEventListener('click', async () => {
-  const isActive = passiveModeToggleMain.classList.contains('active');
+// Sprint 10: Voice mode toggle (Main UI)
+voiceModeToggleMain.addEventListener('click', async () => {
+  const isActive = voiceModeToggleMain.classList.contains('active');
 
   if (isActive) {
-    // Disable passive mode
+    // Disable voice mode
     try {
-      await chrome.runtime.sendMessage({ action: 'stop_passive_session' });
-      passiveModeToggleMain.classList.remove('active');
-      updatePassiveStatus('idle');
+      await chrome.runtime.sendMessage({ action: 'stop_voice_session' });
+      voiceModeToggleMain.classList.remove('active');
+      updateVoiceStatus('idle');
 
       // Sprint 10: Persist state to chrome.storage
-      await setPassiveModeEnabled(false);
-      console.log('[Passive] Passive mode disabled and saved to storage');
+      await setVoiceModeEnabled(false);
+      console.log('[Voice Mode] Voice mode disabled and saved to storage');
     } catch (err) {
-      console.error('[Passive] Failed to stop passive session:', err);
+      console.error('[Voice Mode] Failed to stop voice session:', err);
     }
   } else {
-    // Enable passive mode
+    // Enable voice mode
     try {
-      await chrome.runtime.sendMessage({ action: 'start_passive_session' });
-      passiveModeToggleMain.classList.add('active');
-      updatePassiveStatus('observing');
+      await chrome.runtime.sendMessage({ action: 'start_voice_session' });
+      voiceModeToggleMain.classList.add('active');
+      updateVoiceStatus('observing');
 
       // Sprint 10: Persist state to chrome.storage
-      await setPassiveModeEnabled(true);
-      console.log('[Passive] Passive mode enabled and saved to storage');
+      await setVoiceModeEnabled(true);
+      console.log('[Voice Mode] Voice mode enabled and saved to storage');
     } catch (err) {
-      console.error('[Passive] Failed to start passive session:', err);
+      console.error('[Voice Mode] Failed to start voice session:', err);
 
       // Sprint 10: Show error in UI
-      passiveModeToggleMain.classList.remove('active');
-      updatePassiveStatus('error', null, err.message || 'Failed to start passive mode');
+      voiceModeToggleMain.classList.remove('active');
+      updateVoiceStatus('error', null, err.message || 'Failed to start voice mode');
 
       // Don't persist the enabled state since it failed
-      await setPassiveModeEnabled(false);
+      await setVoiceModeEnabled(false);
     }
   }
 });
@@ -472,12 +472,12 @@ if (retryVADBtn) {
     retryVADBtn.textContent = 'Retrying…';
 
     try {
-      const response = await chrome.runtime.sendMessage({ action: 'retry_passive_vad' });
+      const response = await chrome.runtime.sendMessage({ action: 'retry_voice_vad' });
       if (!response?.success) {
-        console.warn('[Passive] Retry VAD reported failure:', response?.error);
+        console.warn('[Voice Mode] Retry VAD reported failure:', response?.error);
       }
     } catch (error) {
-      console.error('[Passive] Retry VAD command failed:', error);
+      console.error('[Voice Mode] Retry VAD command failed:', error);
     } finally {
       retryVADBtn.disabled = false;
       retryVADBtn.textContent = originalText;
@@ -485,19 +485,19 @@ if (retryVADBtn) {
   });
 }
 
-if (disablePassiveBtn) {
-  disablePassiveBtn.addEventListener('click', async () => {
-    disablePassiveBtn.disabled = true;
+if (disableVoiceBtn) {
+  disableVoiceBtn.addEventListener('click', async () => {
+    disableVoiceBtn.disabled = true;
 
     try {
-      await chrome.runtime.sendMessage({ action: 'stop_passive_session' });
-      passiveModeToggleMain.classList.remove('active');
-      await setPassiveModeEnabled(false);
-      updatePassiveStatus('idle');
+      await chrome.runtime.sendMessage({ action: 'stop_voice_session' });
+      voiceModeToggleMain.classList.remove('active');
+      await setVoiceModeEnabled(false);
+      updateVoiceStatus('idle');
     } catch (error) {
-      console.error('[Passive] Failed to disable passive mode:', error);
+      console.error('[Voice Mode] Failed to disable voice mode:', error);
     } finally {
-      disablePassiveBtn.disabled = false;
+      disableVoiceBtn.disabled = false;
     }
   });
 }
@@ -515,10 +515,10 @@ function toggleDebugDrawer() {
   }
 }
 
-// Sprint 10: Update passive status chip
-function updatePassiveStatus(status, telemetry = null, errorMessage = null) {
-  passiveStatusMain.className = `passive-status ${status}`;
-  passiveStatusMain.textContent = status.charAt(0).toUpperCase() + status.slice(1);
+// Sprint 10: Update voice mode status chip
+function updateVoiceStatus(status, telemetry = null, errorMessage = null) {
+  voiceStatusMain.className = `voice-status ${status}`;
+  voiceStatusMain.textContent = status.charAt(0).toUpperCase() + status.slice(1);
 
   // Update telemetry if provided
   if (telemetry) {
@@ -534,18 +534,18 @@ function updatePassiveStatus(status, telemetry = null, errorMessage = null) {
 
   // Sprint 10: Show/hide error message
   if (status === 'error' && errorMessage) {
-    passiveErrorMessage.textContent = getUserFriendlyErrorMessage(errorMessage);
-    passiveErrorMessage.classList.remove('hidden');
+    voiceErrorMessage.textContent = getUserFriendlyErrorMessage(errorMessage);
+    voiceErrorMessage.classList.remove('hidden');
   } else {
-    passiveErrorMessage.classList.add('hidden');
+    voiceErrorMessage.classList.add('hidden');
   }
 
-  // Update waveform visualization based on passive mode status
+  // Update waveform visualization based on voice mode status
   if (status === 'observing' || status === 'recording' || status === 'cooldown') {
-    // Start waveform when passive mode is active
+    // Start waveform when voice mode is active
     startWaveformVisualization();
   } else {
-    // Stop waveform when passive mode is idle or error
+    // Stop waveform when voice mode is idle or error
     stopWaveformVisualization();
   }
 }
@@ -781,7 +781,7 @@ function formatTelemetryValue(value) {
   return String(value);
 }
 
-// Waveform visualization control for passive mode
+// Waveform visualization control for voice mode
 async function startWaveformVisualization() {
   if (waveform) {
     // Already running
@@ -789,7 +789,7 @@ async function startWaveformVisualization() {
   }
 
   try {
-    console.log('[Waveform] Starting visualization for passive mode');
+    console.log('[Waveform] Starting visualization for voice mode');
     waveform = new LiveWaveform(waveformCanvas, {
       barColor: '#dc2626',
       sensitivity: 1.2,
@@ -806,7 +806,7 @@ async function startWaveformVisualization() {
     console.log('[Waveform] Visualization started');
   } catch (error) {
     console.error('[Waveform] Failed to start:', error);
-    // Don't fail passive mode if waveform fails - it's just visual feedback
+    // Don't fail voice mode if waveform fails - it's just visual feedback
   }
 }
 
@@ -961,16 +961,16 @@ async function handleTabChanged(tabId, videoContext) {
   // Privacy protection: Stop recording when switching to non-video tabs
   // But keep recording across video-to-video tab changes (seamless multi-video notes)
   if (previousVideoDbId && !newVideoDbId) {
-    const isPassiveActive = passiveModeToggleMain.classList.contains('active');
-    if (isPassiveActive) {
-      console.log('[Passive] Stopping recording - switched from video to non-video tab');
+    const isVoiceActive = voiceModeToggleMain.classList.contains('active');
+    if (isVoiceActive) {
+      console.log('[Voice Mode] Stopping recording - switched from video to non-video tab');
       try {
-        await chrome.runtime.sendMessage({ action: 'stop_passive_session' });
-        passiveModeToggleMain.classList.remove('active');
-        updatePassiveStatus('idle');
-        await setPassiveModeEnabled(false);
+        await chrome.runtime.sendMessage({ action: 'stop_voice_session' });
+        voiceModeToggleMain.classList.remove('active');
+        updateVoiceStatus('idle');
+        await setVoiceModeEnabled(false);
       } catch (err) {
-        console.error('[Passive] Failed to stop session on tab change:', err);
+        console.error('[Voice Mode] Failed to stop session on tab change:', err);
       }
     }
   }
@@ -1156,7 +1156,7 @@ async function renderNotesFromCache(videoDbId) {
   return true;
 }
 
-// Note: Manual recording mode removed - waveform now driven by passive mode
+// Note: Manual recording mode removed - waveform now driven by voice mode
 function updateUI() {
   if (isRecording) {
     if (waveformContainerMain) {
@@ -1548,16 +1548,16 @@ chrome.runtime.onMessage.addListener((message) => {
   }
 });
 
-// Sprint 10: Listen for passive mode status updates
+// Sprint 10: Listen for voice mode status updates
 chrome.runtime.onMessage.addListener((message) => {
-  if (message.action === 'passive_status_update') {
-    updatePassiveStatus(message.status, message.telemetry, message.errorMessage);
+  if (message.action === 'voice_status_update') {
+    updateVoiceStatus(message.status, message.telemetry, message.errorMessage);
 
     // If error occurred, disable the toggle
     if (message.status === 'error') {
-      passiveModeToggleMain.classList.remove('active');
-      setPassiveModeEnabled(false).catch((err) => {
-        console.error('[Passive] Failed to update persisted state:', err);
+      voiceModeToggleMain.classList.remove('active');
+      setVoiceModeEnabled(false).catch((err) => {
+        console.error('[Voice Mode] Failed to update persisted state:', err);
       });
     }
   }
@@ -1600,35 +1600,35 @@ function updateTranscriptionStatus(status) {
   }
 }
 
-// Sprint 10: Initialize passive mode on load
-// Auto-start only if user previously enabled passive mode in settings
-async function initPassiveMode() {
-  console.log('[Passive] Checking persisted passive mode preference');
+// Sprint 10: Initialize voice mode on load
+// Auto-start only if user previously enabled voice mode in settings
+async function initVoiceMode() {
+  console.log('[Voice Mode] Checking persisted voice mode preference');
 
   try {
-    const isEnabled = await getPassiveModeEnabled();
+    const isEnabled = await getVoiceModeEnabled();
 
     if (!isEnabled) {
-      console.log('[Passive] Passive mode disabled in storage – leaving idle');
-      passiveModeToggleMain.classList.remove('active');
-      updatePassiveStatus('idle');
-      await setPassiveModeEnabled(false);
+      console.log('[Voice Mode] Voice mode disabled in storage – leaving idle');
+      voiceModeToggleMain.classList.remove('active');
+      updateVoiceStatus('idle');
+      await setVoiceModeEnabled(false);
       return;
     }
 
-    console.log('[Passive] Passive mode previously enabled – awaiting user confirmation to start');
-    passiveModeToggleMain.classList.add('active');
-    updatePassiveStatus('idle');
+    console.log('[Voice Mode] Voice mode previously enabled – awaiting user confirmation to start');
+    voiceModeToggleMain.classList.add('active');
+    updateVoiceStatus('idle');
     // Previous setting remains true so the toggle reflects state; user must click to actually start.
   } catch (err) {
-    console.error('[Passive] Failed to auto-start passive session:', err);
-    passiveModeToggleMain.classList.remove('active');
-    updatePassiveStatus('idle');
-    await setPassiveModeEnabled(false);
+    console.error('[Voice Mode] Failed to auto-start voice session:', err);
+    voiceModeToggleMain.classList.remove('active');
+    updateVoiceStatus('idle');
+    await setVoiceModeEnabled(false);
   }
 }
 
-initPassiveMode();
+initVoiceMode();
 
 // ============================================================================
 // Sprint 12: Phoenix Socket for Real-Time Notes

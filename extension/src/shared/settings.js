@@ -24,8 +24,8 @@ export const LOCAL_VISION_MODES = {
 const DEFAULT_SETTINGS = {
   features: {
     localVisionEnabled: LOCAL_VISION_MODES.AUTO,
-    passiveModeEnabled: false, // Sprint 10: Default OFF per spec
-    debugLoggingEnabled: false, // Passive mode refactor: Debug logging OFF by default (production-safe)
+    voiceModeEnabled: false, // Sprint 10: Default OFF per spec
+    debugLoggingEnabled: false, // Voice mode refactor: Debug logging OFF by default (production-safe)
   },
 };
 
@@ -166,34 +166,34 @@ export async function allowCloudVisionFallback() {
 }
 
 // ========================================
-// Sprint 10: Passive Mode Settings
+// Sprint 10: Voice Mode Settings
 // ========================================
 
 /**
- * Get the current passive mode enabled state.
+ * Get the current voice mode enabled state.
  *
- * @returns {Promise<boolean>} True if passive mode is enabled
+ * @returns {Promise<boolean>} True if voice mode is enabled
  */
-export async function getPassiveModeEnabled() {
+export async function getVoiceModeEnabled() {
   const settings = await getSettings();
-  return settings.features.passiveModeEnabled ?? false; // Default OFF per Sprint 10 spec
+  return settings.features.voiceModeEnabled ?? false; // Default OFF per Sprint 10 spec
 }
 
 /**
- * Set the passive mode enabled state.
+ * Set the voice mode enabled state.
  *
- * @param {boolean} enabled - True to enable passive mode
+ * @param {boolean} enabled - True to enable voice mode
  */
-export async function setPassiveModeEnabled(enabled) {
+export async function setVoiceModeEnabled(enabled) {
   return updateSettings({
     features: {
-      passiveModeEnabled: Boolean(enabled),
+      voiceModeEnabled: Boolean(enabled),
     },
   });
 }
 
 // ========================================
-// Passive Mode Refactor: Debug Logging Settings
+// Voice Mode Refactor: Debug Logging Settings
 // ========================================
 
 /**
@@ -209,7 +209,7 @@ export async function getDebugLoggingEnabled() {
 
 /**
  * Set the debug logging enabled state.
- * Controls verbose logging output for passive mode and VAD.
+ * Controls verbose logging output for voice mode and VAD.
  *
  * @param {boolean} enabled - True to enable debug logging
  */

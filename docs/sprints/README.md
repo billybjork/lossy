@@ -7,9 +7,9 @@
 
 ## Current Status
 
-🎉 **Latest:** Sprint 12 (Notes Channel Refactor + Passive Mode Tab Switching) completed 2025-10-23
+🎉 **Latest:** Sprint 12 (Notes Channel Refactor + Voice Mode Mode Tab Switching) completed 2025-10-23
 📋 **Active:** None
-🔜 **Next:** Sprint 14 (Passive Mode Polish) or Sprint 15 (Continuous Sessions)
+🔜 **Next:** Sprint 14 (Voice Mode Mode Polish) or Sprint 15 (Continuous Sessions)
 
 ---
 
@@ -31,7 +31,7 @@
 
 | Sprint | Goal | Duration |
 |--------|------|----------|
-| [14 - Passive Mode Polish](./SPRINT_14_passive_mode_polish.md) | UX improvements, status indicators, error recovery | 2-3 days |
+| [14 - Voice Mode Mode Polish](./SPRINT_14_voice mode_mode_polish.md) | UX improvements, status indicators, error recovery | 2-3 days |
 | [15 - Continuous Sessions](./SPRINT_15_continuous_sessions.md) | Session persistence across browser restarts + state recovery | 3-4 days |
 | [TBD - Emoji Chips](./planned/SPRINT_TBD_emoji_chips.md) | Text-based visual feedback tokens using transcription | 2-3 days |
 | [TBD - Auto Posting](./planned/SPRINT_TBD_auto_posting.md) | Browserbase automation + Oban workers | 3-5 days |
@@ -53,9 +53,9 @@
 | [07 - Local Transcription](./archive/SPRINT_07_local_transcription.md) | ✅ 2025-10-20 | Browser-side Whisper Tiny with WebGPU/WASM + cloud fallback | 3 days |
 | [08 - GPT-4o Vision Integration](./archive/SPRINT_08_siglip_vision.md) | ✅ 2025-10-20 | Cloud-based visual context enrichment for notes | 2 days |
 | [09 - Video Library](./archive/SPRINT_09_video_library.md) | ✅ 2025-10-22 | Video history management, queue system, and auto-status transitions | 2 days |
-| [10 - Always-On Agent](./archive/SPRINT_10_always_on_agent.md) | ✅ 2025-10-22 | VAD-driven passive recording with energy-based speech detection | 1 day |
+| [10 - Always-On Agent](./archive/SPRINT_10_always_on_agent.md) | ✅ 2025-10-22 | VAD-driven voice mode recording with energy-based speech detection | 1 day |
 | [11 - Local-Only Transcription](./archive/SPRINT_11_local_only_transcription.md) | ✅ 2025-10-22 | Removed cloud transcription, 100% local privacy with WebGPU/WASM | 1 day |
-| [12 - Notes Channel Refactor](./archive/SPRINT_12_notes_channel_refactor.md) | ✅ 2025-10-23 | Direct Phoenix Channel subscription + passive mode tab switching fix | 3 hours |
+| [12 - Notes Channel Refactor](./archive/SPRINT_12_notes_channel_refactor.md) | ✅ 2025-10-23 | Direct Phoenix Channel subscription + voice mode mode tab switching fix | 3 hours |
 | [13 - IndexedDB Cache](./archive/SPRINT_13_indexeddb_cache.md) | ✅ 2025-10-23 | Sidepanel/Dexie caching for notes & video library | 1 day |
 
 ---

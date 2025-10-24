@@ -7,7 +7,7 @@
  * - Transcribes locally using Whisper via ONNX Runtime (WebGPU or WASM)
  * - No cloud fallback - 100% local processing
  *
- * Sprint 10: Passive audio detection (VAD)
+ * Sprint 10: Voice mode audio detection (VAD)
  * - Runs Voice Activity Detection independently from recording
  * - Emits speech_start/speech_end events to service worker
  * - Supports energy-based and Silero ONNX detection
@@ -377,7 +377,7 @@ async function transcribeLocally() {
 /**
  * Sprint 10: Start Voice Activity Detection
  *
- * Creates a separate audio stream for passive monitoring.
+ * Creates a separate audio stream for voice mode monitoring.
  * VAD runs independently from recording and emits events to service worker.
  *
  * @param {Object} config - VAD configuration from service worker
@@ -388,7 +388,7 @@ async function startVAD(config = {}) {
     return;
   }
 
-  console.log('[VAD] Starting passive audio detection');
+  console.log('[VAD] Starting voice mode audio detection');
 
   try {
     // Request microphone access
@@ -419,7 +419,7 @@ async function startVAD(config = {}) {
         console.log('[VAD] Speech detected (confidence:', event.confidence.toFixed(3), ')');
         chrome.runtime.sendMessage({
           target: 'background',
-          action: 'passive_event',
+          action: 'voice_event',
           type: 'speech_start',
           data: {
             timestamp: event.timestamp,
@@ -438,7 +438,7 @@ async function startVAD(config = {}) {
         );
         chrome.runtime.sendMessage({
           target: 'background',
-          action: 'passive_event',
+          action: 'voice_event',
           type: 'speech_end',
           data: {
             timestamp: event.timestamp,
@@ -462,7 +462,7 @@ async function startVAD(config = {}) {
         );
         chrome.runtime.sendMessage({
           target: 'background',
-          action: 'passive_event',
+          action: 'voice_event',
           type: 'metrics',
           data: {
             confidence: metrics.confidence,
@@ -473,7 +473,7 @@ async function startVAD(config = {}) {
       onError: (error) => {
         chrome.runtime.sendMessage({
           target: 'background',
-          action: 'passive_event',
+          action: 'voice_event',
           type: 'error',
           data: {
             message: error.message,
@@ -554,7 +554,7 @@ async function startVAD(config = {}) {
     }
 
     vadEnabled = true;
-    console.log('[VAD] Passive detection active (mode: silero)');
+    console.log('[VAD] Voice mode detection active (mode: silero)');
   } catch (error) {
     console.error('[VAD] Failed to start:', error);
 
@@ -571,7 +571,7 @@ async function startVAD(config = {}) {
     // Notify service worker of failure
     chrome.runtime.sendMessage({
       target: 'background',
-      action: 'passive_event',
+      action: 'voice_event',
       type: 'error',
       data: {
         message: error.message,
@@ -594,7 +594,7 @@ async function stopVAD() {
     return;
   }
 
-  console.log('[VAD] Stopping passive detection');
+  console.log('[VAD] Stopping voice mode detection');
 
   // Cleanup audio processor or worklet bridge
   if (vadInstance?._audioBridge) {

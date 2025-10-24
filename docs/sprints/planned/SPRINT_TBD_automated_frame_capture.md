@@ -1,25 +1,25 @@
 # Sprint TBD: Automated Frame Capture Strategy
 
 **Status:** 🔄 Deferred (was Sprint 13, now TBD)
-**Priority:** Medium (deferred in favor of Sprint 11: Local-Only Transcription and Sprint 14: Passive Mode Polish)
+**Priority:** Medium (deferred in favor of Sprint 11: Local-Only Transcription and Sprint 14: Voice Mode Mode Polish)
 **Owner:** TBD
 **Progress:** 0%
 
 **Related Sprints**
 - ✅ Sprint 08 – Visual Intelligence (manual "Refine with Vision" button)
-- ✅ Sprint 10 – Always-On Foundations (passive audio VAD)
+- ✅ Sprint 10 – Always-On Foundations (voice mode audio VAD)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
-- 🔜 Sprint 14 – Passive Mode Polish (Silero VAD)
+- 🔜 Sprint 14 – Voice Mode Mode Polish (Silero VAD)
 - 🔜 Sprint 15 – Continuous Session Persistence
 - 🔜 Sprint 15+ – Diffusion Refinement & Cost Governance
 
-**Note:** This sprint has been deferred to prioritize improving passive mode quality with Silero VAD. Frame capture will be revisited after continuous session persistence is established.
+**Note:** This sprint has been deferred to prioritize improving voice mode mode quality with Silero VAD. Frame capture will be revisited after continuous session persistence is established.
 
 ---
 
 ## Purpose
 
-Automatically capture video frames during passive mode recordings to provide visual context for notes. This bridges the gap between Sprint 08's manual "Refine with Vision" button and a fully automated multimodal agent that understands both what was said and what was on screen.
+Automatically capture video frames during voice mode mode recordings to provide visual context for notes. This bridges the gap between Sprint 08's manual "Refine with Vision" button and a fully automated multimodal agent that understands both what was said and what was on screen.
 
 **Key Constraint:** Must stay within cost budget ($0.50/session target from Sprint 15+) while providing meaningful visual enrichment.
 

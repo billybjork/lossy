@@ -34,12 +34,12 @@ defmodule Lossy.Agent.Session do
     GenServer.cast(via_tuple(session_id), {:frame_embedding, embedding, timestamp, opts})
   end
 
-  # Sprint 10: Update timestamp for passive mode
+  # Sprint 10: Update timestamp for voice mode
   def set_timestamp(session_id, timestamp) when is_number(timestamp) do
     GenServer.call(via_tuple(session_id), {:set_timestamp, timestamp})
   end
 
-  # Sprint 12: Update video context for passive mode (when user switches tabs)
+  # Sprint 12: Update video context for voice mode (when user switches tabs)
   def update_video_context(session_id, video_id) do
     GenServer.cast(via_tuple(session_id), {:update_video_context, video_id})
   end
@@ -131,7 +131,7 @@ defmodule Lossy.Agent.Session do
     structure_note(state, text, source: source, opts: opts)
 
     # Sprint 10 FIX: Clear audio buffer after processing transcript
-    # This is critical for persistent audio channel in passive mode
+    # This is critical for persistent audio channel in voice mode
     {:noreply, %{state | status: :idle, audio_buffer: <<>>, audio_duration: 0}}
   end
 
@@ -157,7 +157,7 @@ defmodule Lossy.Agent.Session do
     {:noreply, Map.put(state, :pending_visual_context, visual_context)}
   end
 
-  # Sprint 12: Handle video context update for passive mode (tab switching)
+  # Sprint 12: Handle video context update for voice mode (tab switching)
   @impl true
   def handle_cast({:update_video_context, video_id}, state) do
     Logger.info("[#{state.session_id}] Updating video context: #{state.video_id} → #{video_id}")
@@ -165,7 +165,7 @@ defmodule Lossy.Agent.Session do
     {:noreply, new_state}
   end
 
-  # Sprint 10: Handle timestamp update for passive mode
+  # Sprint 10: Handle timestamp update for voice mode
   @impl true
   def handle_call({:set_timestamp, timestamp}, _from, state) do
     Logger.info("[#{state.session_id}] Updating timestamp: #{state.timestamp_seconds} → #{timestamp}")

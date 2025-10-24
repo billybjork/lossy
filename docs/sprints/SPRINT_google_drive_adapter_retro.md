@@ -17,7 +17,7 @@
    - Capture iframe tree and sandbox attributes immediately after playback starts.
 2. **Detection strategy**
    - Read-only scanning of Drive DOM (no mutations) until video confirmed.
-   - Prefer passive observers (MutationObserver limited to structural changes) with early teardown.
+   - Prefer voice mode observers (MutationObserver limited to structural changes) with early teardown.
 3. **Control proxy**
    - Avoid writing to native slider or dispatching synthetic events until proven safe.
    - Consider read-only time tracking via `requestAnimationFrame` on slider value without altering it.

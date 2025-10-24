@@ -1,7 +1,7 @@
 /**
- * Shared Constants for Passive Mode and VAD
+ * Shared Constants for Voice Mode and VAD
  *
- * Centralized configuration for Voice Activity Detection and Passive Session behavior.
+ * Centralized configuration for Voice Activity Detection and Voice Mode Session behavior.
  * All tunable parameters are collected here for easy discovery and modification.
  *
  * For tuning guidance, see: docs/VAD_TUNING_GUIDE.md
@@ -30,12 +30,12 @@ export const VAD_CONFIG = Object.freeze({
 });
 
 /**
- * Passive Session Configuration
+ * Voice Mode Session Configuration
  *
- * Controls passive mode lifecycle, circuit breaker, and safety timeouts.
+ * Controls voice mode lifecycle, circuit breaker, and safety timeouts.
  * Frozen to prevent accidental mutation during runtime.
  */
-export const PASSIVE_SESSION_CONFIG = Object.freeze({
+export const VOICE_SESSION_CONFIG = Object.freeze({
   // Session timing
   COOLDOWN_MS: 500, // Cooldown period after speech_end before returning to observing
   AUTO_RESUME_DELAY_MS: 500, // Delay before auto-resuming paused video

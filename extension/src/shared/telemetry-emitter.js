@@ -123,7 +123,7 @@ export const telemetryEmitter = {
   /**
    * Emit warning telemetry.
    *
-    * @param {string} context - Logical component (e.g. 'VAD', 'Passive')
+    * @param {string} context - Logical component (e.g. 'VAD', 'Voice Mode')
     * @param {Array<any>} args - Additional log arguments
    */
   warn(context, args = []) {

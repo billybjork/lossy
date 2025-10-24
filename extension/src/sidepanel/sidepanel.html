@@ -628,8 +628,8 @@
       font-size: 14px;
     }
 
-    /* Sprint 10: Passive Mode Control (Main UI) */
-    .passive-mode-control {
+    /* Sprint 10: Voice Mode Control (Main UI) */
+    .voice-mode-control {
       background: #f9fafb;
       border: 2px solid #e5e7eb;
       border-radius: 8px;
@@ -637,7 +637,7 @@
       margin-bottom: 12px;
     }
 
-    /* Waveform in main UI - compact version for passive mode */
+    /* Waveform in main UI - compact version for voice mode */
     .waveform-container-main {
       width: 100%;
       height: 48px;
@@ -660,13 +660,13 @@
       opacity: 1;
     }
 
-    .passive-mode-header {
+    .voice-mode-header {
       display: flex;
       align-items: center;
       justify-content: space-between;
     }
 
-    .passive-mode-label {
+    .voice-mode-label {
       display: flex;
       align-items: center;
       gap: 12px;
@@ -675,7 +675,7 @@
       color: #1f2937;
     }
 
-    .passive-mode-actions {
+    .voice-mode-actions {
       display: flex;
       align-items: center;
       gap: 12px;
@@ -745,7 +745,7 @@
       font-family: 'SF Mono', 'Monaco', monospace;
     }
 
-    .passive-status {
+    .voice-status {
       display: inline-flex;
       align-items: center;
       padding: 6px 12px;
@@ -757,32 +757,32 @@
       letter-spacing: 0.5px;
     }
 
-    .passive-status.idle {
+    .voice-status.idle {
       background: #374151;
       color: #9ca3af;
     }
 
-    .passive-status.observing {
+    .voice-status.observing {
       background: #1e40af;
       color: #93c5fd;
     }
 
-    .passive-status.recording {
+    .voice-status.recording {
       background: #dc2626;
       color: #fca5a5;
     }
 
-    .passive-status.cooldown {
+    .voice-status.cooldown {
       background: #7c3aed;
       color: #c4b5fd;
     }
 
-    .passive-status.error {
+    .voice-status.error {
       background: #b91c1c;
       color: #fecaca;
     }
 
-    .passive-error-message {
+    .voice-error-message {
       margin-top: 12px;
       padding: 10px 12px;
       background: #fef2f2;
@@ -793,7 +793,7 @@
       line-height: 1.4;
     }
 
-    .passive-error-message.hidden {
+    .voice-error-message.hidden {
       display: none;
     }
 
@@ -1013,15 +1013,15 @@
       <div class="status" id="status">Loading...</div>
       <div class="video-timestamp" id="videoTimestamp">Video: --:--</div>
 
-      <!-- Sprint 10: Passive Mode Control (Main UI) -->
-      <div class="passive-mode-control">
-        <div class="passive-mode-header">
-          <div class="passive-mode-label">
-            <span>Passive Mode</span>
-            <div class="passive-status idle" id="passiveStatusMain">Idle</div>
+      <!-- Sprint 10: Voice Mode Control (Main UI) -->
+      <div class="voice-mode-control">
+        <div class="voice-mode-header">
+          <div class="voice-mode-label">
+            <span>Voice Mode</span>
+            <div class="voice-status idle" id="voiceStatusMain">Idle</div>
           </div>
-          <div class="passive-mode-actions">
-            <div class="debug-toggle-switch" id="passiveModeToggleMain"></div>
+          <div class="voice-mode-actions">
+            <div class="debug-toggle-switch" id="voiceModeToggleMain"></div>
             <button class="debug-toggle-btn" id="debugToggleBtn">Debug</button>
           </div>
         </div>
@@ -1032,14 +1032,14 @@
         </div>
 
         <!-- Sprint 10: Error message (hidden by default) -->
-        <div class="passive-error-message hidden" id="passiveErrorMessage"></div>
+        <div class="voice-error-message hidden" id="voiceErrorMessage"></div>
       </div>
 
       <!-- Sprint 10: Debug Drawer (Hidden by Default) -->
       <div class="debug-drawer hidden" id="debugDrawer">
         <div class="debug-header">
           <span class="debug-title">Diagnostics</span>
-          <span class="debug-shortcut">Passive mode telemetry</span>
+          <span class="debug-shortcut">Voice mode telemetry</span>
         </div>
 
         <!-- Transcription Status (Sprint 11: Local-only) -->
@@ -1100,7 +1100,7 @@
 
         <div class="debug-buttons">
           <button class="debug-btn" id="retryVADBtn">Retry VAD</button>
-          <button class="debug-btn" id="disablePassiveBtn">Disable Passive</button>
+          <button class="debug-btn" id="disableVoiceBtn">Disable Voice</button>
         </div>
       </div>
     </div>

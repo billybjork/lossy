@@ -108,7 +108,7 @@ defmodule LossyWeb.AudioChannel do
     {:reply, {:ok, %{pong: true}}, socket}
   end
 
-  # Sprint 10: Handle timestamp update for passive mode
+  # Sprint 10: Handle timestamp update for voice mode
   @impl true
   def handle_in("set_timestamp", %{"timestamp" => timestamp}, socket)
       when is_number(timestamp) do
@@ -127,7 +127,7 @@ defmodule LossyWeb.AudioChannel do
     end
   end
 
-  # Sprint 12: Handle video context update for passive mode (tab switching)
+  # Sprint 12: Handle video context update for voice mode (tab switching)
   @impl true
   def handle_in("update_video_context", %{"video_id" => video_id}, socket) do
     session_id = socket.assigns.session_id

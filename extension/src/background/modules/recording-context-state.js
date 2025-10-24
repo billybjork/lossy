@@ -4,7 +4,7 @@
  * Pure functions for recording context capture and isolation.
  * Ensures notes/timestamps route to correct tab/video even if user switches tabs mid-recording.
  *
- * Critical for passive mode correctness:
+ * Critical for voice mode correctness:
  * - Context captured atomically at speech_start
  * - Preserved until note_created event arrives
  * - Stale contexts cleared after timeout to prevent memory leaks
@@ -12,7 +12,7 @@
  * No Chrome APIs, no side effects - all unit-testable.
  */
 
-import { PASSIVE_SESSION_CONFIG } from '../../shared/shared-constants.js';
+import { VOICE_SESSION_CONFIG } from '../../shared/shared-constants.js';
 
 /**
  * Create a recording context snapshot
@@ -45,7 +45,7 @@ export function createRecordingContext(tabId, videoContext, timestamp, autoPause
  * @param {number} maxAgeMs - Maximum age in milliseconds
  * @returns {boolean} True if context is stale
  */
-export function isContextStale(context, maxAgeMs = PASSIVE_SESSION_CONFIG.STALE_CONTEXT_THRESHOLD_MS) {
+export function isContextStale(context, maxAgeMs = VOICE_SESSION_CONFIG.STALE_CONTEXT_THRESHOLD_MS) {
   if (!context || !context.startedAt) {
     return true;
   }

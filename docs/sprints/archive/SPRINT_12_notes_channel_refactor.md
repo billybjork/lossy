@@ -271,7 +271,7 @@ subscribeToVideoNotes(newVideoDbId);
 Remove or simplify:
 
 1. **Lines 896-926**: `audioChannel.on('note_created')` relay
-2. **Lines 1238-1268**: Passive mode `note_created` relay
+2. **Lines 1238-1268**: Voice Mode mode `note_created` relay
 3. **Lines 1507-1571**: `loadNotesForSidePanel()` and `sendNotesToSidePanel()`
 4. **Lines 1475-1505**: Note loading in `loadNotesForContentScript()` (keep for timeline markers)
 

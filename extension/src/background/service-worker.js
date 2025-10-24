@@ -1,19 +1,19 @@
 // Service Worker for Voice Video Companion
 // Sprint 01: Audio streaming to Phoenix
 // Sprint 03.5: Tab Management
-// Sprint 10: Always-On Passive Audio
+// Sprint 10: Always-On Voice Mode Audio
 
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
-import { PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
+import { VOICE_SESSION_CONFIG } from '../shared/shared-constants.js';
 import {
-  initPassiveSessionManager,
+  initVoiceSessionManager,
   restartVADWithBackoff,
-  handlePassiveEvent,
-  startPassiveSession,
-  stopPassiveSession,
-} from './modules/passive-session-manager.js';
+  handleVoiceEvent,
+  startVoiceSession,
+  stopVoiceSession,
+} from './modules/voice-session-manager.js';
 import {
   initRecordingManager,
   toggleRecording,
@@ -42,17 +42,17 @@ let messageRouter = null;
 // Track side panel state per window: windowId → port
 const openPanels = new Map();
 
-// Sprint 10: Passive session coordinator
+// Sprint 10: Voice mode session coordinator
 const AUTO_PAUSE_DEFAULT = true;
 
-const passiveSession = {
+const voiceSession = {
   tabId: null,
   status: 'idle', // 'idle' | 'observing' | 'recording' | 'cooldown' | 'error'
   vadEnabled: false, // Default OFF per Sprint 10 spec
   lastStartAt: 0,
   vadConfig: null,
 
-  // Sprint 10 Fix: Persistent audio channel for passive mode
+  // Sprint 10 Fix: Persistent audio channel for voice mode
   socket: null,
   audioChannel: null,
   sessionId: null,
@@ -63,7 +63,7 @@ const passiveSession = {
   recordingContext: null, // { tabId, videoDbId, videoContext, timestamp, startedAt }
   recordingContextTimeout: null, // Safety timeout to clear stale context
 
-  // Auto-start behavior: Stop passive session if no speech detected within 10 seconds
+  // Auto-start behavior: Stop voice session if no speech detected within 10 seconds
   firstSpeechTimeout: null,
   resumeTimeout: null,
 
@@ -84,15 +84,15 @@ const passiveSession = {
 
   settings: {
     autoPauseVideo: AUTO_PAUSE_DEFAULT,
-    autoResumeDelayMs: PASSIVE_SESSION_CONFIG.AUTO_RESUME_DELAY_MS,
+    autoResumeDelayMs: VOICE_SESSION_CONFIG.AUTO_RESUME_DELAY_MS,
   },
 
   circuitBreaker: {
     state: 'closed',
     restartCount: 0,
     lastRestartAt: 0,
-    maxRestarts: PASSIVE_SESSION_CONFIG.MAX_RESTARTS,
-    resetWindowMs: PASSIVE_SESSION_CONFIG.RESET_WINDOW_MS,
+    maxRestarts: VOICE_SESSION_CONFIG.MAX_RESTARTS,
+    resetWindowMs: VOICE_SESSION_CONFIG.RESET_WINDOW_MS,
   },
 
   heartbeatFailures: 0,
@@ -192,7 +192,7 @@ function sendMessageToTab(tabId, message) {
   });
 }
 
-// Initialize TabManager, MessageRouter, PassiveSessionManager, RecordingManager, and SocketManager
+// Initialize TabManager, MessageRouter, VoiceSessionManager, RecordingManager, and SocketManager
 (async () => {
   tabManager = new TabManager();
   await tabManager.init();
@@ -215,9 +215,9 @@ function sendMessageToTab(tabId, message) {
     getOrCreateVideoChannel,
   });
 
-  // Initialize passive session manager with dependencies
-  initPassiveSessionManager({
-    passiveSession,
+  // Initialize voice session manager with dependencies
+  initVoiceSessionManager({
+    voiceSession,
     tabManager,
     Socket,
     sendMessageToTab,
@@ -238,7 +238,7 @@ function sendMessageToTab(tabId, message) {
     messageRouter.subscribePanelToTab(tabs[0].id);
   }
 
-  console.log('[ServiceWorker] Initialized TabManager, MessageRouter, SocketManager, PassiveSessionManager, and RecordingManager');
+  console.log('[ServiceWorker] Initialized TabManager, MessageRouter, SocketManager, VoiceSessionManager, and RecordingManager');
 })();
 
 // Track tab activation to subscribe panel to active tab
@@ -247,53 +247,53 @@ chrome.tabs.onActivated.addListener(async (activeInfo) => {
     messageRouter.subscribePanelToTab(activeInfo.tabId);
   }
 
-  // Update the current active tab ID for passive session
+  // Update the current active tab ID for voice session
   // NOTE: This does NOT update the recording context mid-recording
   // Recording context is captured atomically at speech_start and frozen
-  passiveSession.tabId = activeInfo.tabId;
+  voiceSession.tabId = activeInfo.tabId;
 
-  // If passive mode is observing (not recording), update the video context
+  // If voice mode is observing (not recording), update the video context
   // so the next speech segment will use the current tab's context
-  if (passiveSession.status === 'observing' && passiveSession.audioChannel) {
+  if (voiceSession.status === 'observing' && voiceSession.audioChannel) {
     // Reset VAD state when tab switches to prevent cross-tab audio confusion
-    console.log('[Passive] Tab switch detected - resetting VAD state');
+    console.log('[Voice Mode] Tab switch detected - resetting VAD state');
     try {
       await chrome.runtime.sendMessage({
         target: 'offscreen',
         action: 'reset_vad',
       });
     } catch (err) {
-      console.warn('[Passive] Failed to reset VAD on tab switch:', err.message);
+      console.warn('[Voice Mode] Failed to reset VAD on tab switch:', err.message);
     }
 
     const newVideoContext = tabManager ? tabManager.getVideoContext(activeInfo.tabId) : null;
 
     if (newVideoContext?.videoDbId) {
       console.log(
-        `[Passive] Tab switched while observing, updating context to: ${newVideoContext.videoDbId}`
+        `[Voice Mode] Tab switched while observing, updating context to: ${newVideoContext.videoDbId}`
       );
 
       // Update backend AgentSession's video context for next recording
-      passiveSession.audioChannel
+      voiceSession.audioChannel
         .push('update_video_context', { video_id: newVideoContext.videoDbId })
         .receive('ok', () => {
-          console.log('[Passive] Video context updated successfully');
+          console.log('[Voice Mode] Video context updated successfully');
         })
         .receive('error', (err) => {
-          console.error('[Passive] Failed to update video context:', err);
+          console.error('[Voice Mode] Failed to update video context:', err);
         });
     } else {
-      console.log('[Passive] New tab has no video context - clearing backend context');
+      console.log('[Voice Mode] New tab has no video context - clearing backend context');
 
       // Phase 2: Clear video context in backend when switching to non-video tab
       // This prevents notes from bleeding into unrelated videos
-      passiveSession.audioChannel
+      voiceSession.audioChannel
         .push('update_video_context', { video_id: null })
         .receive('ok', () => {
-          console.log('[Passive] Backend video context cleared (no video on active tab)');
+          console.log('[Voice Mode] Backend video context cleared (no video on active tab)');
         })
         .receive('error', (err) => {
-          console.error('[Passive] Failed to clear backend video context:', err);
+          console.error('[Voice Mode] Failed to clear backend video context:', err);
         });
     }
   }
@@ -511,47 +511,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
-  // Sprint 10: Handle passive VAD events from offscreen
-  if (message.action === 'passive_event' && sender.url?.includes('offscreen.html')) {
-    handlePassiveEvent(message);
+  // Sprint 10: Handle voice mode VAD events from offscreen
+  if (message.action === 'voice_event' && sender.url?.includes('offscreen.html')) {
+    handleVoiceEvent(message);
     return false; // No async response needed
   }
 
-  // Sprint 10: Start passive session (from sidepanel)
-  if (message.action === 'start_passive_session') {
-    startPassiveSession()
+  // Sprint 10: Start voice session (from sidepanel)
+  if (message.action === 'start_voice_session') {
+    startVoiceSession()
       .then(() => {
         sendResponse({ success: true });
       })
       .catch((error) => {
-        console.error('[Passive] Failed to start passive session:', error);
+        console.error('[Voice Mode] Failed to start voice session:', error);
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open
   }
 
-  // Sprint 10: Stop passive session (from sidepanel)
-  if (message.action === 'stop_passive_session') {
-    stopPassiveSession()
+  // Sprint 10: Stop voice session (from sidepanel)
+  if (message.action === 'stop_voice_session') {
+    stopVoiceSession()
       .then(() => {
         sendResponse({ success: true });
       })
       .catch((error) => {
-        console.error('[Passive] Failed to stop passive session:', error);
+        console.error('[Voice Mode] Failed to stop voice session:', error);
         sendResponse({ success: false, error: error.message });
       });
     return true; // Keep channel open
   }
 
-  if (message.action === 'retry_passive_vad') {
-    const executor = passiveSession.status === 'idle' ? startPassiveSession : restartVADWithBackoff;
+  if (message.action === 'retry_voice_vad') {
+    const executor = voiceSession.status === 'idle' ? startVoiceSession : restartVADWithBackoff;
 
     executor()
       .then(() => {
         sendResponse({ success: true });
       })
       .catch((error) => {
-        console.error('[Passive] Retry VAD failed:', error);
+        console.error('[Voice Mode] Retry VAD failed:', error);
         sendResponse({ success: false, error: error.message });
       });
     return true;
@@ -582,10 +582,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'transcript_final' && sender.url?.includes('offscreen.html')) {
     console.log('[Lossy] Local transcript received:', message.text.substring(0, 50) + '...');
 
-    // Sprint 10 Fix: Route transcript to correct channel (passive vs manual)
+    // Sprint 10 Fix: Route transcript to correct channel (voice mode vs manual)
     const targetChannel =
-      passiveSession.status === 'recording' || passiveSession.status === 'cooldown'
-        ? passiveSession.audioChannel
+      voiceSession.status === 'recording' || voiceSession.status === 'cooldown'
+        ? voiceSession.audioChannel
         : getAudioChannel();
 
     if (targetChannel) {
@@ -671,22 +671,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             title: videoData.title,
           });
 
-          // Phase 2: If this is the active tab and passive mode is observing,
+          // Phase 2: If this is the active tab and voice mode is observing,
           // update the backend context immediately (handles late detection)
           chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
             if (
               tabs[0]?.id === tabId &&
-              passiveSession.status === 'observing' &&
-              passiveSession.audioChannel
+              voiceSession.status === 'observing' &&
+              voiceSession.audioChannel
             ) {
-              console.log('[Passive] Late video detection on active tab, updating backend context');
-              passiveSession.audioChannel
+              console.log('[Voice Mode] Late video detection on active tab, updating backend context');
+              voiceSession.audioChannel
                 .push('update_video_context', { video_id: response.videoDbId })
                 .receive('ok', () => {
-                  console.log('[Passive] Backend context updated after late detection');
+                  console.log('[Voice Mode] Backend context updated after late detection');
                 })
                 .receive('error', (err) => {
-                  console.error('[Passive] Failed to update backend context:', err);
+                  console.error('[Voice Mode] Failed to update backend context:', err);
                 });
             }
           });

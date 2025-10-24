@@ -15,7 +15,7 @@ This document outlines the agentic principles that guide Lossy's evolution from 
 **From Manual Tools → Intelligent Companions**
 
 Lossy is transitioning from discrete, user-triggered actions (manual record, manual refine) to a continuous, context-aware agent that:
-- Observes passively until needed
+- Observes voice modely until needed
 - Acts proactively when appropriate
 - Refines understanding iteratively
 - Maintains global coherence across the entire video session
@@ -24,7 +24,7 @@ Lossy is transitioning from discrete, user-triggered actions (manual record, man
 
 ## Agentic Principles
 
-### 1. Context-Aware Passive Observation
+### 1. Context-Aware Voice Mode Observation
 
 **Definition:** The agent maintains continuous awareness of the video context without requiring explicit activation, similar to a human assistant observing a review session.
 
@@ -520,7 +520,7 @@ All scheduling decisions, queue depths, and load shedding events are instrumente
 
 ## Agentic Agent Architecture
 
-> **Implementation Roadmap:** Always-on observation is being introduced in phases. Sprint 10 delivers passive audio triggers and a debug view while preserving the current per-recording backend. Sprint 11 adds local-only transcription with browser-based VAD. Sprint 12 completes the notes channel refactor. Sprint 14 improves passive mode quality with Silero VAD. Sprint 15 extends the lifecycle to continuous sessions. Frame capture and diffusion-style refinement land after persistent review state is in place. Each phase should be feature-gated so manual controls remain available during rollout.
+> **Implementation Roadmap:** Always-on observation is being introduced in phases. Sprint 10 delivers voice mode audio triggers and a debug view while preserving the current per-recording backend. Sprint 11 adds local-only transcription with browser-based VAD. Sprint 12 completes the notes channel refactor. Sprint 14 improves voice mode mode quality with Silero VAD. Sprint 15 extends the lifecycle to continuous sessions. Frame capture and diffusion-style refinement land after persistent review state is in place. Each phase should be feature-gated so manual controls remain available during rollout.
 
 ### Agent Lifecycle
 
@@ -541,7 +541,7 @@ Initialize monitoring:
 Agent enters :observing state
 ```
 
-**Phase 2: Passive Observation**
+**Phase 2: Voice Mode Observation**
 ```
 Agent observes (no UI interruption):
   - Audio stream (VAD monitoring for speech)
@@ -1021,7 +1021,7 @@ end
 
 **Agentic principles transform Lossy from a tool into a companion:**
 
-1. **Context-Aware Passive Observation** - Always ready, never intrusive
+1. **Context-Aware Voice Mode Observation** - Always ready, never intrusive
 2. **Progressive Evidence Accumulation** - Build understanding across modalities
 3. **Diffusion-Style Iterative Refinement** - Global coherence, not autoregressive accumulation
 4. **Frame Capture Rules & Adaptive Bandwidth** - Systematic visual context collection
@@ -1033,4 +1033,4 @@ Notes that start as rough drafts and iteratively converge to precise, actionable
 
 ---
 
-**Next:** See `docs/sprints/SPRINT_11_local_only_transcription.md` for current implementation sprint (local-only transcription), and `docs/sprints/SPRINT_12_passive_mode_polish.md` for the next sprint (Silero VAD improvements). Sprint 10 (always-on foundations) is complete.
+**Next:** See `docs/sprints/SPRINT_11_local_only_transcription.md` for current implementation sprint (local-only transcription), and `docs/sprints/SPRINT_12_voice mode_mode_polish.md` for the next sprint (Silero VAD improvements). Sprint 10 (always-on foundations) is complete.

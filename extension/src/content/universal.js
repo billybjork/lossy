@@ -510,13 +510,13 @@ function listenForEvents() {
       return true; // Keep channel open for async response
     }
 
-    // Sprint 10: Get timestamp without pausing (for passive mode)
+    // Sprint 10: Get timestamp without pausing (for voice mode)
     if (message.action === 'get_timestamp') {
       videoController
         .getCurrentTime()
         .then((timestamp) => {
-          console.log('[Lossy] Timestamp requested (passive mode):', timestamp);
-          // DON'T pause - passive mode keeps video playing
+          console.log('[Lossy] Timestamp requested (voice mode):', timestamp);
+          // DON'T pause - voice mode keeps video playing
           sendResponse({ success: true, timestamp: timestamp });
         })
         .catch((err) => {
@@ -526,7 +526,7 @@ function listenForEvents() {
       return true; // Keep channel open for async response
     }
 
-    if (message.action === 'passive_pause_video') {
+    if (message.action === 'voice_pause_video') {
       const isPaused =
         !videoController || !videoController.videoElement
           ? true
@@ -540,7 +540,7 @@ function listenForEvents() {
       return false;
     }
 
-    if (message.action === 'passive_resume_video') {
+    if (message.action === 'voice_resume_video') {
       let resumed = false;
 
       if (videoController && videoController.videoElement) {

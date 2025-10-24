@@ -91,7 +91,7 @@ This documentation is organized into focused, non-overlapping guides. Read them 
 ### 04_AGENTIC_PRINCIPLES.md
 **What it covers:**
 - Transition from manual tools to intelligent companions
-- Context-aware passive observation patterns
+- Context-aware voice mode observation patterns
 - Progressive evidence accumulation (speech, vision, user actions)
 - Diffusion-style iterative refinement (global coherence)
 - Frame capture rules and adaptive bandwidth management
