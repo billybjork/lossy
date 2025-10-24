@@ -11,6 +11,44 @@ export class TabManager {
     this.pendingClearContext = new Map(); // tabId → boolean (track if we should clear context)
   }
 
+  /**
+   * Check if a URL change represents meaningful navigation (different page/video).
+   * Returns true if the page changed, false if only query parameters changed.
+   *
+   * This prevents Voice Mode from stopping when video players update the URL
+   * with timestamp parameters (e.g., ?ts=16.489585 → ?ts=10.383610).
+   */
+  isSignificantUrlChange(oldUrl, newUrl) {
+    if (!oldUrl || !newUrl) return true;
+
+    try {
+      const oldParsed = new URL(oldUrl);
+      const newParsed = new URL(newUrl);
+
+      // Different host/domain = significant change
+      if (oldParsed.host !== newParsed.host) {
+        return true;
+      }
+
+      // Different path = significant change
+      if (oldParsed.pathname !== newParsed.pathname) {
+        return true;
+      }
+
+      // Different hash = significant change (might be SPA navigation)
+      if (oldParsed.hash !== newParsed.hash) {
+        return true;
+      }
+
+      // Only query parameters changed (e.g., ?ts=X) - NOT significant
+      return false;
+    } catch (err) {
+      // If URL parsing fails, assume it's significant
+      console.warn('[TabManager] Failed to parse URLs for comparison:', err);
+      return true;
+    }
+  }
+
   async init() {
     console.log('[TabManager] Initializing...');
 
@@ -76,9 +114,24 @@ export class TabManager {
       if (changeInfo.url || (changeInfo.status === 'complete' && tab.active)) {
         console.log('[TabManager] Tab updated:', tabId, changeInfo);
 
-        // If URL changed, mark that we need to clear context (track independently of closure)
+        // If URL changed, check if it's a significant change (not just query params)
         if (changeInfo.url) {
-          this.pendingClearContext.set(tabId, true);
+          const existingContext = this.getVideoContext(tabId);
+          const oldUrl = existingContext?.url;
+          const newUrl = changeInfo.url;
+
+          if (this.isSignificantUrlChange(oldUrl, newUrl)) {
+            // Real navigation - mark context for clearing
+            console.log('[TabManager] Significant URL change detected, will clear context');
+            this.pendingClearContext.set(tabId, true);
+          } else {
+            // Just query parameters changed (e.g., timestamp) - update URL but keep context
+            console.log('[TabManager] Query parameter change only, updating URL in context');
+            if (existingContext) {
+              existingContext.url = newUrl;
+              this.persist();
+            }
+          }
         }
 
         // Clear existing debounce timer for this tab

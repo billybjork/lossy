@@ -181,12 +181,19 @@ async function startRecording() {
     const bufferSize = 4096;
     const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
 
+    let audioChunkCount = 0;
     processor.onaudioprocess = (event) => {
       // Copy input buffer (Float32Array)
       const inputData = event.inputBuffer.getChannelData(0);
       const copy = new Float32Array(inputData.length);
       copy.set(inputData);
       audioBuffer.push(copy);
+
+      // Log first chunk to confirm audio is being captured
+      audioChunkCount++;
+      if (audioChunkCount === 1) {
+        console.log('[Offscreen] First audio chunk captured');
+      }
     };
 
     source.connect(processor);
@@ -209,10 +216,11 @@ async function startRecording() {
     mediaRecorder._audioSource = source;
 
     mediaRecorder.onerror = (event) => {
-      console.error('MediaRecorder error:', event.error);
+      console.error('[Offscreen] MediaRecorder error:', event.error);
     };
 
     mediaRecorder.onstop = function () {
+      console.log('[Offscreen] MediaRecorder stopped, cleaning up stream');
       stream.getTracks().forEach((track) => track.stop());
 
       // Cleanup audio processor (use 'this' instead of 'mediaRecorder' to avoid null reference)
@@ -224,6 +232,7 @@ async function startRecording() {
 
     // Start recording with 1-second chunks
     mediaRecorder.start(1000);
+    console.log('[Offscreen] MediaRecorder started successfully');
   } catch (error) {
     console.error('[Offscreen] Failed to start recording:', error);
     throw error;
@@ -231,7 +240,14 @@ async function startRecording() {
 }
 
 async function stopRecording() {
+  console.log('[Offscreen] stopRecording called', {
+    hasMediaRecorder: !!mediaRecorder,
+    mediaRecorderState: mediaRecorder?.state,
+    audioBufferLength: audioBuffer.length,
+  });
+
   if (!mediaRecorder || mediaRecorder.state === 'inactive') {
+    console.warn('[Offscreen] Cannot stop: mediaRecorder is null or inactive');
     return { localTranscription: false };
   }
 
@@ -276,9 +292,106 @@ async function stopRecording() {
       audioBuffer = [];
     }
   } else {
-    console.warn('[Offscreen] No audio captured');
+    console.warn('[Offscreen] No audio captured - audioBuffer is empty');
     return { success: false, error: 'No audio captured' };
   }
+}
+
+/**
+ * Detect Whisper hallucinations using multiple signals.
+ *
+ * Whisper models hallucinate when processing music, silence, or poor audio.
+ * This function uses research-backed heuristics to detect and filter out
+ * hallucinated transcripts before sending to backend.
+ *
+ * Detection signals:
+ * 1. Compression ratio: Text length vs audio duration (>2.4 = hallucination)
+ * 2. Repetitive patterns: Same words repeated excessively
+ * 3. Zero-duration timestamps: Many chunks with identical start/end times
+ * 4. Music markers: Whisper outputs ♪ or [Music] for non-speech
+ *
+ * @param {string} text - Transcribed text
+ * @param {Array} chunks - Word-level timestamp chunks
+ * @param {number} durationSeconds - Audio duration in seconds
+ * @returns {Object} { isHallucination: boolean, reason: string, metrics: Object }
+ */
+function detectWhisperHallucination(text, chunks, durationSeconds) {
+  const metrics = {};
+
+  // Signal 1: Compression ratio
+  // Normal speech: ~15 chars/sec. Hallucinations often exceed 2.4x normal
+  const compressionRatio = text.length / (durationSeconds * 15);
+  metrics.compressionRatio = compressionRatio;
+
+  if (compressionRatio > 2.4) {
+    return {
+      isHallucination: true,
+      reason: `High compression ratio: ${compressionRatio.toFixed(2)} (threshold: 2.4)`,
+      metrics,
+    };
+  }
+
+  // Signal 2: Repetitive patterns
+  // Count unique vs total words. Hallucinations often repeat the same words
+  const words = text.split(/\s+/).filter((w) => w.length > 0);
+  if (words.length > 5) {
+    const uniqueWords = new Set(words.map((w) => w.toLowerCase()));
+    const repetitionRatio = words.length / uniqueWords.size;
+    metrics.repetitionRatio = repetitionRatio;
+
+    if (repetitionRatio > 3.0) {
+      return {
+        isHallucination: true,
+        reason: `High repetition ratio: ${repetitionRatio.toFixed(2)} (threshold: 3.0)`,
+        metrics,
+      };
+    }
+  }
+
+  // Signal 3: Zero-duration timestamps
+  // Hallucinations often have many chunks with identical start/end times
+  if (chunks && chunks.length > 0) {
+    const zeroDurationChunks = chunks.filter(
+      (c) => c.timestamp && c.timestamp[0] === c.timestamp[1]
+    ).length;
+    const zeroDurationRatio = zeroDurationChunks / chunks.length;
+    metrics.zeroDurationRatio = zeroDurationRatio;
+
+    if (zeroDurationRatio > 0.3) {
+      return {
+        isHallucination: true,
+        reason: `High zero-duration chunks: ${(zeroDurationRatio * 100).toFixed(1)}% (threshold: 30%)`,
+        metrics,
+      };
+    }
+  }
+
+  // Signal 4: Music/non-speech markers
+  // Whisper outputs ♪, [Music], [Applause], etc. for non-speech audio
+  const musicMarkers = /[♪♫]|\[Music\]|\[Applause\]|\[Laughter\]/i;
+  if (musicMarkers.test(text)) {
+    return {
+      isHallucination: true,
+      reason: 'Music or non-speech markers detected',
+      metrics,
+    };
+  }
+
+  // Signal 5: Very short text for long audio
+  // If audio is >3s but text is <10 chars, likely silence misdetected as speech
+  if (durationSeconds > 3 && text.trim().length < 10) {
+    return {
+      isHallucination: true,
+      reason: `Text too short for audio duration: ${text.length} chars for ${durationSeconds.toFixed(1)}s`,
+      metrics,
+    };
+  }
+
+  return {
+    isHallucination: false,
+    reason: 'Passed all hallucination checks',
+    metrics,
+  };
 }
 
 /**
@@ -347,6 +460,44 @@ async function transcribeLocally() {
 
   console.log(`[Offscreen] Local transcription complete in ${transcriptionTime.toFixed(0)}ms`);
   console.log(`[Offscreen] Transcript: "${result.text}"`);
+
+  // Detect Whisper hallucination before sending to backend
+  const hallucinationCheck = detectWhisperHallucination(
+    result.text,
+    result.chunks || [],
+    durationSeconds
+  );
+
+  console.log(
+    `[Offscreen] Hallucination check: ${hallucinationCheck.isHallucination ? 'FAILED' : 'PASSED'}`,
+    hallucinationCheck
+  );
+
+  if (hallucinationCheck.isHallucination) {
+    console.warn(
+      `[Offscreen] Hallucination detected, discarding transcript: ${hallucinationCheck.reason}`
+    );
+    console.warn(`[Offscreen] Discarded text: "${result.text.slice(0, 100)}..."`);
+
+    // Notify UI: hallucination detected
+    chrome.runtime.sendMessage({
+      action: 'transcription_status',
+      stage: 'hallucination_detected',
+      source: 'local',
+      device: device,
+      reason: hallucinationCheck.reason,
+      metrics: hallucinationCheck.metrics,
+    });
+
+    return {
+      text: '',
+      chunks: [],
+      hallucination: true,
+      hallucinationReason: hallucinationCheck.reason,
+      hallucinationMetrics: hallucinationCheck.metrics,
+      transcriptionTimeMs: Math.round(transcriptionTime),
+    };
+  }
 
   // Notify UI: transcription completed
   chrome.runtime.sendMessage({

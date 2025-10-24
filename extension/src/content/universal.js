@@ -168,6 +168,12 @@ async function init() {
 async function onVideoReady(videoElement) {
   console.log('[Lossy] 🔵 Video element ready:', videoElement);
 
+  // Guard against race condition: cleanup() may have been called before this callback
+  if (!adapter) {
+    console.warn('[Lossy] ⚠️ Adapter is null (cleanup race condition), ignoring video detection');
+    return;
+  }
+
   // Extract video ID using adapter
   const videoIdData = adapter.extractVideoId(window.location.href);
   currentVideoId = videoIdData.id;
@@ -273,6 +279,12 @@ function checkUrlChange() {
 }
 
 function setupAnchorChip(videoElement) {
+  // Guard against race condition: adapter may be null if cleanup() was called
+  if (!adapter) {
+    console.warn('[Lossy] ⚠️ Cannot setup anchor chip, adapter is null');
+    return;
+  }
+
   // Get platform-specific anchor container from adapter
   const anchorContainer = adapter.getAnchorChipContainer(videoElement);
   anchorChip = new AnchorChip(videoElement, anchorContainer);
@@ -362,6 +374,12 @@ function enqueuePendingNote(note) {
 function setupTimelineMarkers(videoElement) {
   console.log('[Lossy] 🎯 Setting up timeline markers...');
 
+  // Guard against race condition: adapter may be null if cleanup() was called
+  if (!adapter) {
+    console.warn('[Lossy] ⚠️ Cannot setup timeline markers, adapter is null');
+    return;
+  }
+
   // Find progress bar using adapter
   const progressBar = adapter.findProgressBar(videoElement);
 
@@ -394,6 +412,12 @@ function retryTimelineMarkersSetup(videoElement, attempt) {
 
   setTimeout(() => {
     console.log('[Lossy] 🔄 Retry attempt', attempt + 1, 'to find progress bar...');
+
+    // Guard against race condition: adapter may be null if cleanup() was called
+    if (!adapter) {
+      console.warn('[Lossy] ⚠️ Adapter is null during retry, aborting');
+      return;
+    }
 
     const progressBar = adapter.findProgressBar(videoElement);
 

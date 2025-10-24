@@ -580,6 +580,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Sprint 07: Handle transcript from local transcription
   if (message.action === 'transcript_final' && sender.url?.includes('offscreen.html')) {
+    // Skip empty transcripts (hallucination detected by offscreen)
+    if (!message.text || message.text.trim().length === 0) {
+      console.log('[Lossy] Skipping empty transcript (hallucination filtered)');
+      return false;
+    }
+
     console.log('[Lossy] Local transcript received:', message.text.substring(0, 50) + '...');
 
     // Sprint 10 Fix: Route transcript to correct channel (voice mode vs manual)
