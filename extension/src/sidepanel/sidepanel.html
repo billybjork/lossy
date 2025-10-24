@@ -2,17 +2,13 @@
 <html lang="en">
 <!--
   Extension Side Panel (extension/src/sidepanel/)
-
-  Current (Sprint 01-02): Vanilla JS with inline styles
-  Future: Will connect to Phoenix LiveView via WebSocket for real-time updates
-
+  
   Architecture:
   - This HTML loads locally in extension
   - sidepanel.js bundles phoenix.js (via webpack)
   - Connects to backend via WebSocket (wss://...)
   - LiveView manages state, this renders updates
 
-  See docs/03_LIVEVIEW_PATTERNS.md for LiveView integration pattern
 -->
 <head>
   <meta charset="utf-8">
@@ -911,6 +907,97 @@
       color: #e5e7eb;
       font-weight: 600;
     }
+
+    .debug-telemetry-events {
+      margin-top: 16px;
+      padding: 10px 12px;
+      background: #0f172a;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #9ca3af;
+      font-family: 'SF Mono', 'Monaco', monospace;
+      max-height: 200px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .debug-telemetry-events-header {
+      display: flex;
+      justify-content: space-between;
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    .debug-telemetry-counters {
+      color: #9ca3af;
+      font-weight: 500;
+    }
+
+    .debug-telemetry-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    .telemetry-event-list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      overflow-y: auto;
+    }
+
+    .telemetry-event {
+      background: #111827;
+      border-radius: 4px;
+      padding: 6px 8px;
+      border: 1px solid rgba(148, 163, 184, 0.1);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .telemetry-event-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+
+    .telemetry-event-level {
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-weight: 700;
+      color: #111827;
+    }
+
+    .telemetry-event-level.warn {
+      background: #facc15;
+    }
+
+    .telemetry-event-level.error {
+      background: #ef4444;
+    }
+
+    .telemetry-event-context {
+      font-weight: 600;
+      color: #e5e7eb;
+    }
+
+    .telemetry-event-source {
+      margin-left: auto;
+    }
+
+    .telemetry-event-message {
+      font-size: 11px;
+      color: #e5e7eb;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
   </style>
 </head>
 <body>
@@ -998,6 +1085,17 @@
             <span>Uptime:</span>
             <span class="debug-telemetry-value" id="telemetryUptime">0s</span>
           </div>
+        </div>
+
+        <div class="debug-telemetry-events">
+          <div class="debug-telemetry-events-header">
+            <span>Recent WARN / ERROR</span>
+            <span class="debug-telemetry-counters" id="telemetryCounters">0 warn · 0 error</span>
+          </div>
+          <div class="debug-telemetry-actions">
+            <button class="debug-btn" id="refreshTelemetryBtn">Refresh Log</button>
+          </div>
+          <ul class="telemetry-event-list" id="telemetryEventList"></ul>
         </div>
 
         <div class="debug-buttons">

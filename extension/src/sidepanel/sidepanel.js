@@ -190,6 +190,9 @@ const telemetryConfidence = document.getElementById('telemetryConfidence');
 const telemetryRestarts = document.getElementById('telemetryRestarts');
 const telemetryNotes = document.getElementById('telemetryNotes');
 const telemetryUptime = document.getElementById('telemetryUptime');
+const telemetryEventList = document.getElementById('telemetryEventList');
+const telemetryCountersLabel = document.getElementById('telemetryCounters');
+const refreshTelemetryBtn = document.getElementById('refreshTelemetryBtn');
 
 const retryVADBtn = document.getElementById('retryVADBtn');
 const disablePassiveBtn = document.getElementById('disablePassiveBtn');
@@ -197,6 +200,14 @@ const disablePassiveBtn = document.getElementById('disablePassiveBtn');
 // Initialize LiveWaveform
 const waveformCanvas = document.getElementById('waveformCanvas');
 let waveform = null;
+
+// Telemetry buffering (WARN/ERROR feed)
+const TELEMETRY_EVENT_LIMIT = 50;
+const telemetryEventBuffer = [];
+let telemetryCountersData = { warn: 0, error: 0 };
+let telemetryHydrated = false;
+
+updateTelemetryCountersLabel();
 
 // LiveWaveform class (inline - will be bundled by webpack)
 class LiveWaveform {
@@ -408,6 +419,12 @@ debugToggleBtn.addEventListener('click', () => {
   toggleDebugDrawer();
 });
 
+if (refreshTelemetryBtn) {
+  refreshTelemetryBtn.addEventListener('click', () => {
+    fetchTelemetryHistory(TELEMETRY_EVENT_LIMIT);
+  });
+}
+
 // Sprint 10: Passive mode toggle (Main UI)
 passiveModeToggleMain.addEventListener('click', async () => {
   const isActive = passiveModeToggleMain.classList.contains('active');
@@ -494,6 +511,7 @@ function toggleDebugDrawer() {
   } else {
     debugDrawer.classList.remove('hidden');
     debugDrawer.classList.add('visible');
+    hydrateTelemetryIfNeeded();
   }
 }
 
@@ -554,6 +572,213 @@ function getUserFriendlyErrorMessage(errorMessage) {
 
   // Generic fallback
   return `VAD initialization failed: ${errorMessage}`;
+}
+
+function hydrateTelemetryIfNeeded() {
+  if (telemetryHydrated) {
+    return;
+  }
+  fetchTelemetryHistory(TELEMETRY_EVENT_LIMIT);
+}
+
+async function fetchTelemetryHistory(limit = TELEMETRY_EVENT_LIMIT) {
+  try {
+    const response = await chrome.runtime.sendMessage({
+      action: 'get_telemetry_events',
+      limit,
+    });
+
+    if (response?.events) {
+      telemetryEventBuffer.length = 0;
+      response.events.forEach((event) => telemetryEventBuffer.push(event));
+      telemetryEventBuffer.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+      trimTelemetryBuffer();
+      renderTelemetryEvents();
+    }
+
+    if (response?.counters) {
+      telemetryCountersData = {
+        warn: response.counters.warn ?? telemetryCountersData.warn ?? 0,
+        error: response.counters.error ?? telemetryCountersData.error ?? 0,
+      };
+      updateTelemetryCountersLabel();
+    }
+
+    telemetryHydrated = true;
+  } catch (error) {
+    console.error('[Telemetry] Failed to fetch telemetry history:', error);
+  }
+}
+
+function handleIncomingTelemetryEvent(event) {
+  if (!event || !event.id) {
+    return;
+  }
+
+  appendTelemetryEvent(event);
+
+  if (event.level && telemetryCountersData[event.level] != null) {
+    telemetryCountersData[event.level] += 1;
+    updateTelemetryCountersLabel();
+  }
+
+  telemetryHydrated = true;
+}
+
+function appendTelemetryEvent(event) {
+  if (telemetryEventBuffer.some((existing) => existing.id === event.id)) {
+    return;
+  }
+
+  telemetryEventBuffer.push(event);
+  telemetryEventBuffer.sort((a, b) => (a.timestamp || 0) - (b.timestamp || 0));
+  trimTelemetryBuffer();
+  renderTelemetryEvents();
+}
+
+function trimTelemetryBuffer() {
+  const excess = telemetryEventBuffer.length - TELEMETRY_EVENT_LIMIT;
+  if (excess > 0) {
+    telemetryEventBuffer.splice(0, excess);
+  }
+}
+
+function renderTelemetryEvents() {
+  if (!telemetryEventList) {
+    return;
+  }
+
+  const fragment = document.createDocumentFragment();
+  const eventsToRender = [...telemetryEventBuffer].reverse(); // newest first
+
+  eventsToRender.forEach((event) => {
+    const li = document.createElement('li');
+    li.className = `telemetry-event level-${event.level ?? 'warn'}`;
+
+    const levelClass = event.level === 'error' ? 'error' : 'warn';
+    const timestamp = formatTelemetryTimestamp(event.timestamp);
+    const sourceLabel = event.source ? event.source : 'extension';
+    const message = formatTelemetryMessage(event);
+
+    const metaDiv = document.createElement('div');
+    metaDiv.className = 'telemetry-event-meta';
+
+    const levelSpan = document.createElement('span');
+    levelSpan.className = `telemetry-event-level ${levelClass}`;
+    levelSpan.textContent = (event.level || 'warn').toUpperCase();
+
+    const contextSpan = document.createElement('span');
+    contextSpan.className = 'telemetry-event-context';
+    contextSpan.textContent = event.context || 'unknown';
+
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'telemetry-event-time';
+    timeSpan.textContent = timestamp;
+
+    const sourceSpan = document.createElement('span');
+    sourceSpan.className = 'telemetry-event-source';
+    sourceSpan.textContent = sourceLabel;
+
+    metaDiv.append(levelSpan, contextSpan, timeSpan, sourceSpan);
+
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'telemetry-event-message';
+    messageDiv.textContent = message;
+
+    li.append(metaDiv, messageDiv);
+
+    fragment.appendChild(li);
+  });
+
+  telemetryEventList.replaceChildren(fragment);
+}
+
+function updateTelemetryCountersLabel() {
+  if (!telemetryCountersLabel) {
+    return;
+  }
+
+  const warnCount = telemetryCountersData.warn ?? 0;
+  const errorCount = telemetryCountersData.error ?? 0;
+  telemetryCountersLabel.textContent = `${warnCount} warn · ${errorCount} error`;
+}
+
+function formatTelemetryTimestamp(timestamp) {
+  if (!timestamp) {
+    return '--:--:--';
+  }
+
+  try {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+    });
+  } catch (_err) {
+    return String(timestamp);
+  }
+}
+
+function formatTelemetryMessage(event) {
+  if (!event || !event.payload) {
+    return 'No additional details.';
+  }
+
+  const parts = [];
+  const { payload } = event;
+
+  if (payload.error) {
+    const errorInfo = payload.error;
+    const name = errorInfo.name || 'Error';
+    const message = errorInfo.message || 'Unknown error';
+    parts.push(`${name}: ${message}`);
+
+    if (errorInfo.stack) {
+      const firstLine = String(errorInfo.stack).split('\n')[0];
+      parts.push(firstLine);
+    }
+  }
+
+  if (Array.isArray(payload.args) && payload.args.length > 0) {
+    parts.push(payload.args.map(formatTelemetryValue).join(' '));
+  }
+
+  if (parts.length === 0) {
+    parts.push('No additional details.');
+  }
+
+  return parts.join('\n');
+}
+
+function formatTelemetryValue(value) {
+  if (value == null) {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return `[${value.map(formatTelemetryValue).join(', ')}]`;
+  }
+
+  if (typeof value === 'object') {
+    if (value.type === 'function') {
+      return `[Function ${value.name || 'anonymous'}]`;
+    }
+    if (value.type === 'symbol') {
+      return `[Symbol ${value.description || ''}]`;
+    }
+    if (value.summary || value.description) {
+      return `[${value.summary || 'Object'}] ${value.description || ''}`.trim();
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch (_error) {
+      return '[Object]';
+    }
+  }
+
+  return String(value);
 }
 
 // Waveform visualization control for passive mode
@@ -1251,6 +1476,12 @@ chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
 // This allows the service worker to track panel state and notify content scripts
 const panelPort = chrome.runtime.connect({ name: 'sidepanel' });
 console.log('[SidePanel] Opened connection to service worker');
+
+panelPort.onMessage.addListener((message) => {
+  if (message?.action === 'telemetry_event' && message.event) {
+    handleIncomingTelemetryEvent(message.event);
+  }
+});
 
 // Handle port disconnection (if needed in the future)
 panelPort.onDisconnect.addListener(() => {

@@ -192,6 +192,7 @@ MAX_SPEECH_DURATION_MS: 60000  // Absolute max recording length (60s)
    - **Avg Latency:** VAD inference latency (should be <50ms)
    - **Last Confidence:** Most recent VAD confidence value
    - **Restarts:** Circuit breaker restart count
+   - **Recent WARN/ERROR Log:** Inspect the rolling log feed in the debug drawer (click **Refresh Log** to pull the latest entries from the service worker buffer)
 
 ### Interpreting Metrics
 

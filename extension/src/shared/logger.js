@@ -1,3 +1,5 @@
+import { telemetryEmitter } from './telemetry-emitter.js';
+
 /**
  * Centralized Logging Utility
  *
@@ -77,11 +79,10 @@ export const logger = {
    *
    * @param {string} context - Context/module name
    * @param {...any} args - Arguments to log
-   */
+  */
   warn: (context, ...args) => {
     console.warn(`[${context}]`, ...args);
-    // TODO: Call telemetryEmitter.warn(context, args)
-    // This will preserve observability when DEBUG logging is disabled
+    telemetryEmitter.warn(context, args);
   },
 
   /**
@@ -94,7 +95,6 @@ export const logger = {
    */
   error: (context, error, ...args) => {
     console.error(`[${context}]`, error, ...args);
-    // TODO: Call telemetryEmitter.error(context, error, args)
-    // This will preserve observability when DEBUG logging is disabled
+    telemetryEmitter.error(context, error, args);
   },
 };

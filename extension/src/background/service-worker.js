@@ -98,6 +98,76 @@ const passiveSession = {
   heartbeatFailures: 0,
 };
 
+// Telemetry buffer for WARN/ERROR logs (shared by logger via runtime messages)
+const telemetryEvents = [];
+const TELEMETRY_BUFFER_LIMIT = 200;
+const telemetryCounters = {
+  warn: 0,
+  error: 0,
+};
+// TODO: Forward telemetryEvents to backend telemetry channel once unified analytics pipeline is implemented.
+
+function resolveTelemetrySource(sender) {
+  if (!sender) {
+    return 'service_worker';
+  }
+
+  if (sender.tab?.id != null) {
+    return `tab:${sender.tab.id}`;
+  }
+
+  const url = sender.url || '';
+  if (url.includes('offscreen')) {
+    return 'offscreen';
+  }
+  if (url.includes('sidepanel')) {
+    return 'sidepanel';
+  }
+  if (url.includes('service-worker')) {
+    return 'service_worker';
+  }
+
+  return 'extension';
+}
+
+function broadcastTelemetryEvent(event) {
+  for (const port of openPanels.values()) {
+    try {
+      port.postMessage({
+        action: 'telemetry_event',
+        event,
+      });
+    } catch {
+      // Ignore port failures (panel may no longer exist)
+    }
+  }
+}
+
+function recordTelemetryEventMessage(message, sender) {
+  const event = {
+    id:
+      typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+        ? crypto.randomUUID()
+        : `telemetry-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    level: message.level,
+    context: message.context,
+    payload: message.payload || {},
+    timestamp: message.timestamp || Date.now(),
+    source: resolveTelemetrySource(sender),
+  };
+
+  telemetryEvents.push(event);
+  if (telemetryEvents.length > TELEMETRY_BUFFER_LIMIT) {
+    telemetryEvents.shift();
+  }
+
+  if (event.level === 'warn' || event.level === 'error') {
+    telemetryCounters[event.level] = (telemetryCounters[event.level] || 0) + 1;
+  }
+
+  broadcastTelemetryEvent(event);
+}
+
 /**
  * Sprint 10 Fix: Safe wrapper for sending messages to tabs
  * Handles extension context invalidation gracefully
@@ -423,6 +493,24 @@ function extractExternalId(url, platform) {
 
 // Handle messages from extension pages
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'telemetry_event') {
+    recordTelemetryEventMessage(message, sender);
+    sendResponse({ success: true });
+    return false;
+  }
+
+  if (message.action === 'get_telemetry_events') {
+    const limit =
+      typeof message.limit === 'number'
+        ? Math.max(1, Math.min(TELEMETRY_BUFFER_LIMIT, message.limit))
+        : 50;
+    sendResponse({
+      events: telemetryEvents.slice(-limit),
+      counters: { ...telemetryCounters },
+    });
+    return false;
+  }
+
   // Sprint 10: Handle passive VAD events from offscreen
   if (message.action === 'passive_event' && sender.url?.includes('offscreen.html')) {
     handlePassiveEvent(message);
