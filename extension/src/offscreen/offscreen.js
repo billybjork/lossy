@@ -16,7 +16,7 @@
 import { loadWhisperModel, detectCapabilities, unloadModel, warmCache } from './whisper-loader.js';
 import { enqueueGpuTask, JobPriority } from './gpu-job-queue.js';
 import { SileroVAD } from './vad-detector.js';
-import { VAD_CONFIG, PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
+import { VAD_CONFIG } from '../shared/shared-constants.js';
 import { VadWorkletBridge } from './vad-worklet-bridge.js';
 
 const TARGET_SAMPLE_RATE = 16000;

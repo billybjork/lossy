@@ -23,8 +23,6 @@ let isRecording = false;
 let currentVideoContext = null;
 let displayedVideoDbId = null; // Track which video's notes are currently displayed
 let loadingSessionId = 0; // Increment this to invalidate in-flight note requests
-let tabChangedTimer = null; // Debounce timer for tab_changed messages
-let pendingTabChange = null; // Store pending tab change data
 const notesCache = new Map(); // Persist notes per video to avoid flicker on reloads
 const transcriptsClearDelayMs = 250;
 let scheduledTranscriptClear = null;
@@ -401,69 +399,7 @@ class LiveWaveform {
   }
 }
 
-// Shared function to toggle recording
-async function toggleRecording() {
-  try {
-    // Start waveform first if not recording
-    if (!isRecording) {
-      try {
-        if (!waveform) {
-          waveform = new LiveWaveform(waveformCanvas, {
-            barColor: '#dc2626',
-            sensitivity: 1.2,
-            mode: 'static',
-            height: 48, // Compact size for main UI
-          });
-        }
-        await waveform.start();
-        console.log('Waveform started');
-      } catch (error) {
-        console.error('Failed to start waveform:', error);
-        statusEl.textContent = `Microphone error: ${error.message}`;
-        return;
-      }
-    }
-
-    const response = await chrome.runtime.sendMessage({
-      action: 'toggle_recording',
-    });
-
-    if (response.success === false) {
-      console.error('Recording failed:', response.error);
-      statusEl.textContent = `Error: ${response.error}`;
-      statusEl.classList.remove('connected');
-      isRecording = false;
-
-      // Stop waveform on error
-      if (waveform) {
-        waveform.stop();
-      }
-
-      updateUI();
-      return;
-    }
-
-    isRecording = response.recording;
-
-    // Stop waveform if we stopped recording
-    if (!isRecording && waveform) {
-      waveform.stop();
-    }
-
-    updateUI();
-  } catch (error) {
-    console.error('Failed to toggle recording:', error);
-    statusEl.textContent = `Error: ${error.message}`;
-    statusEl.classList.remove('connected');
-
-    // Stop waveform on error
-    if (waveform) {
-      waveform.stop();
-    }
-  }
-}
-
-// Removed: Manual recording button event listeners (replaced by passive mode toggle in main UI)
+// Removed: Manual recording button and toggleRecording function (replaced by passive mode toggle in main UI)
 // recordBtn.addEventListener('click', toggleRecording);
 // pauseBtn.addEventListener('click', toggleRecording);
 

@@ -20,11 +20,11 @@ class VadProcessor extends AudioWorkletProcessor {
    * Called automatically by the audio rendering thread
    *
    * @param {Float32Array[][]} inputs - Input audio data (multi-channel)
-   * @param {Float32Array[][]} outputs - Output audio data (unused, we're just monitoring)
-   * @param {Object} parameters - Audio parameters (unused)
+   * @param {Float32Array[][]} _outputs - Output audio data (unused, we're just monitoring)
+   * @param {Object} _parameters - Audio parameters (unused)
    * @returns {boolean} - true to keep processor alive
    */
-  process(inputs, outputs, parameters) {
+  process(inputs, _outputs, _parameters) {
     const input = inputs[0];
 
     // Check if we have valid input

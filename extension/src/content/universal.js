@@ -209,7 +209,7 @@ async function onVideoReady(videoElement) {
   setupTimelineMarkers(videoElement);
 
   // Watch for video changes using adapter
-  adapter.watchForChanges((newVideo) => {
+  adapter.watchForChanges((_newVideo) => {
     console.log('[Lossy] 🔄 Video element changed, reinitializing...');
     debouncedReinit();
   });

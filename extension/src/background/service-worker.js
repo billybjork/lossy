@@ -6,14 +6,10 @@
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
-import { VAD_CONFIG, PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
+import { PASSIVE_SESSION_CONFIG } from '../shared/shared-constants.js';
 import {
   initPassiveSessionManager,
-  resetPassiveTelemetry,
-  broadcastPassiveStatus,
   restartVADWithBackoff,
-  handleHeartbeatFailure,
-  acknowledgeHeartbeatSuccess,
   handlePassiveEvent,
   startPassiveSession,
   stopPassiveSession,
@@ -21,25 +17,18 @@ import {
 import {
   initRecordingManager,
   toggleRecording,
-  startRecording,
-  stopRecording,
   createOffscreenDocument,
-  hasOffscreenDocument,
-  getRecordingState,
   getAudioChannel,
 } from './modules/recording-manager.js';
 import {
   initSocketManager,
-  getOrCreateSocket,
   getOrCreateVideoChannel,
-  getVideoChannel,
 } from './modules/socket-manager.js';
 import {
   initVideoContextManager,
   handleVideoDetected,
   handleTriggerVideoDetection,
   ensureVideoContextForTab,
-  ensureContentScriptInjected,
 } from './modules/video-context-manager.js';
 import {
   initNoteManager,
@@ -108,8 +97,6 @@ const passiveSession = {
 
   heartbeatFailures: 0,
 };
-
-let heartbeatInterval = null;
 
 /**
  * Sprint 10 Fix: Safe wrapper for sending messages to tabs
