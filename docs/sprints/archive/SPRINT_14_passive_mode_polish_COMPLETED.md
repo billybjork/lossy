@@ -3,21 +3,22 @@
 **Status:** ✅ Completed (2025-10-23)
 **Priority:** High
 **Owner:** Claude Code
-**Progress:** 80% Complete
+**Progress:** 95% Complete (UI integration deferred to Sprint 15)
 
-**ARCHIVED:** This sprint has been mostly completed. Remaining work (code quality, refactoring, debug drawer wiring) moved to `PASSIVE_MODE_REFACTOR.md`
+**ARCHIVED:** This sprint has been completed including all core deliverables plus comprehensive code quality refactoring.
 
 ---
 
 ## Completion Summary
 
-### ✅ Completed Deliverables (80%)
+### ✅ Core Deliverables (100%)
 
 1. **Silero VAD Integration** - COMPLETE
    - Silero v5 integrated and working reliably
    - <5% false positive rate achieved
    - Proper speech_end detection (no more infinite recordings)
    - Inference latency <5ms per frame
+   - AudioWorklet migration (eliminated ScriptProcessor deprecation)
 
 2. **Auto-Pause Video During Speech** - COMPLETE
    - Video pauses on speech_start
@@ -31,29 +32,118 @@
    - Auto-restart on transient failures
    - User notifications for permanent failures
 
-4. **Passive Mode Feedback & Telemetry** - MOSTLY COMPLETE
+4. **Passive Mode Feedback & Telemetry** - COMPLETE
    - Badge updates working (note count + status color)
    - Telemetry data collection working
    - Status chip updating in real-time
-   - ⚠️ Debug drawer UI needs JS wiring (see PASSIVE_MODE_REFACTOR.md)
+   - Debug drawer data ready (UI wiring deferred to Sprint 15)
 
-### ⏭️ Remaining Work (20%)
+### ✅ Code Quality Refactoring (100%)
 
-5. **Debug Drawer Instrumentation** - PARTIAL
+**Refactor Results (Commits: 104ab6c → 106c755):**
+- **Service worker decomposition:** 2368 → 1055 lines (55% reduction)
+- **5 focused modules extracted:** passive-session-manager, recording-manager, socket-manager, video-context-manager, note-manager
+- **Frozen config constants:** All VAD tunables centralized in VAD_CONFIG, PASSIVE_SESSION_CONFIG
+- **Production logging:** Centralized logger with DEBUG gating (off by default)
+- **Zero lint warnings:** All eslint warnings resolved
+- **Zero deprecation warnings:** AudioWorklet migration complete
+- **Code review fixes:** AudioWorklet fallback, telemetry reset, hard-coded config removal, dead code deletion
+
+**Phase Breakdown:**
+1. **Phase 1:** VAD config + shared constants (frozen configs) ✅
+2. **Phase 2:** Centralized logger with DEBUG gating ✅
+3. **Phase 3:** Service worker decomposition (3 passes, 5 modules) ✅
+4. **Phase 4:** AudioWorklet migration (eliminated deprecation warnings) ✅
+5. **Phase 5:** VAD tuning guide, production logging ✅
+6. **Code Review:** AudioWorklet fallback, telemetry fixes, constant consolidation ✅
+
+### 📋 Acceptance Criteria Status
+
+**Code Quality:**
+- [x] All VAD tunables in frozen config (VAD_CONFIG, PASSIVE_SESSION_CONFIG)
+- [x] State diagram documented in vad-detector.js
+- [x] Service worker significantly reduced (2368 → 1055 lines, 55% reduction)
+- [x] Modules extracted with single responsibility (5 focused modules)
+- [x] No ScriptProcessor deprecation warnings (AudioWorklet migration complete)
+- [x] Zero lint warnings across codebase
+
+**Functionality:**
+- [x] Passive mode smoke test: 100% pass
+- [x] Start passive → observing state
+- [x] Speak → recording starts, note created
+- [x] Switch tabs during recording → note routes to correct video
+- [x] Auto-pause/resume works (video pauses on speech, resumes after)
+- [x] Circuit breaker: stops after 3 failed restarts
+- [x] Manual recording still works independently
+
+**Observability:**
+- [x] Logger feeds same telemetry keys (badge updates, circuit breaker counts)
+- [x] DEBUG logs gated by settings flag (off by default)
+- [x] WARN/ERROR logs preserved and sent to telemetryEmitter
+- [x] No loss of telemetry coverage after refactor
+
+**Documentation:**
+- [x] VAD tuning guide created (docs/VAD_TUNING_GUIDE.md)
+- [x] Module ownership map documented
+- [x] Code review fixes documented
+
+### ⏭️ Deferred to Sprint 15 (5%)
+
+5. **Debug Drawer UI Integration** - DEFERRED
+   - Telemetry data ready and broadcasting
    - HTML structure exists
-   - Telemetry data collected
-   - **TODO:** Wire JS to update UI values
+   - **TODO:** Wire JS to hydrate UI values
    - **TODO:** Wire retry/disable buttons
-   - See `PASSIVE_MODE_REFACTOR.md` Phase 5 for details
+   - Deferred due to higher-priority sprint items
 
-### Additional Polish Needed
+### 📊 Module Ownership Map
 
-See `PASSIVE_MODE_REFACTOR.md` for:
-- VAD config consolidation and documentation
-- Service worker refactoring (god object → focused modules)
-- AudioWorklet migration (remove ScriptProcessor deprecation)
-- Production logging strategy
-- VAD tuning guide
+After refactoring, responsibilities are clearly separated:
+
+| Module | Owns | Does NOT Own |
+|--------|------|--------------|
+| `vad-detector.js` | Silero inference, state machine, speech events | Audio capture, Chrome APIs |
+| `passive-session-manager.js` | Passive session lifecycle, VAD event handling, circuit breaker | Manual recording, video detection |
+| `recording-manager.js` | Manual recording, offscreen lifecycle | Passive mode, VAD events |
+| `video-context-manager.js` | Video detection, content script injection | Recording, notes |
+| `note-manager.js` | Note CRUD, marker sync | Recording, video context |
+| `socket-manager.js` | Phoenix socket, channel lifecycle | Business logic, note creation |
+| `service-worker.js` | Chrome event listeners, message routing | Business logic (delegates to modules) |
+
+---
+
+## Refactor Commit History
+
+**Timeline:** Sprint 14 core features → Code quality refactor → Code review fixes
+
+### Sprint 14 Core Features (Phases 1-5)
+- `104ab6c` - Phase 1: VAD config + shared constants (frozen configs)
+- `7e020de` - Phase 2: Centralized logger with DEBUG gating
+- `2bc6ece` - Phase 3 Pass 1: Pure state helpers (passive-session-state, recording-context-state)
+- `cee5960` - Phase 3 Pass 2: Passive session manager extraction (735 lines)
+- `a642e6f` - Phase 3 Pass 2: Fix broadcastsSetUp variable declaration bug
+- `37a3269` - Phase 3 Pass 3: Extract 4 modules (recording, socket, video-context, notes)
+- `c974d05` - Phase 4: AudioWorklet migration (audio-worklet-vad.js, vad-worklet-bridge.js)
+- `5e23ca9` - Phase 5: VAD tuning guide, production logging
+
+### Post-Sprint Polish
+- `e0eb3e6` - Fix all eslint warnings (zero lint warnings achieved)
+- `106c755` - Code review fixes (AudioWorklet fallback, telemetry reset, hard-coded config)
+- `5c0c6ff` - Documentation update and archive
+
+### Recording Context Isolation
+
+**Critical functionality preserved:** Tab-switch bug prevention
+
+The refactor maintained exact recording context isolation logic:
+- Context captured atomically at speech_start
+- Timestamp routing to correct tab verified (user logs: timestamp 555.3)
+- Note delivery to correct tab verified
+- Context cleared after note delivery
+- All edge cases handled (tab switches, stale contexts, timeout guards)
+
+User verified working after each phase with complete smoke tests showing:
+- Speech detection → recording → context isolation → transcription → note creation → auto-resume
 
 ---
 
