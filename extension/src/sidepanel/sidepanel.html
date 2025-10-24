@@ -640,13 +640,25 @@
     /* Waveform in main UI - compact version for voice mode */
     .waveform-container-main {
       width: 100%;
-      height: 48px;
+      height: 0;
+      max-height: 0;
       background: #ffffff;
       border-radius: 6px;
-      margin-top: 12px;
+      margin-top: 0;
+      margin-bottom: 0;
       border: 1px solid #e5e7eb;
       overflow: hidden;
       position: relative;
+      opacity: 0;
+      transition: max-height 0.3s ease, opacity 0.3s ease, margin-top 0.3s ease, margin-bottom 0.3s ease, height 0.3s ease;
+    }
+
+    .waveform-container-main.is-recording {
+      height: 48px;
+      max-height: 48px;
+      margin-top: 12px;
+      margin-bottom: 0;
+      opacity: 1;
     }
 
     .waveform-canvas-main {
@@ -702,47 +714,33 @@
     /* Sprint 10: Debug Drawer */
     .debug-drawer {
       background: #1f2937;
-      border-radius: 8px;
-      padding: 16px;
-      margin-bottom: 16px;
+      border-radius: 0 0 6px 6px;
+      padding: 0;
+      margin-top: 0;
+      margin-left: -16px;
+      margin-right: -16px;
+      margin-bottom: -14px;
       max-height: 0;
       overflow: hidden;
-      transition: max-height 0.3s ease, padding 0.3s ease, margin 0.3s ease;
+      opacity: 0;
+      border-top: 0 solid #374151;
+      transition: max-height 0.3s ease, opacity 0.3s ease, padding 0.3s ease, margin-top 0.3s ease, border-top-width 0.3s ease;
     }
 
     .debug-drawer.visible {
       max-height: 500px;
       padding: 16px;
-      margin-bottom: 16px;
+      margin-top: 12px;
+      opacity: 1;
+      border-top-width: 1px;
     }
 
     .debug-drawer.hidden {
       max-height: 0;
-      padding: 0 16px;
-      margin-bottom: 0;
-    }
-
-    .debug-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 12px;
-      padding-bottom: 12px;
-      border-bottom: 1px solid #374151;
-    }
-
-    .debug-title {
-      font-size: 13px;
-      font-weight: 700;
-      color: #9ca3af;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-    }
-
-    .debug-shortcut {
-      font-size: 11px;
-      color: #6b7280;
-      font-family: 'SF Mono', 'Monaco', monospace;
+      padding: 0;
+      margin-top: 0;
+      opacity: 0;
+      border-top-width: 0;
     }
 
     .voice-status {
@@ -846,12 +844,6 @@
 
     .debug-toggle-switch.active::after {
       left: 23px;
-    }
-
-    .debug-buttons {
-      display: flex;
-      gap: 8px;
-      margin-top: 8px;
     }
 
     .debug-btn {
@@ -1033,15 +1025,9 @@
 
         <!-- Sprint 10: Error message (hidden by default) -->
         <div class="voice-error-message hidden" id="voiceErrorMessage"></div>
-      </div>
 
-      <!-- Sprint 10: Debug Drawer (Hidden by Default) -->
-      <div class="debug-drawer hidden" id="debugDrawer">
-        <div class="debug-header">
-          <span class="debug-title">Diagnostics</span>
-          <span class="debug-shortcut">Voice mode telemetry</span>
-        </div>
-
+        <!-- Sprint 10: Debug Drawer (Hidden by Default) -->
+        <div class="debug-drawer hidden" id="debugDrawer">
         <!-- Transcription Status (Sprint 11: Local-only) -->
         <div class="transcription-status" id="transcriptionStatus">
           <div class="transcription-mode">
@@ -1097,10 +1083,6 @@
           </div>
           <ul class="telemetry-event-list" id="telemetryEventList"></ul>
         </div>
-
-        <div class="debug-buttons">
-          <button class="debug-btn" id="retryVADBtn">Retry VAD</button>
-          <button class="debug-btn" id="disableVoiceBtn">Disable Voice</button>
         </div>
       </div>
     </div>

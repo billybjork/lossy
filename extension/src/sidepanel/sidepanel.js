@@ -194,9 +194,6 @@ const telemetryEventList = document.getElementById('telemetryEventList');
 const telemetryCountersLabel = document.getElementById('telemetryCounters');
 const refreshTelemetryBtn = document.getElementById('refreshTelemetryBtn');
 
-const retryVADBtn = document.getElementById('retryVADBtn');
-const disableVoiceBtn = document.getElementById('disableVoiceBtn');
-
 // Initialize LiveWaveform
 const waveformCanvas = document.getElementById('waveformCanvas');
 let waveform = null;
@@ -464,43 +461,6 @@ voiceModeToggleMain.addEventListener('click', async () => {
     }
   }
 });
-
-if (retryVADBtn) {
-  retryVADBtn.addEventListener('click', async () => {
-    retryVADBtn.disabled = true;
-    const originalText = retryVADBtn.textContent;
-    retryVADBtn.textContent = 'Retrying…';
-
-    try {
-      const response = await chrome.runtime.sendMessage({ action: 'retry_voice_vad' });
-      if (!response?.success) {
-        console.warn('[Voice Mode] Retry VAD reported failure:', response?.error);
-      }
-    } catch (error) {
-      console.error('[Voice Mode] Retry VAD command failed:', error);
-    } finally {
-      retryVADBtn.disabled = false;
-      retryVADBtn.textContent = originalText;
-    }
-  });
-}
-
-if (disableVoiceBtn) {
-  disableVoiceBtn.addEventListener('click', async () => {
-    disableVoiceBtn.disabled = true;
-
-    try {
-      await chrome.runtime.sendMessage({ action: 'stop_voice_session' });
-      voiceModeToggleMain.classList.remove('active');
-      await setVoiceModeEnabled(false);
-      updateVoiceStatus('idle');
-    } catch (error) {
-      console.error('[Voice Mode] Failed to disable voice mode:', error);
-    } finally {
-      disableVoiceBtn.disabled = false;
-    }
-  });
-}
 
 // Sprint 10: Toggle debug drawer visibility
 function toggleDebugDrawer() {
