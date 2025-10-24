@@ -97,6 +97,10 @@ export class SileroVAD {
       ort.env.wasm.simd = true;
       ort.env.wasm.wasmPaths = chrome.runtime.getURL('onnx/');
 
+      // Suppress ONNX informational logs (CPU vendor warnings, etc.)
+      // Only show warnings and errors to keep console clean
+      ort.env.logLevel = 'warning';
+
       const modelUrl = chrome.runtime.getURL('models/silero_vad_v5.onnx');
       const response = await fetch(modelUrl);
       if (!response.ok) {

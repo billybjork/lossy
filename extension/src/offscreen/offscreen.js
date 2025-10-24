@@ -21,8 +21,27 @@ import { VadWorkletBridge } from './vad-worklet-bridge.js';
 
 const TARGET_SAMPLE_RATE = 16000;
 
-// Feature flag: Use AudioWorklet instead of deprecated ScriptProcessor
-// Can be disabled to fallback to ScriptProcessor if issues arise
+/**
+ * Feature flag: AudioWorklet vs ScriptProcessor
+ *
+ * AudioWorklet (modern, Chrome 66+):
+ *   - Runs in dedicated audio thread (better performance, no glitches)
+ *   - Non-deprecated (ScriptProcessor removed in Chrome future)
+ *   - Requires module loading (adds ~50ms initialization)
+ *
+ * ScriptProcessor (legacy, all Chrome):
+ *   - Runs on main thread (can cause audio glitches under load)
+ *   - Deprecated since 2014, may be removed in future Chrome versions
+ *   - Simpler initialization
+ *
+ * Current behavior: Try AudioWorklet first, gracefully fall back to ScriptProcessor if it fails.
+ * This provides best performance for modern browsers while maintaining compatibility.
+ *
+ * Decision: Keep fallback enabled (default: true)
+ * Rationale: AudioWorklet support is excellent (Chrome 66+, Mar 2018), but fallback provides
+ * safety net for edge cases (corp proxies blocking module loading, unusual browser configs).
+ * Fallback code is minimal and tested. ScriptProcessor still works despite deprecation.
+ */
 const USE_AUDIO_WORKLET = true;
 
 let mediaRecorder = null;
