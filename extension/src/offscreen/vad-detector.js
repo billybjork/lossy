@@ -1,5 +1,6 @@
 import * as ort from 'onnxruntime-web';
 import { VAD_CONFIG } from '../shared/shared-constants.js';
+import { logger } from '../shared/logger.js';
 
 /**
  * Silero VAD Detector (V5)
@@ -102,7 +103,7 @@ export class SileroVAD {
         throw new Error(`Failed to fetch Silero model (${response.status})`);
       }
       const arrayBuffer = await response.arrayBuffer();
-      console.log('[VAD] Silero model bytes:', arrayBuffer.byteLength);
+      logger.info('VAD', 'Silero model loaded, bytes:', arrayBuffer.byteLength);
       const modelData = new Uint8Array(arrayBuffer);
 
       this.session = await ort.InferenceSession.create(modelData, {
@@ -145,7 +146,7 @@ export class SileroVAD {
         const latencyMs = performance.now() - inferenceStarted;
 
         if (!this.debugLogged) {
-          console.log('[VAD] Silero outputs:', Object.keys(results));
+          logger.debug('VAD', 'Silero outputs:', Object.keys(results));
           this.debugLogged = true;
         }
 
@@ -153,7 +154,7 @@ export class SileroVAD {
         const stateTensor = results.stateN || results.state || results['state'];
 
         if (!confidenceTensor || !stateTensor) {
-          console.warn('[VAD] Unexpected Silero output payload:', Object.keys(results));
+          logger.warn('VAD', 'Unexpected Silero output payload:', Object.keys(results));
           continue;
         }
 
@@ -228,7 +229,7 @@ export class SileroVAD {
           timestamp: this.speechStartTimestamp,
           source: 'silero',
         });
-        console.log('[VAD] Speech started, confidence:', confidence.toFixed(3));
+        logger.debug('VAD', 'Speech started, confidence:', confidence.toFixed(3));
       } else {
         this.lastHighConfidenceTimestamp = now;
       }
@@ -238,7 +239,7 @@ export class SileroVAD {
 
       // Absolute max duration guard
       if (this.speechDurationMs >= VAD_CONFIG.MAX_SPEECH_DURATION_MS) {
-        console.warn('[VAD] Forcing speech_end after max duration:', this.speechDurationMs);
+        logger.warn('VAD', 'Forcing speech_end after max duration:', this.speechDurationMs);
         this.onSpeechEnd({
           confidence,
           latencyMs,
@@ -257,7 +258,7 @@ export class SileroVAD {
       if (this.state === STATE_SPEECH || this.state === STATE_MAYBE_SILENCE) {
         if (this.state !== STATE_MAYBE_SILENCE) {
           this.state = STATE_MAYBE_SILENCE;
-          console.log('[VAD] Entered maybe_silence, confidence:', confidence.toFixed(3));
+          logger.debug('VAD', 'Entered maybe_silence, confidence:', confidence.toFixed(3));
         }
 
         this.silenceDurationMs += HOP_MS;
@@ -265,8 +266,9 @@ export class SileroVAD {
           const duration = this.speechDurationMs;
 
           if (this.speechStartTimestamp !== null) {
-            console.log(
-              '[VAD] Speech ended naturally, duration:',
+            logger.debug(
+              'VAD',
+              'Speech ended naturally, duration:',
               duration,
               'silence:',
               this.silenceDurationMs
@@ -295,8 +297,9 @@ export class SileroVAD {
       if (this.silenceDurationMs < silenceRevertThreshold) {
         this.state = STATE_SPEECH;
         this.silenceDurationMs = 0;
-        console.log(
-          '[VAD] Reverted to speech from maybe_silence, confidence:',
+        logger.debug(
+          'VAD',
+          'Reverted to speech from maybe_silence, confidence:',
           confidence.toFixed(3),
           'silence was:',
           this.silenceDurationMs.toFixed(0)
@@ -305,8 +308,9 @@ export class SileroVAD {
         // We're late in the silence period - continue accumulating
         // This prevents brief mid-confidence blips from resetting the counter
         this.silenceDurationMs += HOP_MS;
-        console.log(
-          '[VAD] Continuing silence accumulation in middle zone, confidence:',
+        logger.debug(
+          'VAD',
+          'Continuing silence accumulation in middle zone, confidence:',
           confidence.toFixed(3),
           'silence:',
           this.silenceDurationMs.toFixed(0)
@@ -322,7 +326,7 @@ export class SileroVAD {
         this.lastHighConfidenceTimestamp !== null &&
         now - this.lastHighConfidenceTimestamp >= VAD_CONFIG.STUCK_STATE_TIMEOUT_MS
       ) {
-        console.warn('[VAD] Forcing speech_end: no high confidence for 2s (stuck state)');
+        logger.warn('VAD', 'Forcing speech_end: no high confidence for 2s (stuck state)');
         this.onSpeechEnd({
           confidence,
           latencyMs,
@@ -342,7 +346,7 @@ export class SileroVAD {
       this.silenceDurationMs >= this.minSilenceDurationMs * VAD_CONFIG.EXTENDED_SILENCE_MULTIPLIER
     ) {
       const duration = this.speechDurationMs;
-      console.warn('[VAD] Forcing speech_end after extended silence:', this.silenceDurationMs);
+      logger.warn('VAD', 'Forcing speech_end after extended silence:', this.silenceDurationMs);
       this.onSpeechEnd({
         confidence,
         latencyMs,
@@ -374,7 +378,7 @@ export class SileroVAD {
     this.processing = false;
     this.destroyed = false;
     this.resetSpeechTracking();
-    console.log('[VAD] State tensor reset (full reset)');
+    logger.debug('VAD', 'State tensor reset (full reset)');
   }
 
   reset() {
