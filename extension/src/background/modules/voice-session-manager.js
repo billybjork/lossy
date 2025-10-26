@@ -735,8 +735,14 @@ export async function startVoiceSession() {
     // Create persistent socket and audio channel
     console.log('[Voice Mode] Creating persistent audio channel');
     voiceSession.sessionId = crypto.randomUUID();
+
+    // Sprint 15 Milestone 0: Get auth token for Phoenix connection
+    // Import phoenix-auth module dynamically to get socket params
+    const { getSocketParams } = await import('../../shared/phoenix-auth.js');
+    const socketParams = await getSocketParams();
+
     voiceSession.socket = new SocketConstructor('ws://localhost:4000/socket', {
-      params: {},
+      params: socketParams, // {token: "jwt_here"}
     });
     voiceSession.socket.connect();
 

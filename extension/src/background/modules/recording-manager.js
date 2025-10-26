@@ -133,8 +133,20 @@ export async function startRecording(options = {}) {
   await createOffscreenDocument();
 
   // 3. Connect to Phoenix Socket
+  // Sprint 15 Milestone 0: Get auth token for Phoenix connection
+  let socketParams = {};
+  try {
+    const { getSocketParams } = await import('../../shared/phoenix-auth.js');
+    socketParams = await getSocketParams();
+    console.log('[RecordingManager] ✅ Got auth token for socket connection');
+  } catch (error) {
+    console.error('[RecordingManager] ⚠️ Failed to get auth token:', error.message);
+    console.error('[RecordingManager] Please log in at: http://localhost:4000/dev/auth');
+    // Continue with empty params - connection will fail with 403, which is expected
+  }
+
   socket = new Socket('ws://localhost:4000/socket', {
-    params: {}, // No token for now
+    params: socketParams, // {token: "jwt_here"}
   });
 
   socket.connect();

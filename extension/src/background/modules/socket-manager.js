@@ -28,12 +28,26 @@ export function initSocketManager(deps) {
 
 /**
  * Get or create socket connection
+ * Sprint 15 Milestone 0: Now async to support auth token fetching
  */
-export function getOrCreateSocket() {
+export async function getOrCreateSocket() {
   if (!socket || !socket.isConnected()) {
     console.log('[SocketManager] Creating new socket connection');
+
+    // Sprint 15 Milestone 0: Get auth token for Phoenix connection
+    let socketParams = {};
+    try {
+      const { getSocketParams } = await import('../../shared/phoenix-auth.js');
+      socketParams = await getSocketParams();
+      console.log('[SocketManager] ✅ Got auth token for socket connection');
+    } catch (error) {
+      console.error('[SocketManager] ⚠️ Failed to get auth token:', error.message);
+      console.error('[SocketManager] Please log in at: http://localhost:4000/dev/auth');
+      // Continue with empty params - connection will fail with 403, which is expected
+    }
+
     socket = new Socket('ws://localhost:4000/socket', {
-      params: {},
+      params: socketParams, // {token: "jwt_here"}
     });
     socket.connect();
   }
@@ -45,7 +59,7 @@ export function getOrCreateSocket() {
  */
 export async function getOrCreateVideoChannel() {
   // Ensure socket is connected
-  getOrCreateSocket();
+  await getOrCreateSocket();
 
   // Reuse existing channel if available
   if (videoChannel) {

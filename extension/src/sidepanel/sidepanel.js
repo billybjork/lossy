@@ -1641,11 +1641,23 @@ initVoiceMode();
  * This runs independently from the service worker's AudioChannel connection.
  * Phase 3: Added reconnection handling to prevent silent failures.
  */
-function initNotesSocket() {
+async function initNotesSocket() {
   console.log('[Notes] Initializing Phoenix Socket...');
 
+  // Sprint 15 Milestone 0: Get auth token for Phoenix connection
+  let socketParams = {};
+  try {
+    const { getSocketParams } = await import('../shared/phoenix-auth.js');
+    socketParams = await getSocketParams();
+    console.log('[Notes] ✅ Got auth token for socket connection');
+  } catch (error) {
+    console.error('[Notes] ⚠️ Failed to get auth token:', error.message);
+    console.error('[Notes] Please log in at: http://localhost:4000/dev/auth');
+    // Continue with empty params - connection will fail with 403, which is expected
+  }
+
   notesSocket = new Socket('ws://localhost:4000/socket', {
-    params: {}, // TODO: Add auth token when auth is implemented (Sprint TBD)
+    params: socketParams, // {token: "jwt_here"}
   });
 
   notesSocket.onOpen(() => {
