@@ -355,8 +355,47 @@ export function acknowledgeHeartbeatSuccess() {
 }
 
 /**
+ * Dispatch voice event to Phoenix
+ * Sprint 15 Milestone 1: Forward events to Phoenix when phoenix_voice_session enabled
+ */
+function dispatchToPhoenix(eventType, eventData) {
+  if (!voiceSession.audioChannel || !voiceSession.phoenixVoiceSessionEnabled) {
+    return;
+  }
+
+  // Increment sequence number
+  voiceSession.sequenceNumber += 1;
+
+  const payload = {
+    type: eventType,
+    data: eventData,
+    sequence: voiceSession.sequenceNumber,
+  };
+
+  // Buffer event for reconnection protocol
+  voiceSession.eventBuffer.push(payload);
+  if (voiceSession.eventBuffer.length > 100) {
+    voiceSession.eventBuffer.shift(); // Keep max 100 events
+  }
+
+  // Send to Phoenix
+  voiceSession.audioChannel
+    .push('voice_event', payload)
+    .receive('ok', () => {
+      // Event acknowledged
+    })
+    .receive('error', (err) => {
+      console.error('[Voice Mode] Failed to send voice event to Phoenix:', err);
+    });
+}
+
+/**
  * Handle voice mode VAD events (speech_start, speech_end, metrics, error)
  * CRITICAL: Preserves recording context isolation for correct note routing
+ *
+ * Sprint 15 Milestone 1: When phoenix_voice_session is enabled, forward events
+ * to Phoenix and let Phoenix control the state machine. When disabled, use
+ * local JavaScript state machine (existing behavior).
  */
 export async function handleVoiceEvent(event) {
   if (!voiceSession.vadEnabled) {
@@ -364,6 +403,22 @@ export async function handleVoiceEvent(event) {
     return;
   }
 
+  // Sprint 15 Milestone 1: Dispatch to Phoenix when enabled
+  if (voiceSession.phoenixVoiceSessionEnabled) {
+    dispatchToPhoenix(event.type, event.data || {});
+    // Phoenix controls state machine, extension just forwards hardware events
+    // Still handle metrics locally for UI updates
+    if (event.type === 'metrics') {
+      const m = event.data || {};
+      voiceSession.telemetry.lastConfidence = m.confidence ?? 0;
+      voiceSession.telemetry.lastLatencyMs = m.latencyMs ?? 0;
+      acknowledgeHeartbeatSuccess();
+      broadcastVoiceStatus();
+    }
+    return;
+  }
+
+  // Local JavaScript state machine (existing behavior when flag disabled)
   if (event.type === 'metrics') {
     const m = event.data || {};
     console.log(
@@ -752,8 +807,36 @@ export async function startVoiceSession() {
     await new Promise((resolve, reject) => {
       voiceSession.audioChannel
         .join()
-        .receive('ok', () => {
+        .receive('ok', (response) => {
           console.log('[Voice Mode] Persistent audio channel joined');
+
+          // Sprint 15 Milestone 1: Check if Phoenix voice session is enabled
+          voiceSession.phoenixVoiceSessionEnabled = response.voice_session_enabled || false;
+          voiceSession.sequenceNumber = 0;
+          voiceSession.eventBuffer = [];
+
+          if (voiceSession.phoenixVoiceSessionEnabled) {
+            console.log('[Voice Mode] ✨ Phoenix voice session ENABLED - Phoenix will control state machine');
+            // Listen for Phoenix voice status updates
+            voiceSession.audioChannel.on('voice_status', (payload) => {
+              console.log('[Voice Mode] Phoenix voice status:', payload.status, payload.telemetry);
+              // Update local telemetry display from Phoenix
+              if (payload.telemetry) {
+                Object.assign(voiceSession.telemetry, payload.telemetry);
+                broadcastVoiceStatus();
+              }
+            });
+
+            // Listen for reset_session events (reconnection failed)
+            voiceSession.audioChannel.on('reset_session', (payload) => {
+              console.warn('[Voice Mode] Phoenix requested session reset:', payload.reason);
+              voiceSession.sequenceNumber = 0;
+              voiceSession.eventBuffer = [];
+            });
+          } else {
+            console.log('[Voice Mode] Phoenix voice session DISABLED - using local JavaScript state machine');
+          }
+
           resolve();
         })
         .receive('error', (err) => {
@@ -895,6 +978,12 @@ export async function stopVoiceSession() {
   voiceSession.circuitBreaker.restartCount = 0;
   voiceSession.heartbeatFailures = 0;
   voiceSession.vadConfig = null;
+
+  // Sprint 15 Milestone 1: Clean up Phoenix voice session state
+  voiceSession.phoenixVoiceSessionEnabled = false;
+  voiceSession.sequenceNumber = 0;
+  voiceSession.eventBuffer = [];
+
   broadcastVoiceStatus();
   console.log('[Voice Mode] Session stopped and cleaned up');
 }

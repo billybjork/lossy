@@ -16,6 +16,19 @@ defmodule LossyWeb.VideoChannel do
   alias Lossy.Videos
   alias LossyWeb.ChannelAuth
 
+  # Platform whitelist for validation (Sprint 15 Milestone 1)
+  # Full adapter logic deferred to Milestone 1.5
+  @supported_platforms [
+    "youtube",
+    "frameio",
+    "vimeo",
+    "iconik",
+    "air",
+    "wipster",
+    "tiktok",
+    "generic"
+  ]
+
   @impl true
   def join("video:meta", payload, socket) do
     case ChannelAuth.authorize_join(socket, payload) do
@@ -37,6 +50,11 @@ defmodule LossyWeb.VideoChannel do
       ) do
     Logger.info("[VideoChannel] Video detected: #{platform}/#{video_id}")
 
+    # Validate platform (Sprint 15 Milestone 1)
+    unless platform in @supported_platforms do
+      Logger.warning("[VideoChannel] Unknown platform detected: #{platform} (will create record anyway)")
+    end
+
     url = Map.get(payload, "url")
     title = Map.get(payload, "title")
     user_id = Map.get(socket.assigns, :user_id)
@@ -50,7 +68,15 @@ defmodule LossyWeb.VideoChannel do
          }) do
       {:ok, video} ->
         Logger.info("[VideoChannel] Video record created/found: #{video.id}")
-        {:reply, {:ok, %{video_id: video.id}}, socket}
+
+        # Include platform metadata in response for debugging
+        {:reply,
+         {:ok,
+          %{
+            video_id: video.id,
+            platform: platform,
+            platform_supported: platform in @supported_platforms
+          }}, socket}
 
       {:error, changeset} ->
         Logger.error("[VideoChannel] Failed to create video: #{inspect(changeset)}")
