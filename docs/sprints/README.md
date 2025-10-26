@@ -32,7 +32,7 @@
 | Sprint | Goal | Duration |
 |--------|------|----------|
 | [14 - Voice Mode Mode Polish](./SPRINT_14_voice mode_mode_polish.md) | UX improvements, status indicators, error recovery | 2-3 days |
-| [15 - Continuous Sessions](./SPRINT_15_continuous_sessions.md) | Session persistence across browser restarts + state recovery | 3-4 days |
+| [16 - Continuous Sessions](./SPRINT_16_continuous_sessions.md) | Session persistence across browser restarts + state recovery | 3-4 days |
 | [TBD - Emoji Chips](./planned/SPRINT_TBD_emoji_chips.md) | Text-based visual feedback tokens using transcription | 2-3 days |
 | [TBD - Auto Posting](./planned/SPRINT_TBD_auto_posting.md) | Browserbase automation + Oban workers | 3-5 days |
 | [TBD - Auth](./planned/SPRINT_TBD_auth.md) | User authentication & multi-user support | 2-3 days |

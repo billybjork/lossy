@@ -1,4 +1,4 @@
-# Sprint 15: Continuous Session Persistence
+# Sprint 16: Continuous Session Persistence
 
 **Status:** 📋 Planned
 **Priority:** High
@@ -9,7 +9,7 @@
 - ✅ Sprint 10 – Always-On Foundations (voice mode audio VAD)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
 - 🔜 Sprint 14 – Passive Mode Polish (Silero VAD)
-- 🔜 Sprint 15+ – Automated Frame Capture & Diffusion Refinement
+- 🔜 Sprint 16+ – Automated Frame Capture & Diffusion Refinement
 
 ---
 
@@ -18,7 +18,7 @@
 Transform AgentSession from ephemeral (per-recording) to continuous (long-lived across video session). This enables:
 - Persistent context across multiple speech segments
 - Accumulated visual and audio evidence over time
-- Foundation for diffusion-based refinement (Sprint 15+)
+- Foundation for diffusion-based refinement (Sprint 16+)
 - Better conversation continuity for the agent
 
 **Key Insight:** Current architecture creates a new session per recording. For voice mode mode to feel like a continuous assistant, the session must persist across the entire video viewing session.
@@ -1065,7 +1065,7 @@ Oban.insert!(Lossy.Workers.SessionCleanup.new(%{}, schedule_in: 3600))
 
 ---
 
-## Deferred Items (Sprint 15+)
+## Deferred Items (Sprint 16+)
 
 ### Diffusion Refinement
 - Multi-pass note refinement using session context

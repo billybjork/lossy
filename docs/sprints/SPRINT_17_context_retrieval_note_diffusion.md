@@ -1,4 +1,4 @@
-# Sprint 16: Context Retrieval & Note Diffusion
+# Sprint 17: Context Retrieval & Note Diffusion
 
 **Status:** 📋 Planned  
 **Priority:** High  
@@ -9,7 +9,7 @@
 - ✅ Sprint 10 – Always-On Foundations (voice mode audio VAD)
 - 🔜 Sprint 11 – Local-Only Transcription (browser-based VAD + transcription)
 - 🔜 Sprint 14 – Voice Mode Mode Polish (Silero VAD)
-- 🔜 Sprint 15 – Continuous Session Persistence (evidence ledger, context windowing)
+- 🔜 Sprint 16 – Continuous Session Persistence (evidence ledger, context windowing)
 - 🔜 Sprint TBD – Automated Frame Capture (ledger-compatible frame ingestion)
 
 ---
@@ -21,7 +21,7 @@ Transform the continuous session infrastructure into an agent that can:
 - Escalate low-confidence notes intelligently by harvesting additional evidence or prompting the user.
 - Surface replay tools that let users and downstream systems inspect ledger-backed evidence when revisiting a video days or months later.
 
-This sprint operationalizes the evidence ledger created in Sprint 15 and turns it into a diffusion-style refinement loop that keeps session knowledge coherent over time.
+This sprint operationalizes the evidence ledger created in Sprint 16 and turns it into a diffusion-style refinement loop that keeps session knowledge coherent over time.
 
 ---
 
@@ -167,7 +167,7 @@ Ledger trigger ─► Fetch context window ─► Run refinement prompt
 
 ---
 
-## Deferred Items (Sprint 16+)
+## Deferred Items (Sprint 17+)
 
 - Cross-session context stitching (carry insights across related videos).
 - Automated summarization of ledger history into shareable reports.
