@@ -9,6 +9,9 @@ defmodule Lossy.Videos do
 
   # Videos
 
+  def get_video(id), do: Repo.get(Video, id)
+  def get_video!(id), do: Repo.get!(Video, id)
+
   def find_or_create_video(attrs) do
     case get_video_by_platform_id(attrs[:platform], attrs[:external_id]) do
       nil ->

@@ -3,36 +3,34 @@ defmodule LossyWeb.AudioChannel do
   require Logger
 
   alias Lossy.Agent.SessionSupervisor
+  alias LossyWeb.ChannelAuth
 
   @impl true
   def join("audio:" <> session_id, payload, socket) do
-    Logger.info("Audio channel joined: #{session_id}")
+    case ChannelAuth.authorize_join(socket, payload) do
+      {:ok, authed_socket, auth_payload} ->
+        Logger.info("Audio channel joined: #{session_id}")
 
-    video_id = Map.get(payload, "video_id")
-    timestamp = Map.get(payload, "timestamp")
+        video_id = Map.get(payload, "video_id")
+        timestamp = Map.get(payload, "timestamp")
 
-    # Subscribe to agent session events
-    Phoenix.PubSub.subscribe(Lossy.PubSub, "session:#{session_id}")
+        Phoenix.PubSub.subscribe(Lossy.PubSub, "session:#{session_id}")
 
-    # Start AgentSession with video context
-    case SessionSupervisor.start_session(
-           session_id,
-           video_id: video_id,
-           timestamp: timestamp
-         ) do
-      {:ok, _pid} ->
-        Logger.info(
-          "Started new AgentSession: #{session_id} (video: #{video_id}, ts: #{timestamp})"
+        start_session(session_id, authed_socket.assigns.user_id,
+          video_id: video_id,
+          timestamp: timestamp
         )
 
-      {:error, {:already_started, _pid}} ->
-        Logger.info("AgentSession already running: #{session_id}")
+        response =
+          auth_payload
+          |> Map.put(:session_id, session_id)
+          |> Map.put(:video_id, video_id)
+
+        {:ok, response, Phoenix.Socket.assign(authed_socket, :session_id, session_id)}
 
       {:error, reason} ->
-        Logger.error("Failed to start AgentSession: #{inspect(reason)}")
+        {:error, reason}
     end
-
-    {:ok, assign(socket, :session_id, session_id)}
   end
 
   # Sprint 11: Audio chunks removed - all transcription happens locally
@@ -169,5 +167,20 @@ defmodule LossyWeb.AudioChannel do
     # Log other events for debugging
     Logger.debug("Agent event: #{inspect(event)}")
     {:noreply, socket}
+  end
+
+  defp start_session(session_id, user_id, opts) do
+    case SessionSupervisor.start_session(session_id, Keyword.merge(opts, user_id: user_id)) do
+      {:ok, _pid} ->
+        Logger.info(
+          "Started new AgentSession: #{session_id} (video: #{opts[:video_id]}, ts: #{opts[:timestamp]}, user: #{user_id})"
+        )
+
+      {:error, {:already_started, _pid}} ->
+        Logger.info("AgentSession already running: #{session_id}")
+
+      {:error, reason} ->
+        Logger.error("Failed to start AgentSession: #{inspect(reason)}")
+    end
   end
 end

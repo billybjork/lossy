@@ -14,6 +14,12 @@ defmodule LossyWeb.Router do
     plug :accepts, ["json"]
   end
 
+  pipeline :api_authenticated do
+    plug :accepts, ["json"]
+    plug :fetch_session
+    plug LossyWeb.Plugs.RequireAuthenticatedUser
+  end
+
   scope "/", LossyWeb do
     pipe_through :browser
 
@@ -25,6 +31,12 @@ defmodule LossyWeb.Router do
   # scope "/api", LossyWeb do
   #   pipe_through :api
   # end
+
+  scope "/api", LossyWeb.Api do
+    pipe_through :api_authenticated
+
+    post "/auth/extension_token", ExtensionAuthController, :create
+  end
 
   # Enable LiveDashboard and Swoosh mailbox preview in development
   if Application.compile_env(:lossy, :dev_routes) do

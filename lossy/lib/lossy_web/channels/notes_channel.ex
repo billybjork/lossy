@@ -31,25 +31,38 @@ defmodule LossyWeb.NotesChannel do
   require Logger
 
   alias Lossy.Videos
+  alias LossyWeb.ChannelAuth
 
   @impl true
-  def join("notes:video:" <> video_id, _params, socket) do
-    Logger.info("Client joined notes channel for video: #{video_id}")
+  def join("notes:video:" <> video_id, params, socket) do
+    with {:ok, authed_socket, auth_payload} <- ChannelAuth.authorize_join(socket, params),
+         :ok <- authorize_video_access(video_id, authed_socket.assigns.user_id) do
+      Logger.info("Client joined notes channel for video: #{video_id}")
 
-    # Subscribe to this video's PubSub topic
-    # AgentSession broadcasts to "video:#{video_id}" when notes are created
-    Phoenix.PubSub.subscribe(Lossy.PubSub, "video:#{video_id}")
+      Phoenix.PubSub.subscribe(Lossy.PubSub, "video:#{video_id}")
 
-    {:ok, socket}
+      response = Map.put(auth_payload, :scope, %{"type" => "video", "id" => video_id})
+
+      {:ok, response, authed_socket}
+    else
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @impl true
-  def join("notes:user:" <> user_id, _params, socket) do
-    # For future: cross-video note feed (library view)
-    # Could subscribe to "user:#{user_id}" for all user's notes
-    Logger.info("Client joined notes channel for user: #{user_id}")
+  def join("notes:user:" <> user_id, params, socket) do
+    with {:ok, authed_socket, auth_payload} <- ChannelAuth.authorize_join(socket, params),
+         :ok <- ensure_same_user(user_id, authed_socket.assigns.user_id) do
+      Logger.info("Client joined notes channel for user: #{user_id}")
 
-    {:ok, socket}
+      Phoenix.PubSub.subscribe(Lossy.PubSub, "user:#{user_id}")
+
+      response = Map.put(auth_payload, :scope, %{"type" => "user", "id" => user_id})
+
+      {:ok, response, authed_socket}
+    else
+      {:error, reason} -> {:error, reason}
+    end
   end
 
   @impl true
@@ -59,11 +72,16 @@ defmodule LossyWeb.NotesChannel do
 
   @impl true
   def handle_in("get_notes", %{"video_id" => video_id}, socket) do
-    notes = Videos.list_notes(%{video_id: video_id})
+    with :ok <- authorize_video_access(video_id, socket.assigns.user_id) do
+      notes = Videos.list_notes(%{video_id: video_id})
 
-    Logger.info("Sending #{length(notes)} existing notes for video: #{video_id}")
+      Logger.info("Sending #{length(notes)} existing notes for video: #{video_id}")
 
-    {:reply, {:ok, %{notes: serialize_notes(notes)}}, socket}
+      {:reply, {:ok, %{notes: serialize_notes(notes)}}, socket}
+    else
+      {:error, reason} ->
+        {:reply, {:error, %{reason: reason}}, socket}
+    end
   end
 
   @impl true
@@ -100,4 +118,27 @@ defmodule LossyWeb.NotesChannel do
   end
 
   defp serialize_notes(notes), do: Enum.map(notes, &serialize_note/1)
+
+  defp ensure_same_user(requested_user_id, actual_user_id) when requested_user_id == actual_user_id,
+    do: :ok
+
+  defp ensure_same_user(_requested_user_id, _actual_user_id), do: {:error, :forbidden}
+
+  defp authorize_video_access(nil, _user_id), do: :ok
+
+  defp authorize_video_access(video_id, user_id) do
+    case Videos.get_video(video_id) do
+      nil ->
+        {:error, :video_not_found}
+
+      %{user_id: ^user_id} ->
+        :ok
+
+      %{user_id: nil} ->
+        :ok
+
+      _ ->
+        {:error, :forbidden}
+    end
+  end
 end

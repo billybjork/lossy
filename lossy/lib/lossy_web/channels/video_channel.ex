@@ -14,11 +14,19 @@ defmodule LossyWeb.VideoChannel do
   require Logger
 
   alias Lossy.Videos
+  alias LossyWeb.ChannelAuth
 
   @impl true
-  def join("video:meta", _payload, socket) do
-    Logger.info("[VideoChannel] Joined video metadata channel")
-    {:ok, socket}
+  def join("video:meta", payload, socket) do
+    case ChannelAuth.authorize_join(socket, payload) do
+      {:ok, authed_socket, auth_payload} ->
+        Logger.info("[VideoChannel] Joined video metadata channel")
+        response = Map.put(auth_payload, :scope, %{"type" => "meta"})
+        {:ok, response, authed_socket}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
   end
 
   @impl true
@@ -31,12 +39,14 @@ defmodule LossyWeb.VideoChannel do
 
     url = Map.get(payload, "url")
     title = Map.get(payload, "title")
+    user_id = Map.get(socket.assigns, :user_id)
 
     case Videos.find_or_create_video(%{
            platform: platform,
            external_id: video_id,
            url: url,
-           title: title
+           title: title,
+           user_id: user_id
          }) do
       {:ok, video} ->
         Logger.info("[VideoChannel] Video record created/found: #{video.id}")
@@ -160,8 +170,6 @@ defmodule LossyWeb.VideoChannel do
   # Sprint 09: Video library management
   @impl true
   def handle_in("list_videos", %{"filters" => filters}, socket) do
-    # TODO: Get user_id from socket.assigns once authentication is implemented
-    # For now, use the user_id from the first video or default to nil
     user_id = Map.get(socket.assigns, :user_id)
 
     Logger.info("[VideoChannel] Listing videos for user: #{inspect(user_id)} with filters: #{inspect(filters)}")
