@@ -25,15 +25,20 @@ defmodule LossyWeb.AudioChannel do
         feature_flags = Settings.feature_flags_for(user_id)
         voice_session_enabled = voice_mode && FeatureFlags.enabled?(feature_flags, "phoenix_voice_session")
 
+        # Always start the regular Session for transcript processing
+        start_session(session_id, user_id,
+          video_id: video_id,
+          timestamp: timestamp
+        )
+
+        # Additionally start VoiceSession if voice mode is enabled
         if voice_session_enabled do
           Logger.info("[AudioChannel:#{session_id}] Starting Phoenix voice session (feature flag enabled)")
           Phoenix.PubSub.subscribe(Lossy.PubSub, "voice_session:#{session_id}")
           start_voice_session(session_id, user_id, video_id: video_id)
-        else
-          start_session(session_id, user_id,
-            video_id: video_id,
-            timestamp: timestamp
-          )
+
+          # Transition to observing state
+          VoiceSession.start_observing(session_id)
         end
 
         response =

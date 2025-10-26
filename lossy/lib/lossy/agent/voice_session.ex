@@ -62,6 +62,14 @@ defmodule Lossy.Agent.VoiceSession do
   end
 
   @doc """
+  Start observing for speech (transition from idle to observing).
+  Called when voice mode is initiated.
+  """
+  def start_observing(session_id) do
+    GenServer.cast(via_tuple(session_id), :start_observing)
+  end
+
+  @doc """
   Get current session state for debugging/telemetry.
   """
   def get_state(session_id) do
@@ -108,13 +116,15 @@ defmodule Lossy.Agent.VoiceSession do
 
       # Reconnection state
       sequence_number: 0,
-      buffered_events: [],
       reconnect_attempts: 0,
 
       # Recording context
       recording_context: nil,
       last_event_at: DateTime.utc_now()
     }
+
+    # Subscribe to regular session events to track note creation
+    Phoenix.PubSub.subscribe(Lossy.PubSub, "session:#{session_id}")
 
     Logger.info("[VoiceSession:#{session_id}] Initialized for user #{user_id}, video #{video_id}")
 
@@ -146,6 +156,26 @@ defmodule Lossy.Agent.VoiceSession do
   end
 
   @impl true
+  def handle_cast(:start_observing, state) do
+    if state.status == :idle do
+      Logger.info("[VoiceSession:#{state.session_id}] Starting to observe for speech")
+
+      state = %{state | status: :observing}
+      state = schedule_first_speech_guard(state)
+
+      broadcast_status_change(state)
+
+      {:noreply, state}
+    else
+      Logger.warning(
+        "[VoiceSession:#{state.session_id}] Already in #{state.status} state, ignoring start_observing"
+      )
+
+      {:noreply, state}
+    end
+  end
+
+  @impl true
   def handle_cast(:stop_session, state) do
     Logger.info("[VoiceSession:#{state.session_id}] Stopping session")
 
@@ -165,8 +195,7 @@ defmodule Lossy.Agent.VoiceSession do
       video_id: state.video_id,
       status: state.status,
       telemetry: state.telemetry,
-      sequence_number: state.sequence_number,
-      buffered_events_count: length(state.buffered_events)
+      sequence_number: state.sequence_number
     }
 
     {:reply, public_state, state}
@@ -248,16 +277,29 @@ defmodule Lossy.Agent.VoiceSession do
     {:noreply, new_state}
   end
 
+  # Handle note creation events from the regular Session
+  @impl true
+  def handle_info({:agent_event, %{type: :note_created}}, state) do
+    state = update_telemetry(state, :notes_created)
+
+    Logger.debug("[VoiceSession:#{state.session_id}] Note created, total: #{state.telemetry.notes_created}")
+
+    # Broadcast updated telemetry
+    broadcast_status_change(state)
+
+    {:noreply, state}
+  end
+
+  # Ignore other agent events
+  @impl true
+  def handle_info({:agent_event, _event}, state) do
+    {:noreply, state}
+  end
+
   # Event Handlers
 
   defp handle_event(:speech_start, event_data, state) do
     case state.status do
-      :idle ->
-        # Start observing first
-        state = %{state | status: :observing}
-        state = schedule_first_speech_guard(state)
-        handle_event(:speech_start, event_data, state)
-
       :observing ->
         handle_speech_start(event_data, state)
 
@@ -272,7 +314,7 @@ defmodule Lossy.Agent.VoiceSession do
         Logger.debug("[VoiceSession:#{state.session_id}] Ignored speech_start during cooldown")
         {:ok, state}
 
-      status when status in [:error, :disconnected, :reconnecting] ->
+      status when status in [:idle, :error, :disconnected, :reconnecting] ->
         Logger.warning("[VoiceSession:#{state.session_id}] Ignoring speech_start in #{status} state")
         {:ok, state}
     end
@@ -297,6 +339,20 @@ defmodule Lossy.Agent.VoiceSession do
     state = cancel_heartbeat_timer(state)
     state = schedule_heartbeat_timeout(state)
 
+    # Emit telemetry event for metrics
+    :telemetry.execute(
+      [:lossy, :voice_session, :metrics],
+      %{
+        confidence: Map.get(event_data, :confidence, 0.0),
+        latency_ms: Map.get(event_data, :latency_ms, 0.0)
+      },
+      %{
+        session_id: state.session_id,
+        user_id: state.user_id,
+        status: state.status
+      }
+    )
+
     # Broadcast metrics for telemetry
     broadcast_event(state, :metrics, event_data)
 
@@ -316,6 +372,17 @@ defmodule Lossy.Agent.VoiceSession do
 
   defp handle_event(:error, event_data, state) do
     Logger.error("[VoiceSession:#{state.session_id}] VAD error: #{inspect(event_data)}")
+
+    # Emit telemetry event for errors
+    :telemetry.execute(
+      [:lossy, :voice_session, :error],
+      %{count: 1},
+      %{
+        session_id: state.session_id,
+        user_id: state.user_id,
+        error: inspect(event_data)
+      }
+    )
 
     state = transition_to_error(state, event_data)
 
@@ -357,6 +424,17 @@ defmodule Lossy.Agent.VoiceSession do
 
       Logger.info("[VoiceSession:#{state.session_id}] Speech started (confidence: #{confidence})")
 
+      # Emit telemetry event for speech start
+      :telemetry.execute(
+        [:lossy, :voice_session, :speech_start],
+        %{count: 1, confidence: confidence},
+        %{
+          session_id: state.session_id,
+          user_id: state.user_id,
+          video_id: state.video_id
+        }
+      )
+
       broadcast_status_change(state)
       broadcast_event(state, :speech_started, %{
         confidence: confidence,
@@ -373,6 +451,17 @@ defmodule Lossy.Agent.VoiceSession do
     confidence = Map.get(event_data, :confidence, state.recording_context[:confidence])
 
     Logger.info("[VoiceSession:#{state.session_id}] Speech ended (duration: #{duration_ms}ms)")
+
+    # Emit telemetry event for speech end
+    :telemetry.execute(
+      [:lossy, :voice_session, :speech_end],
+      %{duration_ms: duration_ms, confidence: confidence},
+      %{
+        session_id: state.session_id,
+        user_id: state.user_id,
+        video_id: state.video_id
+      }
+    )
 
     # Transition to cooldown
     state = %{state | status: :cooldown, recording_context: nil}
@@ -491,6 +580,19 @@ defmodule Lossy.Agent.VoiceSession do
   end
 
   defp broadcast_status_change(state) do
+    # Emit telemetry event for observability
+    :telemetry.execute(
+      [:lossy, :voice_session, :status_change],
+      %{count: 1},
+      %{
+        session_id: state.session_id,
+        user_id: state.user_id,
+        old_status: state.status,
+        new_status: state.status,
+        speech_detections: state.telemetry.speech_detections
+      }
+    )
+
     Phoenix.PubSub.broadcast(
       Lossy.PubSub,
       "voice_session:#{state.session_id}",
