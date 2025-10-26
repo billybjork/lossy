@@ -18,6 +18,7 @@
 let tabManager = null;
 let sendMessageToTab = null;
 let Socket = null;
+let routeNoteToSidePanel = null;
 
 // Recording state
 let isRecording = false;
@@ -32,6 +33,7 @@ export function initRecordingManager(deps) {
   tabManager = deps.tabManager;
   sendMessageToTab = deps.sendMessageToTab;
   Socket = deps.Socket;
+  routeNoteToSidePanel = deps.routeNoteToSidePanel;
 }
 
 /**
@@ -142,6 +144,7 @@ export async function startRecording(options = {}) {
 
   // Get video context from TabManager
   const videoContext = tabManager ? tabManager.getVideoContext(tab.id) : null;
+  const channelVideoDbId = videoContext?.videoDbId ?? null;
 
   audioChannel = socket.channel(`audio:${sessionId}`, {
     video_id: videoContext?.videoDbId,
@@ -164,6 +167,18 @@ export async function startRecording(options = {}) {
           category: payload.category,
           timestamp_seconds: payload.timestamp_seconds,
         },
+      });
+    }
+
+    if (routeNoteToSidePanel && tab?.id) {
+      const noteForPanel = {
+        ...payload,
+        video_id: payload.video_id ?? channelVideoDbId ?? null,
+      };
+      routeNoteToSidePanel(tab.id, noteForPanel, {
+        source: 'manual_recording',
+        videoDbId: noteForPanel.video_id ?? channelVideoDbId ?? null,
+        timestamp: payload.timestamp_seconds ?? currentTimestamp ?? null,
       });
     }
 

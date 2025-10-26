@@ -63,9 +63,12 @@ const voiceSession = {
   recordingContext: null, // { tabId, videoDbId, videoContext, timestamp, startedAt }
   recordingContextTimeout: null, // Safety timeout to clear stale context
 
-  // Auto-start behavior: Stop voice session if no speech detected within 10 seconds
+  // Auto-start guard: track first speech while user navigates before considering auto-stop
   firstSpeechTimeout: null,
   resumeTimeout: null,
+  pendingStopTimer: null,
+  firstSpeechGuardStartedAt: null,
+  firstSpeechGuardLastReason: null,
 
   // Telemetry (console only)
   telemetry: {
@@ -223,6 +226,7 @@ function sendMessageToTab(tabId, message) {
     sendMessageToTab,
     createOffscreenDocument,
     ensureVideoContextForTab,
+    routeNoteToSidePanel: forwardNoteToSidePanel,
   });
 
   // Initialize recording manager with dependencies
@@ -230,6 +234,7 @@ function sendMessageToTab(tabId, message) {
     tabManager,
     sendMessageToTab,
     Socket,
+    routeNoteToSidePanel: forwardNoteToSidePanel,
   });
 
   // Subscribe panel to the current active tab
@@ -1133,4 +1138,34 @@ async function handleQueueVideo(videoData) {
         reject(new Error('Queue video request timed out'));
       });
   });
+}
+function forwardNoteToSidePanel(tabId, note, metadata = {}) {
+  if (!messageRouter || !tabId || !note) {
+    return false;
+  }
+
+  const normalizedNote = {
+    ...note,
+  };
+
+  const fallbackVideoDbId = metadata.videoDbId ?? normalizedNote.video_id ?? null;
+  if (!normalizedNote.video_id && fallbackVideoDbId) {
+    normalizedNote.video_id = fallbackVideoDbId;
+  }
+
+  const message = {
+    action: 'note_created',
+    note: normalizedNote,
+    source: metadata.source || 'unknown',
+  };
+
+  if (metadata.timestamp != null) {
+    message.timestamp = metadata.timestamp;
+  }
+
+  if (fallbackVideoDbId) {
+    message.videoDbId = fallbackVideoDbId;
+  }
+
+  return messageRouter.routeToSidePanel(message, tabId);
 }

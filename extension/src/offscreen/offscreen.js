@@ -44,15 +44,190 @@ const TARGET_SAMPLE_RATE = 16000;
  */
 const USE_AUDIO_WORKLET = true;
 
-let mediaRecorder = null;
-let audioContext = null;
-let audioBuffer = []; // Float32Array chunks for local transcription
+// Keep at least one minute of audio so we never overwrite long utterances
+const RING_BUFFER_DURATION_MS = Math.max(
+  VAD_CONFIG.MAX_SPEECH_DURATION_MS + VAD_CONFIG.PRE_ROLL_MS + VAD_CONFIG.POST_PAD_MS + 2000,
+  60000
+);
 
-// Sprint 10: VAD state
+class CircularAudioBuffer {
+  constructor(sampleRate, durationMs) {
+    this.sampleRate = sampleRate;
+    this.capacity = Math.ceil((sampleRate * durationMs) / 1000);
+    this.buffer = new Float32Array(this.capacity);
+    this.writeIndex = 0;
+    this.totalSamples = 0;
+    this.waiters = new Set();
+  }
+
+  write(samples) {
+    if (!samples || samples.length === 0) {
+      return;
+    }
+
+    let idx = this.writeIndex;
+    for (let i = 0; i < samples.length; i++) {
+      this.buffer[idx] = samples[i];
+      idx++;
+      if (idx === this.capacity) {
+        idx = 0;
+      }
+    }
+
+    this.writeIndex = idx;
+    this.totalSamples += samples.length;
+    this.resolveWaiters();
+  }
+
+  getWritePosition() {
+    return this.totalSamples;
+  }
+
+  getEarliestSample() {
+    return Math.max(0, this.totalSamples - this.capacity);
+  }
+
+  async waitForSamples(targetSample, timeoutMs = Math.max(1500, VAD_CONFIG.POST_PAD_MS * 4)) {
+    if (this.totalSamples >= targetSample) {
+      return;
+    }
+
+    return new Promise((resolve, reject) => {
+      const waiter = {
+        target: targetSample,
+        resolve,
+        reject,
+        timeoutId: null,
+      };
+
+      if (Number.isFinite(timeoutMs)) {
+        waiter.timeoutId = setTimeout(() => {
+          this.waiters.delete(waiter);
+          reject(new Error('Timed out waiting for buffered audio'));
+        }, timeoutMs);
+      }
+
+      this.waiters.add(waiter);
+    });
+  }
+
+  resolveWaiters() {
+    for (const waiter of Array.from(this.waiters)) {
+      if (this.totalSamples >= waiter.target) {
+        if (waiter.timeoutId) {
+          clearTimeout(waiter.timeoutId);
+        }
+        waiter.resolve();
+        this.waiters.delete(waiter);
+      }
+    }
+  }
+
+  read(startSample, endSample) {
+    if (endSample <= startSample) {
+      return new Float32Array(0);
+    }
+
+    const earliest = this.getEarliestSample();
+    if (startSample < earliest) {
+      console.warn(
+        `[AudioRing] Requested start sample ${startSample} older than buffer (earliest ${earliest}) – clamping`
+      );
+      startSample = earliest;
+    }
+
+    if (endSample > this.totalSamples) {
+      throw new Error(
+        `[AudioRing] Requested end sample ${endSample} beyond write head ${this.totalSamples}`
+      );
+    }
+
+    const length = endSample - startSample;
+    const result = new Float32Array(length);
+    for (let i = 0; i < length; i++) {
+      const absoluteSample = startSample + i;
+      const ringIndex = absoluteSample % this.capacity;
+      result[i] = this.buffer[ringIndex];
+    }
+    return result;
+  }
+
+  reset() {
+    this.writeIndex = 0;
+    this.totalSamples = 0;
+    for (const waiter of this.waiters) {
+      if (waiter.timeoutId) {
+        clearTimeout(waiter.timeoutId);
+      }
+      waiter.reject?.(new Error('Audio ring reset'));
+    }
+    this.waiters.clear();
+    this.buffer.fill(0);
+  }
+}
+
+function msToSamples(ms) {
+  if (!ms) {
+    return 0;
+  }
+  return Math.max(0, Math.round((ms / 1000) * TARGET_SAMPLE_RATE));
+}
+
+/**
+ * Calculate audio level for waveform visualization.
+ * Returns normalized value 0-255 (similar to AnalyserNode.getByteFrequencyData).
+ *
+ * @param {Float32Array} samples - Audio samples (-1.0 to 1.0 range)
+ * @returns {number} Audio level 0-255
+ */
+function calculateAudioLevel(samples) {
+  if (!samples || samples.length === 0) {
+    return 0;
+  }
+
+  // Calculate RMS (Root Mean Square) for perceptually accurate level
+  let sumSquares = 0;
+  for (let i = 0; i < samples.length; i++) {
+    sumSquares += samples[i] * samples[i];
+  }
+  const rms = Math.sqrt(sumSquares / samples.length);
+
+  // Convert to 0-255 range (matching AnalyserNode output)
+  // Apply slight boost for better visualization
+  const normalized = Math.min(255, Math.floor(rms * 255 * 3));
+  return normalized;
+}
+
+// Shared audio capture state
+let audioCaptureStream = null;
+let audioCaptureContext = null;
+let audioCaptureSource = null;
+let audioWorkletBridge = null;
+let audioProcessorNode = null;
+let audioRingBuffer = null;
+let ensureAudioCapturePromise = null;
+
+// VAD state
 let vadInstance = null;
-let vadAudioContext = null;
-let vadAudioStream = null;
 let vadEnabled = false;
+
+// Waveform visualization state
+let lastAudioLevelSentAt = 0;
+const AUDIO_LEVEL_INTERVAL_MS = 16; // ~60 FPS for smooth visualization
+
+// Recording state
+let currentRecording = null; // { startSample, startedAt }
+let cachedCapabilities = null;
+let capabilitiesLogged = false;
+
+async function getCapabilities() {
+  if (cachedCapabilities) {
+    return cachedCapabilities;
+  }
+  const capabilities = await detectCapabilities();
+  cachedCapabilities = capabilities;
+  return capabilities;
+}
 
 // Listen for commands from service worker
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
@@ -148,152 +323,275 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
 });
 
-async function startRecording() {
-  try {
-    // Always use local transcription (WebGPU or WASM via ONNX Runtime)
-    console.log('[Offscreen] Using local-only transcription');
+async function ensureAudioCapture() {
+  if (audioCaptureContext && audioRingBuffer) {
+    return;
+  }
 
-    // Detect capabilities
-    const capabilities = await detectCapabilities();
-    console.log('[Offscreen] Device capabilities:', capabilities);
+  if (ensureAudioCapturePromise) {
+    return ensureAudioCapturePromise;
+  }
 
-    if (!capabilities.canUseLocal) {
-      throw new Error(
-        'Local transcription unavailable - please ensure your browser supports WebAssembly'
-      );
+  ensureAudioCapturePromise = (async () => {
+    try {
+      if (audioCaptureContext && audioRingBuffer) {
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          channelCount: 1,
+          sampleRate: TARGET_SAMPLE_RATE,
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+
+      audioCaptureStream = stream;
+      audioCaptureContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+      audioCaptureSource = audioCaptureContext.createMediaStreamSource(stream);
+
+      audioRingBuffer = new CircularAudioBuffer(TARGET_SAMPLE_RATE, RING_BUFFER_DURATION_MS);
+
+      const sourceSampleRate = audioCaptureContext.sampleRate || TARGET_SAMPLE_RATE;
+      const processSamples = (samples) => {
+        if (!audioRingBuffer) {
+          return;
+        }
+        const processed = resampleIfNeeded(samples, sourceSampleRate, TARGET_SAMPLE_RATE);
+        if (!processed || processed.length === 0) {
+          return;
+        }
+        audioRingBuffer.write(processed);
+        if (vadInstance) {
+          vadInstance.enqueueAudio(processed);
+        }
+
+        // Send audio level for waveform visualization
+        const now = performance.now();
+        if (now - lastAudioLevelSentAt >= AUDIO_LEVEL_INTERVAL_MS) {
+          lastAudioLevelSentAt = now;
+          const audioLevel = calculateAudioLevel(processed);
+          chrome.runtime.sendMessage({
+            action: 'audio_level',
+            level: audioLevel,
+          }).catch(() => {
+            // Ignore errors if sidepanel is closed
+          });
+        }
+      };
+
+      if (USE_AUDIO_WORKLET) {
+        const bridge = new VadWorkletBridge(audioCaptureContext, processSamples);
+        try {
+          await bridge.init(audioCaptureSource);
+          audioWorkletBridge = bridge;
+          audioProcessorNode = null;
+          console.log('[Offscreen] AudioWorklet initialized for shared capture');
+          return;
+        } catch (error) {
+          console.warn('[Offscreen] AudioWorklet init failed, falling back to ScriptProcessor:', error);
+          try {
+            bridge.disconnect();
+          } catch (disconnectError) {
+            console.warn('[Offscreen] Failed to disconnect partial AudioWorklet bridge:', disconnectError);
+          }
+          audioWorkletBridge = null;
+        }
+      }
+
+      const bufferSize = 1024;
+      const processor = audioCaptureContext.createScriptProcessor(bufferSize, 1, 1);
+      processor.onaudioprocess = (event) => {
+        const inputData = event.inputBuffer.getChannelData(0);
+        const copy = new Float32Array(inputData.length);
+        copy.set(inputData);
+        processSamples(copy);
+      };
+
+      audioCaptureSource.connect(processor);
+      processor.connect(audioCaptureContext.destination);
+      audioProcessorNode = processor;
+      console.log('[Offscreen] ScriptProcessor initialized for shared capture');
+    } catch (error) {
+      await teardownAudioCapture();
+      throw error;
     }
-
-    const stream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1, // Mono
-        sampleRate: 16000, // 16kHz for Whisper
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
+  })()
+    .finally(() => {
+      ensureAudioCapturePromise = null;
     });
 
-    // Create AudioContext for Float32 audio (for ONNX transcription)
-    audioContext = new AudioContext({ sampleRate: 16000 });
-    const source = audioContext.createMediaStreamSource(stream);
+  return ensureAudioCapturePromise;
+}
 
-    // Create ScriptProcessor to capture raw audio samples
-    const bufferSize = 4096;
-    const processor = audioContext.createScriptProcessor(bufferSize, 1, 1);
+async function teardownAudioCapture() {
+  if (audioWorkletBridge) {
+    try {
+      audioWorkletBridge.disconnect();
+    } catch (error) {
+      console.warn('[Offscreen] Failed to disconnect AudioWorklet bridge during teardown:', error);
+    }
+    audioWorkletBridge = null;
+  }
 
-    let audioChunkCount = 0;
-    processor.onaudioprocess = (event) => {
-      // Copy input buffer (Float32Array)
-      const inputData = event.inputBuffer.getChannelData(0);
-      const copy = new Float32Array(inputData.length);
-      copy.set(inputData);
-      audioBuffer.push(copy);
+  if (audioProcessorNode) {
+    try {
+      audioProcessorNode.disconnect();
+    } catch (error) {
+      console.warn('[Offscreen] Failed to disconnect ScriptProcessor during teardown:', error);
+    }
+    audioProcessorNode = null;
+  }
 
-      // Log first chunk to confirm audio is being captured
-      audioChunkCount++;
-      if (audioChunkCount === 1) {
-        console.log('[Offscreen] First audio chunk captured');
-      }
-    };
+  if (audioCaptureSource) {
+    try {
+      audioCaptureSource.disconnect();
+    } catch (error) {
+      console.warn('[Offscreen] Failed to disconnect capture source during teardown:', error);
+    }
+    audioCaptureSource = null;
+  }
 
-    source.connect(processor);
-    processor.connect(audioContext.destination);
+  if (audioCaptureContext) {
+    try {
+      await audioCaptureContext.close();
+    } catch (error) {
+      console.warn('[Offscreen] Failed to close AudioContext during teardown:', error);
+    }
+    audioCaptureContext = null;
+  }
 
-    // Simple MediaRecorder for basic state management (not used for buffering)
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
+  if (audioCaptureStream) {
+    audioCaptureStream.getTracks().forEach((track) => track.stop());
+    audioCaptureStream = null;
+  }
 
-    mediaRecorder = new MediaRecorder(stream, {
-      mimeType: mimeType,
-      audioBitsPerSecond: 16000,
-    });
-
-    audioBuffer = [];
-
-    // Store processor for cleanup
-    mediaRecorder._audioProcessor = processor;
-    mediaRecorder._audioSource = source;
-
-    mediaRecorder.onerror = (event) => {
-      console.error('[Offscreen] MediaRecorder error:', event.error);
-    };
-
-    mediaRecorder.onstop = function () {
-      console.log('[Offscreen] MediaRecorder stopped, cleaning up stream');
-      stream.getTracks().forEach((track) => track.stop());
-
-      // Cleanup audio processor (use 'this' instead of 'mediaRecorder' to avoid null reference)
-      if (this._audioProcessor) {
-        this._audioProcessor.disconnect();
-        this._audioSource.disconnect();
-      }
-    };
-
-    // Start recording with 1-second chunks
-    mediaRecorder.start(1000);
-    console.log('[Offscreen] MediaRecorder started successfully');
-  } catch (error) {
-    console.error('[Offscreen] Failed to start recording:', error);
-    throw error;
+  if (audioRingBuffer) {
+    audioRingBuffer.reset();
+    audioRingBuffer = null;
   }
 }
 
+async function maybeTeardownAudioCapture() {
+  if (vadEnabled || currentRecording) {
+    return;
+  }
+  await teardownAudioCapture();
+}
+
+async function startRecording() {
+  if (currentRecording) {
+    console.log('[Offscreen] startRecording called while recording is already active');
+    return;
+  }
+
+  const capabilities = await getCapabilities();
+  if (!capabilitiesLogged) {
+    console.log('[Offscreen] Device capabilities:', capabilities);
+    capabilitiesLogged = true;
+  }
+
+  if (!capabilities.canUseLocal) {
+    throw new Error('Local transcription unavailable - please ensure your browser supports WebAssembly');
+  }
+
+  await ensureAudioCapture();
+
+  if (!audioRingBuffer) {
+    throw new Error('Audio capture pipeline unavailable');
+  }
+
+  const preRollSamples = msToSamples(VAD_CONFIG.PRE_ROLL_MS);
+  const writePosition = audioRingBuffer.getWritePosition();
+  const earliest = audioRingBuffer.getEarliestSample();
+  const startSample = Math.max(earliest, writePosition - preRollSamples);
+
+  currentRecording = {
+    startSample,
+    startedAt: performance.now(),
+  };
+
+  console.log('[Offscreen] Recording window opened', {
+    startSample,
+    writePosition,
+    preRollSamples,
+    earliest,
+  });
+}
+
 async function stopRecording() {
-  console.log('[Offscreen] stopRecording called', {
-    hasMediaRecorder: !!mediaRecorder,
-    mediaRecorderState: mediaRecorder?.state,
-    audioBufferLength: audioBuffer.length,
+  if (!currentRecording) {
+    console.warn('[Offscreen] stopRecording called with no active recording');
+    return { success: false, error: 'No active recording' };
+  }
+
+  if (!audioRingBuffer) {
+    console.warn('[Offscreen] stopRecording called without audio buffer');
+    currentRecording = null;
+    await maybeTeardownAudioCapture();
+    return { success: false, error: 'Audio capture unavailable' };
+  }
+
+  const postPadSamples = msToSamples(VAD_CONFIG.POST_PAD_MS);
+  const captureSnapshot = audioRingBuffer.getWritePosition();
+  const targetEndSample = captureSnapshot + postPadSamples;
+
+  try {
+    await audioRingBuffer.waitForSamples(targetEndSample);
+  } catch (error) {
+    console.warn('[Offscreen] Post-pad wait interrupted:', error.message);
+  }
+
+  const finalWrite = audioRingBuffer.getWritePosition();
+  const endSample = Math.min(finalWrite, targetEndSample);
+  const earliest = audioRingBuffer.getEarliestSample();
+  const startSample = Math.max(earliest, currentRecording.startSample);
+
+  let audioSamples = null;
+  try {
+    audioSamples = audioRingBuffer.read(startSample, endSample);
+  } catch (error) {
+    console.error('[Offscreen] Failed to read audio ring buffer:', error);
+    currentRecording = null;
+    await maybeTeardownAudioCapture();
+    return { success: false, error: error.message };
+  }
+
+  currentRecording = null;
+
+  if (!audioSamples || audioSamples.length === 0) {
+    await maybeTeardownAudioCapture();
+    return { success: false, error: 'No audio captured' };
+  }
+
+  console.log('[Offscreen] Captured segment', {
+    samples: audioSamples.length,
+    durationMs: Math.round((audioSamples.length / TARGET_SAMPLE_RATE) * 1000),
   });
 
-  if (!mediaRecorder || mediaRecorder.state === 'inactive') {
-    console.warn('[Offscreen] Cannot stop: mediaRecorder is null or inactive');
-    return { localTranscription: false };
-  }
+  try {
+    const result = await transcribeLocally(audioSamples);
+    await maybeTeardownAudioCapture();
+    return {
+      success: true,
+      ...result,
+    };
+  } catch (error) {
+    console.error('[Offscreen] Local transcription failed:', error);
+    chrome.runtime.sendMessage({
+      action: 'transcription_error',
+      error: error.message,
+      stack: error.stack,
+    });
 
-  mediaRecorder.stop();
-  mediaRecorder = null;
-
-  // Close AudioContext
-  if (audioContext) {
-    await audioContext.close();
-    audioContext = null;
-  }
-
-  // Attempt local transcription if audio was captured
-  if (audioBuffer.length > 0) {
-    console.log(`[Offscreen] Transcribing locally (${audioBuffer.length} chunks)`);
-
-    try {
-      const result = await transcribeLocally();
-      return {
-        success: true,
-        ...result,
-      };
-    } catch (error) {
-      console.error('[Offscreen] Local transcription failed:', error);
-      console.error('[Offscreen] Error stack:', error.stack);
-      console.error('[Offscreen] Error type:', error.constructor.name);
-
-      // No cloud fallback - show error to user
-      chrome.runtime.sendMessage({
-        action: 'transcription_error',
-        error: error.message,
-        stack: error.stack,
-      });
-
-      return {
-        success: false,
-        error: error.message,
-        stack: error.stack,
-      };
-    } finally {
-      // Clear audio buffer
-      audioBuffer = [];
-    }
-  } else {
-    console.warn('[Offscreen] No audio captured - audioBuffer is empty');
-    return { success: false, error: 'No audio captured' };
+    await maybeTeardownAudioCapture();
+    return {
+      success: false,
+      error: error.message,
+      stack: error.stack,
+    };
   }
 }
 
@@ -401,24 +699,21 @@ function detectWhisperHallucination(text, chunks, durationSeconds) {
  *
  * @returns {Promise<Object>} Transcription result
  */
-async function transcribeLocally() {
+async function transcribeLocally(audioSamples) {
   const startTime = performance.now();
 
-  // Concatenate all audio chunks into single Float32Array
-  const totalLength = audioBuffer.reduce((sum, chunk) => sum + chunk.length, 0);
-  const concatenated = new Float32Array(totalLength);
-
-  let offset = 0;
-  for (const chunk of audioBuffer) {
-    concatenated.set(chunk, offset);
-    offset += chunk.length;
+  if (!audioSamples || audioSamples.length === 0) {
+    throw new Error('No audio samples provided for transcription');
   }
 
-  const durationSeconds = concatenated.length / 16000;
+  const concatenated =
+    audioSamples instanceof Float32Array ? audioSamples : new Float32Array(audioSamples);
+
+  const durationSeconds = concatenated.length / TARGET_SAMPLE_RATE;
   console.log(`[Offscreen] Transcribing ${durationSeconds.toFixed(1)}s of audio`);
 
   // Get capability info for status reporting
-  const capabilities = await detectCapabilities();
+  const capabilities = await getCapabilities();
   const device = capabilities.device || 'wasm';
 
   // Notify UI: transcription started
@@ -542,22 +837,8 @@ async function startVAD(config = {}) {
   console.log('[VAD] Starting voice mode audio detection');
 
   try {
-    // Request microphone access
-    vadAudioStream = await navigator.mediaDevices.getUserMedia({
-      audio: {
-        channelCount: 1,
-        sampleRate: 16000,
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-    });
+    await ensureAudioCapture();
 
-    // Create audio context for VAD
-    vadAudioContext = new AudioContext({ sampleRate: 16000 });
-    const source = vadAudioContext.createMediaStreamSource(vadAudioStream);
-
-    // Initialize HybridVAD with callbacks
     let lastMetricsSentAt = 0;
     const METRICS_INTERVAL_MS = 250;
 
@@ -566,6 +847,8 @@ async function startVAD(config = {}) {
       minSilenceDurationMs: config?.minSilenceDurationMs || VAD_CONFIG.MIN_SILENCE_DURATION_MS,
       startThreshold: config?.sileroConfidence || VAD_CONFIG.START_THRESHOLD,
       endThreshold: config?.sileroNegativeThreshold || VAD_CONFIG.END_THRESHOLD,
+      probSmoothingFrames: config?.probSmoothingFrames || VAD_CONFIG.PROB_SMOOTHING_FRAMES,
+      silenceGateMs: config?.silenceGateMs || VAD_CONFIG.SILENCE_GATE_MS,
       onSpeechStart: (event) => {
         console.log('[VAD] Speech detected (confidence:', event.confidence.toFixed(3), ')');
         chrome.runtime.sendMessage({
@@ -611,15 +894,19 @@ async function startVAD(config = {}) {
           metrics.confidence.toFixed(3),
           `${metrics.latencyMs.toFixed(2)}ms`
         );
-        chrome.runtime.sendMessage({
-          target: 'background',
-          action: 'voice_event',
-          type: 'metrics',
-          data: {
-            confidence: metrics.confidence,
-            latencyMs: metrics.latencyMs,
-          },
-        });
+      chrome.runtime.sendMessage({
+        target: 'background',
+        action: 'voice_event',
+        type: 'metrics',
+        data: {
+          confidence: metrics.confidence,
+          latencyMs: metrics.latencyMs,
+          rawConfidence: metrics.rawConfidence,
+          state: metrics.state,
+          speechDurationMs: metrics.speechDurationMs,
+          silenceDurationMs: metrics.silenceDurationMs,
+        },
+      });
       },
       onError: (error) => {
         chrome.runtime.sendMessage({
@@ -636,88 +923,15 @@ async function startVAD(config = {}) {
 
     await vadInstance.loadModel();
 
-    // Use AudioWorklet (modern) or fallback to ScriptProcessor (deprecated)
-    let audioBridgeInitialized = false;
-
-    if (USE_AUDIO_WORKLET) {
-      console.log('[VAD] Attempting AudioWorklet for audio processing');
-
-      // Create AudioWorklet bridge
-      const workletBridge = new VadWorkletBridge(vadAudioContext, (audioFrame) => {
-        if (!vadInstance) return;
-
-        const sourceSampleRate = vadAudioContext.sampleRate || TARGET_SAMPLE_RATE;
-        const processed = resampleIfNeeded(audioFrame, sourceSampleRate, TARGET_SAMPLE_RATE);
-        if (processed && processed.length > 0) {
-          vadInstance.enqueueAudio(processed);
-        }
-      });
-
-      try {
-        // Initialize and connect the worklet
-        await workletBridge.init(source);
-        audioBridgeInitialized = true;
-
-        // Store bridge for cleanup
-        vadInstance._audioBridge = workletBridge;
-        vadInstance._audioSource = source;
-
-        console.log('[VAD] AudioWorklet initialized successfully');
-      } catch (error) {
-        console.warn('[VAD] AudioWorklet initialization failed, falling back to ScriptProcessor:', error);
-        // Clean up partial initialization (ignore errors)
-        try {
-          workletBridge.disconnect();
-        } catch (disconnectError) {
-          console.warn('[VAD] Failed to disconnect worklet during cleanup:', disconnectError);
-        }
-        // audioBridgeInitialized remains false, so we'll use ScriptProcessor below
-      }
-    }
-
-    if (!audioBridgeInitialized) {
-      console.log('[VAD] Using ScriptProcessor (deprecated) for audio processing');
-
-      // Fallback: Create ScriptProcessor to feed audio to VAD
-      const bufferSize = 1024;
-      const processor = vadAudioContext.createScriptProcessor(bufferSize, 1, 1);
-
-      processor.onaudioprocess = (event) => {
-        if (!vadInstance) return;
-
-        const inputData = event.inputBuffer.getChannelData(0);
-        const copy = new Float32Array(inputData.length);
-        copy.set(inputData);
-
-        const sourceSampleRate = vadAudioContext.sampleRate || TARGET_SAMPLE_RATE;
-        const processed = resampleIfNeeded(copy, sourceSampleRate, TARGET_SAMPLE_RATE);
-        if (processed && processed.length > 0) {
-          vadInstance.enqueueAudio(processed);
-        }
-      };
-
-      source.connect(processor);
-      processor.connect(vadAudioContext.destination);
-
-      // Store processor for cleanup
-      vadInstance._audioProcessor = processor;
-      vadInstance._audioSource = source;
-    }
-
     vadEnabled = true;
-    console.log('[VAD] Voice mode detection active (mode: silero)');
+    console.log('[VAD] Voice mode detection active (shared capture)');
   } catch (error) {
     console.error('[VAD] Failed to start:', error);
-
-    // Clean up on failure
-    if (vadAudioStream) {
-      vadAudioStream.getTracks().forEach((track) => track.stop());
-      vadAudioStream = null;
+    if (vadInstance) {
+      vadInstance.destroy();
+      vadInstance = null;
     }
-    if (vadAudioContext) {
-      await vadAudioContext.close();
-      vadAudioContext = null;
-    }
+    await maybeTeardownAudioCapture();
 
     // Notify service worker of failure
     chrome.runtime.sendMessage({
@@ -747,28 +961,6 @@ async function stopVAD() {
 
   console.log('[VAD] Stopping voice mode detection');
 
-  // Cleanup audio processor or worklet bridge
-  if (vadInstance?._audioBridge) {
-    // AudioWorklet cleanup
-    vadInstance._audioBridge.disconnect();
-  } else if (vadInstance?._audioProcessor) {
-    // ScriptProcessor cleanup (fallback)
-    vadInstance._audioProcessor.disconnect();
-    vadInstance._audioSource.disconnect();
-  }
-
-  // Stop audio stream
-  if (vadAudioStream) {
-    vadAudioStream.getTracks().forEach((track) => track.stop());
-    vadAudioStream = null;
-  }
-
-  // Close audio context
-  if (vadAudioContext) {
-    await vadAudioContext.close();
-    vadAudioContext = null;
-  }
-
   // Reset VAD instance
   if (vadInstance) {
     try {
@@ -781,6 +973,8 @@ async function stopVAD() {
 
   vadEnabled = false;
   console.log('[VAD] Stopped');
+
+  await maybeTeardownAudioCapture();
 }
 
 // Handle document visibility changes (for cleanup)

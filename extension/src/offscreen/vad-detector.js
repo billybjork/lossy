@@ -65,6 +65,8 @@ export class SileroVAD {
     this.endThreshold = options.endThreshold || VAD_CONFIG.END_THRESHOLD;
     this.minSpeechDurationMs = options.minSpeechDurationMs || VAD_CONFIG.MIN_SPEECH_DURATION_MS;
     this.minSilenceDurationMs = options.minSilenceDurationMs || VAD_CONFIG.MIN_SILENCE_DURATION_MS;
+    this.probSmoothingFrames = options.probSmoothingFrames || VAD_CONFIG.PROB_SMOOTHING_FRAMES || 1;
+    this.silenceGateMs = options.silenceGateMs || VAD_CONFIG.SILENCE_GATE_MS || 0;
 
     this.session = null;
     this.stateTensor = null;
@@ -78,12 +80,17 @@ export class SileroVAD {
     this.silenceDurationMs = 0;
     this.speechStartTimestamp = null;
     this.lastHighConfidenceTimestamp = null;
+    this.lowConfidenceMs = 0;
 
     this.metrics = {
       confidence: 0,
+      rawConfidence: 0,
       latencyMs: 0,
     };
     this.debugLogged = false;
+
+    this.probabilityWindow = [];
+    this.probabilityWindowSum = 0;
   }
 
   async loadModel() {
@@ -162,15 +169,17 @@ export class SileroVAD {
           continue;
         }
 
-        const confidence = confidenceTensor.data[0];
+        const rawConfidence = confidenceTensor.data[0];
+        const smoothedConfidence = this.addSmoothedConfidence(rawConfidence);
         this.stateTensor = new ort.Tensor('float32', stateTensor.data.slice(), STATE_SHAPE);
 
         // Update state first, then emit metrics with current state
-        this.handleDetection(confidence, latencyMs);
+        this.handleDetection(smoothedConfidence, rawConfidence, latencyMs);
 
         // Emit metrics after state update
         this.metrics = {
-          confidence,
+          confidence: smoothedConfidence,
+          rawConfidence,
           latencyMs,
           state: this.state,
           speechDurationMs: this.speechDurationMs,
@@ -216,17 +225,20 @@ export class SileroVAD {
     };
   }
 
-  handleDetection(confidence, latencyMs) {
+  handleDetection(confidence, rawConfidence, latencyMs) {
     const now = performance.now();
 
-    // HIGH CONFIDENCE: >= 0.5
-    if (confidence >= this.startThreshold) {
+    const highConfidence =
+      confidence >= this.startThreshold || rawConfidence >= this.startThreshold;
+
+    if (highConfidence) {
       if (this.state !== STATE_SPEECH) {
         this.state = STATE_SPEECH;
         this.speechDurationMs = 0;
         this.silenceDurationMs = 0;
         this.speechStartTimestamp = now;
         this.lastHighConfidenceTimestamp = now;
+        this.lowConfidenceMs = 0;
         this.onSpeechStart({
           confidence,
           latencyMs,
@@ -240,6 +252,7 @@ export class SileroVAD {
 
       this.speechDurationMs += HOP_MS;
       this.silenceDurationMs = 0;
+      this.lowConfidenceMs = 0;
 
       // Absolute max duration guard
       if (this.speechDurationMs >= VAD_CONFIG.MAX_SPEECH_DURATION_MS) {
@@ -257,8 +270,15 @@ export class SileroVAD {
       return;
     }
 
-    // LOW CONFIDENCE: <= 0.40
-    if (confidence <= this.endThreshold) {
+    const lowConfidence =
+      confidence <= this.endThreshold && rawConfidence <= this.endThreshold + 0.05;
+
+    if (lowConfidence) {
+      this.lowConfidenceMs += HOP_MS;
+      if (this.lowConfidenceMs < this.silenceGateMs) {
+        return;
+      }
+
       if (this.state === STATE_SPEECH || this.state === STATE_MAYBE_SILENCE) {
         if (this.state !== STATE_MAYBE_SILENCE) {
           this.state = STATE_MAYBE_SILENCE;
@@ -292,15 +312,20 @@ export class SileroVAD {
       return;
     }
 
+    this.lowConfidenceMs = 0;
+
     // MIDDLE ZONE: 0.40 < confidence < 0.45
     // Less aggressive reversion: only reset if we're early in the silence period
     if (this.state === STATE_MAYBE_SILENCE) {
-      const silenceRevertThreshold = this.minSilenceDurationMs * VAD_CONFIG.MIDDLE_ZONE_REVERT_THRESHOLD;
+      this.lowConfidenceMs = Math.min(this.lowConfidenceMs, this.silenceGateMs);
+      const silenceRevertThreshold =
+        this.minSilenceDurationMs * VAD_CONFIG.MIDDLE_ZONE_REVERT_THRESHOLD;
 
       // Only revert to SPEECH if we haven't accumulated much silence yet
       if (this.silenceDurationMs < silenceRevertThreshold) {
         this.state = STATE_SPEECH;
         this.silenceDurationMs = 0;
+        this.lowConfidenceMs = 0;
         logger.debug(
           'VAD',
           'Reverted to speech from maybe_silence, confidence:',
@@ -324,6 +349,7 @@ export class SileroVAD {
 
     if (this.state === STATE_SPEECH) {
       this.speechDurationMs += HOP_MS;
+      this.lowConfidenceMs = 0;
 
       // Force end if no high confidence for STUCK_STATE_TIMEOUT_MS (stuck state guard)
       if (
@@ -370,9 +396,31 @@ export class SileroVAD {
     this.speechStartTimestamp = null;
     this.lastHighConfidenceTimestamp = null;
 
+    this.probabilityWindow = [];
+    this.probabilityWindowSum = 0;
+    this.lowConfidenceMs = 0;
+
     // REMOVED: Don't zero state tensor between utterances
     // Silero V5's RNN state should persist across speech segments
     // Only reset on explicit reset() calls (tab switch, session restart)
+  }
+
+  addSmoothedConfidence(confidence) {
+    // Straight average smoothing keeps things simple and fast
+    if (this.probSmoothingFrames <= 1) {
+      return confidence;
+    }
+
+    this.probabilityWindow.push(confidence);
+    this.probabilityWindowSum += confidence;
+
+    if (this.probabilityWindow.length > this.probSmoothingFrames) {
+      const removed = this.probabilityWindow.shift();
+      this.probabilityWindowSum -= removed;
+    }
+
+    const windowLength = this.probabilityWindow.length || 1;
+    return this.probabilityWindowSum / windowLength;
   }
 
   resetState() {

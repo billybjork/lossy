@@ -29,6 +29,7 @@ let heartbeatInterval = null;
 let sendMessageToTab = null;
 let createOffscreenDocument = null;
 let ensureVideoContextForTab = null;
+let routeNoteToSidePanel = null;
 
 /**
  * Initialize module with dependencies
@@ -41,6 +42,7 @@ export function initVoiceSessionManager(deps) {
   sendMessageToTab = deps.sendMessageToTab;
   createOffscreenDocument = deps.createOffscreenDocument;
   ensureVideoContextForTab = deps.ensureVideoContextForTab;
+  routeNoteToSidePanel = deps.routeNoteToSidePanel;
 }
 
 /**
@@ -201,6 +203,71 @@ function sleep(ms) {
 }
 
 /**
+ * Guard voice session so it stays alive while user navigates, but shuts down if idle too long
+ */
+function scheduleFirstSpeechGuard(reason = 'initial') {
+  if (voiceSession.firstSpeechTimeout) {
+    clearTimeout(voiceSession.firstSpeechTimeout);
+    voiceSession.firstSpeechTimeout = null;
+  }
+
+  if (!voiceSession.audioChannel || voiceSession.status === 'idle') {
+    return;
+  }
+
+  const guardInterval = VOICE_SESSION_CONFIG.FIRST_SPEECH_TIMEOUT_MS;
+  if (!guardInterval || guardInterval <= 0) {
+    return;
+  }
+
+  voiceSession.firstSpeechTimeout = setTimeout(async () => {
+    if (!voiceSession.audioChannel || voiceSession.status !== 'observing') {
+      voiceSession.firstSpeechTimeout = null;
+      return;
+    }
+
+    if (voiceSession.telemetry.speechDetections > 0) {
+      voiceSession.firstSpeechTimeout = null;
+      return;
+    }
+
+    const guardStart =
+      voiceSession.firstSpeechGuardStartedAt || voiceSession.telemetry.startedAt || Date.now();
+    const elapsedMs = Date.now() - guardStart;
+    const activeTabId = voiceSession.tabId;
+    const hasVideoContext =
+      !!(activeTabId && tabManager?.getVideoContext(activeTabId)?.videoDbId);
+
+    if (!hasVideoContext) {
+      if (elapsedMs >= VOICE_SESSION_CONFIG.FIRST_SPEECH_GUARD_MAX_WAIT_MS) {
+        console.log(
+          '[Voice Mode] No speech detected and no video context after',
+          `${Math.round(elapsedMs / 1000)}s - auto-stopping`
+        );
+        voiceSession.firstSpeechTimeout = null;
+        await stopVoiceSession();
+        return;
+      }
+
+      if (voiceSession.firstSpeechGuardLastReason !== 'waiting_for_video_context') {
+        console.log('[Voice Mode] Waiting for video context before first speech - extending guard');
+        voiceSession.firstSpeechGuardLastReason = 'waiting_for_video_context';
+      }
+
+      scheduleFirstSpeechGuard('waiting_for_video_context');
+      return;
+    }
+
+    if (voiceSession.firstSpeechGuardLastReason !== 'waiting_for_speech') {
+      console.log('[Voice Mode] First speech guard active while monitoring current video');
+      voiceSession.firstSpeechGuardLastReason = 'waiting_for_speech';
+    }
+
+    scheduleFirstSpeechGuard('waiting_for_speech');
+  }, guardInterval);
+}
+
+/**
  * Restart VAD with exponential backoff and circuit breaker
  */
 export async function restartVADWithBackoff() {
@@ -316,11 +383,25 @@ export async function handleVoiceEvent(event) {
 
   const now = Date.now();
 
-  if (event.type === 'speech_start' && voiceSession.status !== 'recording') {
+  if (event.type === 'speech_start') {
     // Ignore if in cooldown
     if (voiceSession.status === 'cooldown') {
       voiceSession.telemetry.ignoredCooldown++;
       console.log('[Voice Mode] Ignored speech during cooldown');
+      return;
+    }
+
+    const confidence = event.data?.confidence ?? 0;
+    const latencyMs = event.data?.latencyMs ?? 0;
+
+    if (voiceSession.status === 'recording') {
+      if (voiceSession.pendingStopTimer) {
+        clearTimeout(voiceSession.pendingStopTimer);
+        voiceSession.pendingStopTimer = null;
+        console.log('[Voice Mode] Continuing current recording after brief pause');
+      }
+      voiceSession.telemetry.lastConfidence = confidence;
+      voiceSession.telemetry.lastLatencyMs = latencyMs;
       return;
     }
 
@@ -343,8 +424,6 @@ export async function handleVoiceEvent(event) {
       }
     }
 
-    const confidence = event.data?.confidence ?? 0;
-    const latencyMs = event.data?.latencyMs ?? 0;
     console.log(
       '[Voice Mode] Speech detected (confidence:',
       confidence.toFixed(3),
@@ -424,6 +503,8 @@ export async function handleVoiceEvent(event) {
     if (voiceSession.firstSpeechTimeout) {
       clearTimeout(voiceSession.firstSpeechTimeout);
       voiceSession.firstSpeechTimeout = null;
+      voiceSession.firstSpeechGuardStartedAt = null;
+      voiceSession.firstSpeechGuardLastReason = null;
       console.log('[Voice Mode] First speech detected - cleared auto-stop timeout');
     }
 
@@ -457,76 +538,105 @@ export async function handleVoiceEvent(event) {
 
     broadcastVoiceStatus();
   } else if (event.type === 'speech_end' && voiceSession.status === 'recording') {
-    const duration = now - voiceSession.lastStartAt;
-    const confidence = event.data?.confidence ?? voiceSession.telemetry.lastConfidence;
-    const latencyMs = event.data?.latencyMs ?? voiceSession.telemetry.lastLatencyMs;
-    const resumeInfo = extractResumeInfo(voiceSession.recordingContext);
+    const finalizeSpeechEnd = async () => {
+      voiceSession.pendingStopTimer = null;
 
-    if (duration >= VAD_CONFIG.MIN_SPEECH_DURATION_MS) {
-      console.log('[Voice Mode] Speech ended, duration:', duration, 'ms');
-
-      // Transition immediately so UI reflects cooldown while transcription completes
-      voiceSession.status = 'cooldown';
-      broadcastVoiceStatus();
-
-      // Stop recording in offscreen (may take time due to transcription)
-      try {
-        await chrome.runtime.sendMessage({
-          target: 'offscreen',
-          action: 'stop_recording',
-        });
-        console.log('[Voice Mode] Recording stopped successfully');
-      } catch (error) {
-        console.error('[Voice Mode] Failed to stop recording:', error);
+      if (voiceSession.status !== 'recording') {
+        return;
       }
 
-      // Update telemetry
-      const count = voiceSession.telemetry.speechDetections;
-      if (count > 0) {
-        voiceSession.telemetry.avgLatencyMs =
-          (voiceSession.telemetry.avgLatencyMs * (count - 1) + latencyMs) / count;
-      }
-      voiceSession.telemetry.lastConfidence = confidence;
-      voiceSession.telemetry.lastLatencyMs = latencyMs;
+      const stopTimestamp = Date.now();
+      const duration = stopTimestamp - voiceSession.lastStartAt;
+      const confidence = event.data?.confidence ?? voiceSession.telemetry.lastConfidence;
+      const latencyMs = event.data?.latencyMs ?? voiceSession.telemetry.lastLatencyMs;
+      const resumeInfo = extractResumeInfo(voiceSession.recordingContext);
 
-      // Enter cooldown - recording context is PRESERVED until note arrives
-      setTimeout(() => {
-        if (voiceSession.status === 'cooldown') {
-          voiceSession.status = 'observing';
-          console.log('[Voice Mode] Cooldown complete, resuming observation');
-          broadcastVoiceStatus();
+      if (duration >= VAD_CONFIG.MIN_SPEECH_DURATION_MS) {
+        console.log('[Voice Mode] Speech ended, duration:', duration, 'ms');
+
+        // Transition immediately so UI reflects cooldown while transcription completes
+        voiceSession.status = 'cooldown';
+        broadcastVoiceStatus();
+
+        // Stop recording in offscreen (may take time due to transcription)
+        try {
+          await chrome.runtime.sendMessage({
+            target: 'offscreen',
+            action: 'stop_recording',
+          });
+          console.log('[Voice Mode] Recording stopped successfully');
+        } catch (error) {
+          console.error('[Voice Mode] Failed to stop recording:', error);
         }
-      }, VOICE_SESSION_CONFIG.COOLDOWN_MS);
 
-      // Set a safety timeout to clear stale context
-      if (voiceSession.recordingContextTimeout) {
-        clearTimeout(voiceSession.recordingContextTimeout);
-      }
-      voiceSession.recordingContextTimeout = setTimeout(() => {
-        if (voiceSession.recordingContext) {
-          const age = Date.now() - voiceSession.recordingContext.startedAt;
-          console.warn('[Voice Mode] Recording context timeout after', age, 'ms - clearing');
-          voiceSession.recordingContext = null;
+        // Update telemetry
+        const count = voiceSession.telemetry.speechDetections;
+        if (count > 0) {
+          voiceSession.telemetry.avgLatencyMs =
+            (voiceSession.telemetry.avgLatencyMs * (count - 1) + latencyMs) / count;
+        }
+        voiceSession.telemetry.lastConfidence = confidence;
+        voiceSession.telemetry.lastLatencyMs = latencyMs;
+
+        // Enter cooldown - recording context is PRESERVED until note arrives
+        setTimeout(() => {
+          if (voiceSession.status === 'cooldown') {
+            voiceSession.status = 'observing';
+            console.log('[Voice Mode] Cooldown complete, resuming observation');
+            broadcastVoiceStatus();
+          }
+        }, VOICE_SESSION_CONFIG.COOLDOWN_MS);
+
+        // Set a safety timeout to clear stale context
+        if (voiceSession.recordingContextTimeout) {
+          clearTimeout(voiceSession.recordingContextTimeout);
+        }
+        voiceSession.recordingContextTimeout = setTimeout(() => {
+          if (voiceSession.recordingContext) {
+            const age = Date.now() - voiceSession.recordingContext.startedAt;
+            console.warn('[Voice Mode] Recording context timeout after', age, 'ms - clearing');
+            voiceSession.recordingContext = null;
+            voiceSession.recordingContextTimeout = null;
+          }
+        }, VOICE_SESSION_CONFIG.RECORDING_CONTEXT_TIMEOUT_MS);
+
+        scheduleVoiceResume(resumeInfo.tabId, resumeInfo.wasPlaying);
+        // Broadcast once more to publish updated telemetry (status remains cooldown)
+        broadcastVoiceStatus();
+      } else {
+        voiceSession.telemetry.ignoredShort++;
+        console.log('[Voice Mode] Ignored short speech segment:', duration, 'ms');
+        voiceSession.status = 'observing';
+        // Clear recording context immediately for ignored segments
+        voiceSession.recordingContext = null;
+        if (voiceSession.recordingContextTimeout) {
+          clearTimeout(voiceSession.recordingContextTimeout);
           voiceSession.recordingContextTimeout = null;
         }
-      }, VOICE_SESSION_CONFIG.RECORDING_CONTEXT_TIMEOUT_MS);
 
-      scheduleVoiceResume(resumeInfo.tabId, resumeInfo.wasPlaying);
-      // Broadcast once more to publish updated telemetry (status remains cooldown)
-      broadcastVoiceStatus();
-    } else {
-      voiceSession.telemetry.ignoredShort++;
-      console.log('[Voice Mode] Ignored short speech segment:', duration, 'ms');
-      voiceSession.status = 'observing';
-      // Clear recording context immediately for ignored segments
-      voiceSession.recordingContext = null;
-      if (voiceSession.recordingContextTimeout) {
-        clearTimeout(voiceSession.recordingContextTimeout);
-        voiceSession.recordingContextTimeout = null;
+        scheduleVoiceResume(resumeInfo.tabId, resumeInfo.wasPlaying);
+        broadcastVoiceStatus();
       }
+    };
 
-      scheduleVoiceResume(resumeInfo.tabId, resumeInfo.wasPlaying);
-      broadcastVoiceStatus();
+    const reason = event.data?.reason;
+    const shouldDelay =
+      VAD_CONFIG.MERGE_WITHIN_MS > 0 &&
+      reason !== 'forced_end' &&
+      reason !== 'max_duration' &&
+      reason !== 'stuck_state';
+
+    if (shouldDelay) {
+      if (voiceSession.pendingStopTimer) {
+        clearTimeout(voiceSession.pendingStopTimer);
+      }
+      voiceSession.pendingStopTimer = setTimeout(() => {
+        finalizeSpeechEnd().catch((error) =>
+          console.error('[Voice Mode] Failed to finalize speech end after delay:', error)
+        );
+      }, VAD_CONFIG.MERGE_WITHIN_MS);
+    } else {
+      await finalizeSpeechEnd();
     }
   } else if (event.type === 'error') {
     console.error('[Voice Mode] VAD error:', event.data);
@@ -594,6 +704,8 @@ export async function startVoiceSession() {
 
       // CRITICAL: Route timeline marker to the tab where recording started
       const targetTabId = voiceSession.recordingContext?.tabId || voiceSession.tabId;
+      const contextVideoDbId = voiceSession.recordingContext?.videoDbId ?? null;
+      const contextTimestamp = voiceSession.recordingContext?.timestamp ?? null;
 
       if (targetTabId) {
         console.log('[Voice Mode] Routing timeline marker to recording tab:', targetTabId);
@@ -608,6 +720,18 @@ export async function startVoiceSession() {
         });
       } else {
         console.warn('[Voice Mode] No target tab for timeline marker, note:', payload.id);
+      }
+
+      if (routeNoteToSidePanel && targetTabId) {
+        const noteForPanel = {
+          ...payload,
+          video_id: payload.video_id ?? contextVideoDbId ?? payload.videoDbId ?? null,
+        };
+        routeNoteToSidePanel(targetTabId, noteForPanel, {
+          source: 'voice_mode',
+          videoDbId: noteForPanel.video_id ?? contextVideoDbId ?? null,
+          timestamp: contextTimestamp,
+        });
       }
 
       // Clear recording context now that note has been delivered
@@ -643,6 +767,8 @@ export async function startVoiceSession() {
       minSilenceDurationMs: VAD_CONFIG.MIN_SILENCE_DURATION_MS,
       sileroConfidence: VAD_CONFIG.START_THRESHOLD,
       sileroNegativeThreshold: VAD_CONFIG.END_THRESHOLD,
+      probSmoothingFrames: VAD_CONFIG.PROB_SMOOTHING_FRAMES,
+      silenceGateMs: VAD_CONFIG.SILENCE_GATE_MS,
     };
 
     // Start VAD in offscreen
@@ -675,16 +801,14 @@ export async function startVoiceSession() {
     voiceSession.vadEnabled = true;
     voiceSession.status = 'observing';
     resetVoiceTelemetry();
+    voiceSession.pendingStopTimer = null;
+    voiceSession.firstSpeechGuardStartedAt = Date.now();
+    voiceSession.firstSpeechGuardLastReason = null;
     broadcastVoiceStatus();
     console.log('[Voice Mode] Session active with persistent audio channel');
 
-    // Auto-start behavior: Stop session if no speech detected
-    voiceSession.firstSpeechTimeout = setTimeout(async () => {
-      if (voiceSession.telemetry.speechDetections === 0) {
-        console.log('[Voice Mode] No speech detected in first', VOICE_SESSION_CONFIG.FIRST_SPEECH_TIMEOUT_MS / 1000, 'seconds - auto-stopping');
-        await stopVoiceSession();
-      }
-    }, VOICE_SESSION_CONFIG.FIRST_SPEECH_TIMEOUT_MS);
+    // Auto-start guard: allow user time to navigate before first speech
+    scheduleFirstSpeechGuard('session_start');
   } catch (error) {
     console.error('[Voice Mode] Failed to start session:', error);
     // Clean up on error
@@ -748,10 +872,18 @@ export async function stopVoiceSession() {
     voiceSession.recordingContextTimeout = null;
   }
 
+  if (voiceSession.pendingStopTimer) {
+    clearTimeout(voiceSession.pendingStopTimer);
+    voiceSession.pendingStopTimer = null;
+  }
+
   if (voiceSession.firstSpeechTimeout) {
     clearTimeout(voiceSession.firstSpeechTimeout);
     voiceSession.firstSpeechTimeout = null;
   }
+
+  voiceSession.firstSpeechGuardStartedAt = null;
+  voiceSession.firstSpeechGuardLastReason = null;
 
   clearVoiceResumeTimer();
 

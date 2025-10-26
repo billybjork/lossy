@@ -226,13 +226,10 @@ class LiveWaveform {
 
     this.active = false;
     this.processing = false;
-    this.audioContext = null;
-    this.analyser = null;
-    this.microphone = null;
     this.animationFrame = null;
     this.dataArray = null;
     this.history = [];
-    this.mediaStream = null;
+    this.currentAudioLevel = 0;
 
     this.setupCanvas();
   }
@@ -253,26 +250,38 @@ class LiveWaveform {
     if (this.active) return;
 
     try {
-      this.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      this.analyser = this.audioContext.createAnalyser();
-      this.analyser.fftSize = this.options.fftSize;
-
-      this.microphone = this.audioContext.createMediaStreamSource(this.mediaStream);
-      this.microphone.connect(this.analyser);
-
-      const bufferLength = this.analyser.frequencyBinCount;
+      // Initialize dataArray for external audio level data
+      // We don't need getUserMedia anymore - audio levels come from offscreen document
+      const bufferLength = this.options.fftSize / 2; // Match analyser.frequencyBinCount
       this.dataArray = new Uint8Array(bufferLength);
 
       this.active = true;
       this.processing = false;
       this.history = [];
+      this.currentAudioLevel = 0;
 
       this.draw();
+      console.log('[Waveform] Started with external audio data (no mic access)');
     } catch (error) {
       console.error('Failed to start waveform:', error);
       throw error;
+    }
+  }
+
+  /**
+   * Update waveform with external audio level data.
+   * Called when receiving audio_level messages from offscreen document.
+   * @param {number} level - Audio level 0-255
+   */
+  updateAudioLevel(level) {
+    if (!this.active) return;
+
+    this.currentAudioLevel = level;
+
+    // Fill dataArray with the current level to simulate analyser behavior
+    // This creates a uniform frequency response which works well for voice visualization
+    for (let i = 0; i < this.dataArray.length; i++) {
+      this.dataArray[i] = level;
     }
   }
 
@@ -284,25 +293,14 @@ class LiveWaveform {
       this.animationFrame = null;
     }
 
-    if (this.microphone) {
-      this.microphone.disconnect();
-      this.microphone = null;
-    }
-
-    if (this.mediaStream) {
-      this.mediaStream.getTracks().forEach((track) => track.stop());
-      this.mediaStream = null;
-    }
-
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
+    // No need to clean up mic/audio resources - we don't request them anymore
 
     this.active = false;
     this.processing = false;
+    this.currentAudioLevel = 0;
 
     this.clearCanvas();
+    console.log('[Waveform] Stopped');
   }
 
   setProcessing(processing) {
@@ -314,7 +312,8 @@ class LiveWaveform {
 
     this.animationFrame = requestAnimationFrame(() => this.draw());
 
-    this.analyser.getByteFrequencyData(this.dataArray);
+    // dataArray is now updated externally via updateAudioLevel()
+    // No need to call analyser.getByteFrequencyData()
 
     this.clearCanvas();
 
@@ -406,6 +405,16 @@ class LiveWaveform {
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 }
+
+// Listen for audio level updates from offscreen document
+chrome.runtime.onMessage.addListener((message) => {
+  if (message.action === 'audio_level') {
+    // Update waveform with external audio level data
+    if (waveform && waveform.active) {
+      waveform.updateAudioLevel(message.level);
+    }
+  }
+});
 
 // Removed: Manual recording button and toggleRecording function (replaced by voice mode toggle in main UI)
 // recordBtn.addEventListener('click', toggleRecording);
@@ -1087,6 +1096,38 @@ function storeNoteInCache(videoDbId, noteData) {
   enforceNoteLimits(videoDbId);
   return { added: true, count: updated.length };
 }
+
+chrome.runtime.onMessage.addListener((message) => {
+  if (message?.action !== 'note_created' || !message.note) {
+    return;
+  }
+
+  const incomingNote = {
+    ...message.note,
+  };
+
+  if (!incomingNote.video_id && message.videoDbId) {
+    incomingNote.video_id = message.videoDbId;
+  }
+
+  const videoId = incomingNote.video_id;
+  if (!videoId) {
+    console.warn('[SidePanel] Dropping note without video_id from bridge');
+    return;
+  }
+
+  const { added } = storeNoteInCache(videoId, incomingNote);
+
+  if (displayedVideoDbId === videoId) {
+    addTranscript(incomingNote, { skipCache: true, prepend: true });
+  } else if (added) {
+    console.log(
+      '[SidePanel] Cached bridged note for inactive video',
+      videoId,
+      incomingNote.id
+    );
+  }
+});
 
 async function renderNotesFromCache(videoDbId) {
   cancelScheduledTranscriptClear();

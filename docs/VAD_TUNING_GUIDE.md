@@ -8,30 +8,50 @@ Current defaults in `extension/src/shared/shared-constants.js`:
 
 ```javascript
 export const VAD_CONFIG = {
-  START_THRESHOLD: 0.45,    // Speech start confidence
-  END_THRESHOLD: 0.40,      // Silence detection confidence
-  MIN_SPEECH_DURATION_MS: 250,   // Minimum speech to record
-  MIN_SILENCE_DURATION_MS: 2000, // Silence to end speech
+  START_THRESHOLD: 0.6,         // Speech start confidence (after smoothing)
+  END_THRESHOLD: 0.35,          // Silence detection confidence
+  PRE_ROLL_MS: 500,             // Buffered lead-in captured from the ring buffer
+  POST_PAD_MS: 120,             // Trailing pad appended before transcription
+  MIN_SPEECH_DURATION_MS: 200,  // Minimum speech to record
+  MIN_SILENCE_DURATION_MS: 450, // Silence to end speech
+  MERGE_WITHIN_MS: 250,         // Merge segments separated by tiny pauses
+  MAX_SPEECH_DURATION_MS: 15000,
+  PROB_SMOOTHING_FRAMES: 5,
   // ...
 };
 ```
 
 ## Why These Values?
 
-### START_THRESHOLD: 0.45
-**More sensitive than Silero default (0.50)** to catch speech onset quickly.
-- **Trade-off:** Slightly higher false positive rate (background noise might trigger)
-- **Benefit:** Better UX - doesn't miss speech starts, feels more responsive
+### START_THRESHOLD: 0.60
+Raised onset confidence paired with a five-frame moving average. This keeps the detector stable in noisy rooms while the pre-roll buffer guarantees we still capture the beginning of each utterance.
+- **Trade-off:** Slightly slower to trigger if smoothing window is large.
+- **Benefit:** Dramatically fewer false wakes without clipping leading syllables.
 
-### END_THRESHOLD: 0.40
-**Tighter than Silero default (0.35)** for cleaner speech boundary detection.
-- **Trade-off:** May cut off very quiet speech endings
-- **Benefit:** Reduces chance of VAD staying stuck in "maybe_silence" state
+### END_THRESHOLD: 0.35
+Lower release threshold widens hysteresis so we stay in the speech state once we are confident.
+- **Trade-off:** Can linger for ~50–100 ms after speech stops.
+- **Benefit:** Prevents flicker between `speech` and `maybe_silence`, which reduces double-segmenting.
 
-### MIN_SILENCE_DURATION_MS: 2000
-**2 seconds tolerance** for natural pauses (breathing, thinking).
-- **Trade-off:** Longer recordings if you pause mid-sentence
-- **Benefit:** Prevents premature speech_end during natural pauses
+### PRE_ROLL_MS: 500
+Half a second of audio is always buffered ahead of time. When speech starts we prepend this slice so even soft consonants are preserved.
+- **Trade-off:** Requires a ring buffer, but memory cost is tiny (~32 KB).
+- **Benefit:** No more missing the start of phrases when the model ramps up.
+
+### POST_PAD_MS: 120
+We delay finalisation briefly and append the extra audio before transcription. This keeps trailing plosives or sibilants intact.
+
+### MIN_SILENCE_DURATION_MS: 650
+Slightly longer hangover prevents mid-sentence truncation. Combined with the silence gate (below) it keeps the detector confident through natural gaps.
+
+### MERGE_WITHIN_MS: 250
+Brief silence (<250 ms) between detections no longer splits segments—the background worker delays the stop call for this window.
+
+### PROB_SMOOTHING_FRAMES: 5
+Moving average across the last five frames smooths Silero's confidence curve and enables the higher start threshold.
+
+### SILENCE_GATE_MS: 120
+Requires ~120 ms of consistently low confidence before we even start counting silence. This guards against brief confidence dips in the middle of an utterance.
 
 ## Tuning Scenarios
 
@@ -231,13 +251,18 @@ extension/src/shared/shared-constants.js
 If you break something, restore original values:
 ```javascript
 export const VAD_CONFIG = {
-  START_THRESHOLD: 0.45,
-  END_THRESHOLD: 0.40,
-  MIN_SPEECH_DURATION_MS: 250,
-  MIN_SILENCE_DURATION_MS: 2000,
+  START_THRESHOLD: 0.6,
+  END_THRESHOLD: 0.35,
+  PRE_ROLL_MS: 500,
+  POST_PAD_MS: 120,
+  MIN_SPEECH_DURATION_MS: 200,
+  MIN_SILENCE_DURATION_MS: 650,
+  MERGE_WITHIN_MS: 250,
   STUCK_STATE_TIMEOUT_MS: 2000,
-  EXTENDED_SILENCE_MULTIPLIER: 1.5,
-  MAX_SPEECH_DURATION_MS: 60000,
+  EXTENDED_SILENCE_MULTIPLIER: 3,
+  MAX_SPEECH_DURATION_MS: 15000,
+  PROB_SMOOTHING_FRAMES: 5,
+  SILENCE_GATE_MS: 120,
   MAX_VAD_RESTART_ATTEMPTS: 3,
 };
 ```
