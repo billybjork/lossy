@@ -743,6 +743,7 @@ export async function startVoiceSession() {
 
     voiceSession.socket = new SocketConstructor('ws://localhost:4000/socket', {
       params: socketParams, // {token: "jwt_here"}
+      transport: WebSocket, // Force WebSocket-only (no DOM-based fallbacks like LongPoll)
     });
     voiceSession.socket.connect();
 

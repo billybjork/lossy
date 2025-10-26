@@ -48,6 +48,7 @@ export async function getOrCreateSocket() {
 
     socket = new Socket('ws://localhost:4000/socket', {
       params: socketParams, // {token: "jwt_here"}
+      transport: WebSocket, // Force WebSocket-only (no DOM-based fallbacks)
     });
     socket.connect();
   }
