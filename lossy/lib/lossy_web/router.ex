@@ -52,6 +52,12 @@ defmodule LossyWeb.Router do
 
       live_dashboard "/dashboard", metrics: LossyWeb.Telemetry
       forward "/mailbox", Plug.Swoosh.MailboxPreview
+
+      # Dev-only authentication for testing extension
+      get "/auth", LossyWeb.DevAuthController, :index
+      post "/auth/login", LossyWeb.DevAuthController, :create
+      get "/auth/success", LossyWeb.DevAuthController, :success
+      get "/auth/logout", LossyWeb.DevAuthController, :delete
     end
   end
 end
