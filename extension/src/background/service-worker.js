@@ -12,6 +12,13 @@ if (typeof document === 'undefined') {
     removeEventListener: () => {},
     hidden: false,
     visibilityState: 'visible',
+    getElementsByTagName: () => [], // Return empty array (no DOM elements in service worker)
+    querySelector: () => null,
+    querySelectorAll: () => [],
+    createElement: () => ({}), // Return empty object (won't be used)
+    createTextNode: () => ({}),
+    head: {},
+    body: {},
   };
 }
 
