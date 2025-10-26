@@ -3,6 +3,18 @@
 // Sprint 03.5: Tab Management
 // Sprint 10: Always-On Voice Mode Audio
 
+// Polyfill for Phoenix Socket library in service worker context
+// Phoenix.js was designed for browsers and tries to access DOM globals
+// We provide minimal mocks since service workers don't have a DOM
+if (typeof document === 'undefined') {
+  globalThis.document = {
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    hidden: false,
+    visibilityState: 'visible',
+  };
+}
+
 import { Socket } from 'phoenix';
 import { TabManager } from './tab-manager.js';
 import { MessageRouter } from './message-router.js';
