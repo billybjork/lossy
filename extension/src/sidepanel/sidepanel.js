@@ -1554,8 +1554,9 @@ chrome.runtime.onMessage.addListener((message) => {
   if (message.action === 'voice_status_update') {
     updateVoiceStatus(message.status, message.telemetry, message.errorMessage);
 
-    // If error occurred, disable the toggle
-    if (message.status === 'error') {
+    // If error or idle occurred, disable the toggle
+    // This handles both explicit errors and automatic shutdown (e.g., inactivity timeout)
+    if (message.status === 'error' || message.status === 'idle') {
       voiceModeToggleMain.classList.remove('active');
       setVoiceModeEnabled(false).catch((err) => {
         console.error('[Voice Mode] Failed to update persisted state:', err);
