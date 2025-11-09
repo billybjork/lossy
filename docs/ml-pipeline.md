@@ -20,13 +20,13 @@ This document covers all machine learning and computer vision decisions for Loss
 
 ### MVP Strategy
 
-**Run ALL ML in the cloud** (Replicate):
+**Run ALL ML in the cloud** (Replicate to start):
 - Simpler deployment and debugging
 - Single round-trip for complete text detection
-- Focus on getting core UX working first
+- Predictable infrastructure while the MVP ships
 
 **Roadmap**:
-- **v2**: Move text detection to local (ONNX Runtime Web + WebGPU)
+- **v2**: Allow the extension to post optional text-region payloads (ONNX Runtime Web + WebGPU) while keeping cloud detection as default
 - **v3**: Explore local lightweight inpainting for small edits
 
 This keeps concurrency and pipeline complexity in Elixir (where it's easier) early on.
@@ -119,6 +119,20 @@ Convert **DBNet with MobileNet backbone** to ONNX:
 5. Composite patch back into working image
 6. Render new text on top
 ```
+
+**Mask Padding Strategy**:
+Padding is calculated dynamically based on font size to balance context with precision:
+```elixir
+padding = clamp(font_size * multiplier, min, max)
+# Default: multiplier=0.4, min=6px, max=24px
+```
+
+This ensures:
+- Small text gets minimal padding (preserves details)
+- Large headings get sufficient context (better inpainting)
+- Never over-erases backgrounds
+
+**Configuration**: Padding parameters are tunable. See [Configuration](configuration.md#ml-pipeline-settings) for details.
 
 ---
 
@@ -255,8 +269,10 @@ For each captured document:
 ### When to Upscale First (Fallback)
 
 Upscale **before** detection if:
-- Image is very small (<500px) and detection fails or is unreliable
+- Image is very small (shortest dimension < configured threshold, default 500px) and detection may be unreliable
 - User explicitly requests "HD mode" before editing
+
+**Configuration**: The pre-upscale threshold is configurable via `config :lossy, :ml_pipeline, pre_upscale_min_dimension: 500`. See [Configuration](configuration.md) for details.
 
 **Fallback Path**:
 ```

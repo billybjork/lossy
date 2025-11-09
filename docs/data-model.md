@@ -30,10 +30,12 @@ Represents one captured image and its editing session.
 - `id` (UUID, primary key)
 - `user_id` (UUID, foreign key → User)
 - `source_url` (string) - The web page URL where image was captured
-- `image_source` (enum: `direct_url` | `screenshot`) - How the image was obtained
-- `original_image_path` (string) - Path/URL to the unmodified source image
-- `working_image_path` (string) - Path/URL to the current composited image with edits
-- `status` (enum: `pending_detection` | `ready` | `error`) - Document processing state
+- `capture_mode` (enum: `direct_asset` | `screenshot` | `composited_region`) - How the image was obtained
+- `dimensions` (JSON: `{width, height}`) - Pixel dimensions at capture time
+- `original_asset_id` (UUID, foreign key → Asset) - Pointer to stored original image
+- `working_asset_id` (UUID, foreign key → Asset) - Pointer to current composited image with edits
+- `status` (enum: `queued_detection` | `detecting` | `awaiting_edits` | `rendering` | `export_ready` | `error`) - Document processing state
+- `metrics` (JSONB) - Derived data like dominant colors or OCR confidence
 - `created_at` (timestamp)
 - `updated_at` (timestamp)
 
@@ -43,14 +45,39 @@ Represents one captured image and its editing session.
 
 **Status Flow**:
 ```
-pending_detection → ready
-                 ↘ error
+queued_detection → detecting → awaiting_edits → rendering → export_ready
+                                  ↘ error
 ```
 
+**State Transition Validation**: The document changeset should validate that status transitions follow the defined flow. Invalid transitions (e.g., `detecting` → `export_ready`) should be rejected to prevent inconsistent states. Implement this in the changeset with a custom validation function.
+
 **Future Extensions**:
-- Add `width`, `height` for image dimensions
-- Add `metadata` JSON field for EXIF data, capture context, etc.
 - Add `project_id` for organizing multiple documents
+- Add `team_id`/`workspace_id` when collaboration features arrive
+
+---
+
+### Asset
+
+Represents every binary artifact (original capture, working composites, masks, exports).
+
+**Fields**:
+- `id` (UUID, primary key)
+- `document_id` (UUID, foreign key → Document)
+- `kind` (enum: `original` | `working` | `mask` | `inpainted_patch` | `export`)
+- `storage_uri` (string) - Location of the asset (local path, S3 key, etc.)
+- `width` / `height` (integers) - Pixel dimensions
+- `sha256` (string) - Integrity + dedupe
+- `metadata` (JSONB) - EXIF, DPI, color profile, etc.
+- `created_at` / `updated_at`
+
+**Relationships**:
+- `belongs_to :document`
+
+**Usage**:
+- Documents reference the relevant assets via `original_asset_id`/`working_asset_id`
+- Text regions can point at `inpainted_asset_id`
+- Processing jobs can emit new assets without sprinkling raw file paths across tables
 
 ---
 
@@ -61,25 +88,32 @@ Represents one detected text area within a document, including its styling and c
 **Fields**:
 - `id` (UUID, primary key)
 - `document_id` (UUID, foreign key → Document)
-- `bbox` (JSON: `{x, y, w, h}`) - Bounding box in image coordinates (pixels)
+- `bbox` (JSON: `{x, y, w, h}`) - Axis-aligned bounding box in image coordinates
+- `polygon` (JSON: `[{x, y}, ...]`) - Original quadrilateral from detector for rotated text
 - `padding_px` (integer) - Extra expansion for inpainting mask
 - `original_text` (string, nullable) - OCR output (optional, for reference)
-- `current_text` (string) - The text currently displayed (user-editable)
+- `current_text` (string, nullable) - Text currently displayed (defaults to `original_text`)
+- `style_snapshot` (JSONB) - Captures font/color/alignment for undo + auditing
 - `font_family` (string) - e.g., "Inter", "Roboto"
 - `font_weight` (integer) - e.g., 400, 700
 - `font_size_px` (integer) - Font size in pixels
-- `color_rgba` (string) - e.g., "rgba(255,255,255,1.0)"
+- `color_rgba` (string) - e.g., "rgba(255,255,255,1.0)`
 - `alignment` (enum: `left` | `center` | `right`)
-- `inpainted_bg_path` (string, nullable) - Path to the background-only patch (text removed)
+- `inpainted_asset_id` (UUID, foreign key → Asset, nullable) - Background-only patch
 - `z_index` (integer) - Layering order (for future multi-layer support)
-- `status` (enum: `detected` | `inpainted` | `rendered`) - Processing state
+- `status` (enum: `detected` | `inpainting` | `rendered` | `error`) - Processing state
 
 **Relationships**:
 - `belongs_to :document`
 
+**Design Notes**:
+- `bbox` and `polygon`: The axis-aligned bounding box (`bbox`) is derived from the `polygon` for simple rectangular text. For rotated/skewed detections, `polygon` contains the original quadrilateral points from the detector, while `bbox` stores the minimum enclosing rectangle for efficient querying and rendering. Both are stored redundantly for performance.
+- `metrics` JSONB usage: Store expensive-to-compute derived data here (dominant colors, OCR confidence scores, font guesses). Don't use for frequently-updated values or data that should be in dedicated columns.
+
 **Status Flow**:
 ```
-detected → inpainted → rendered
+detected → inpainting → rendered
+           ↘ error
 ```
 
 **Future Extensions**:
@@ -96,9 +130,14 @@ Represents an asynchronous ML or image processing task.
 **Fields**:
 - `id` (UUID, primary key)
 - `document_id` (UUID, foreign key → Document)
+- `subject_type` (enum: `document` | `text_region`)
+- `subject_id` (UUID, foreign key) - Entity this job mutates
 - `type` (enum: `text_detection` | `inpaint_region` | `upscale_document` | `font_guess`)
-- `payload` (JSON) - Job-specific parameters (e.g., region_id, model params)
+- `payload` (JSON) - Job-specific parameters (model version, padding, etc.)
 - `status` (enum: `queued` | `running` | `done` | `error`)
+- `attempts` (integer, default 0)
+- `max_attempts` (integer, default 3)
+- `locked_at` (timestamp, nullable) - For Oban-style locking
 - `error_message` (string, nullable)
 - `created_at` (timestamp)
 - `updated_at` (timestamp)
@@ -119,9 +158,9 @@ queued → running → done
 - `font_guess`: Infer font characteristics from image
 
 **Future Extensions**:
-- Add `priority` field for queue ordering
+- Add `queue`/`priority` fields for multi-tier processing
 - Add `result` JSON field for storing job outputs
-- Add `retries` counter for failure handling
+- Add `scheduled_at` for deferred jobs
 
 ---
 
@@ -130,8 +169,9 @@ queued → running → done
 ```
 User
  └─ has_many Documents
-         ├─ has_many TextRegions
-         └─ has_many ProcessingJobs
+        ├─ has_many Assets
+        ├─ has_many TextRegions
+        └─ has_many ProcessingJobs
 ```
 
 ## Evolution Strategy

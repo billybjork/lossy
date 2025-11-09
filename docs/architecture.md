@@ -12,12 +12,13 @@ Lossy follows a clean separation of concerns with distinct components handling c
 - Highlight/spotlight UI for image selection
 - Element or region capture
 - POST captured image (or URL + bounding box) to backend
+- (Future) Attach detected text polygons when available
 
 **Philosophy**: Act as a thin "imperative shell" at the edges only. All complex logic lives in the backend.
 
 **Key Design Principles**:
 - Keep extension code minimal and focused
-- No ML or heavy processing in the browser
+- Treat ML as cloud-only for the MVP, but keep the capture payload flexible enough to attach pre-detected regions later
 - Simple, focused modules for capture, overlay, and messaging
 - Composition over complex inheritance
 
@@ -81,9 +82,9 @@ See [Editor Implementation Guide](implementation/editor.md) for details.
 - Font detection (optional, heuristic-based initially)
 
 **Deployment Strategy**:
-- **MVP**: All ML runs in the cloud (Replicate)
-- **v2**: Move text detection to local (ONNX Runtime Web + WebGPU)
-- **Later**: Consider self-hosted or fal.ai for performance-critical models
+- **MVP**: All ML runs in the cloud (Replicate/fal) for consistent latency and simpler ops
+- **v2**: Allow the extension to post optional text-region payloads produced locally (ONNX Runtime Web + WebGPU) while keeping the backend detector as the default
+- **Later**: Consider self-hosted or fal.ai for performance-critical models, and evaluate lightweight local inpainting for tiny edits
 
 See [ML Pipeline](ml-pipeline.md) for model choices and [Technology Stack](technology-stack.md) for platform decisions.
 
@@ -197,3 +198,4 @@ User clicks "Download" → Generate final composite image
 5. **Cost-Effective**: Cloud ML for MVP, option to optimize later
 
 See [Design Principles](design-principles.md) for the philosophical foundation of these choices.
+If the extension provides pre-detected regions (future enhancement), those are accepted via `POST /api/captures/:id/text_regions` and will skip the cloud detection job, keeping the rest of the flow unchanged.

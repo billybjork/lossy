@@ -24,9 +24,10 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - [ ] Configure PostgreSQL database
 - [ ] Create migrations for core tables:
   - `users` (minimal, just id for now)
-  - `documents`
-  - `text_regions`
-  - `processing_jobs`
+  - `documents` (with new lifecycle fields, asset references, metrics JSONB)
+  - `assets`
+  - `text_regions` (with polygons + optional text)
+  - `processing_jobs` (subject_type, attempts, locked_at)
 - [ ] Run migrations: `mix ecto.migrate`
 - [ ] Generate context: `Lossy.Documents`
 - [ ] Create schema modules: `Document`, `TextRegion`, `ProcessingJob`
@@ -35,6 +36,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - [ ] Basic REST API: `POST /api/captures`
   - Accept JSON payload
   - Create stubbed `Document` record
+  - Support optional `text_regions` array (for future local detection payloads)
   - Return document id and status
 - [ ] Test with curl or Postman
 
@@ -84,10 +86,14 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
   - Dim page
   - Highlight candidate images
   - Handle click and keyboard selection
+  - Bind/unbind keyboard listeners cleanly to avoid memory leaks
 - [ ] Implement capture logic: `lib/capture.ts`
   - Extract direct image URL when possible
   - Fall back to region screenshot
+  - Crop screenshots using device pixel ratio + scroll offsets
+  - Show inline overlay toast instead of `alert()` when no images are found
   - Send to background script
+- [ ] Define optional local text detection payload contract (`textRegions`) for future WebGPU mode
 
 #### Integration
 - [ ] Wire up extension → backend flow
@@ -127,8 +133,9 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
   - Call ML service
   - Parse results
   - Create `TextRegion` records for each detected box
-  - Update document status to `:ready`
+  - Update document status to `:awaiting_edits`
   - Broadcast update via PubSub
+- [ ] Support bypassing cloud detection when `text_regions` are provided by the extension (future flag but code path ready)
 
 #### LiveView Updates
 - [ ] Subscribe to PubSub updates in `CaptureLive.mount/3`
@@ -173,6 +180,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - [ ] Implement `Lossy.ImageProcessing.TextRenderer`
   - Use Mogrify to render text onto image
   - Support font family, size, weight, color
+- [ ] Wire compositing/text rendering outputs through the `assets` table instead of raw file paths so LiveView always references the latest working asset
 - [ ] Test compositing and text rendering locally
 
 #### Backend Workflow

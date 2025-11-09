@@ -93,7 +93,7 @@ This document covers key technology choices and the rationale behind them.
 
 ### MVP Decision
 
-**Use Replicate** for ML inference.
+**Run every ML stage in the cloud (Replicate to start).**
 
 **Reasoning**:
 - Quick to integrate (HTTP API with SDKs)
@@ -101,6 +101,10 @@ This document covers key technology choices and the rationale behind them.
 - Easy to experiment and swap models
 - Costs are predictable and low during MVP development
 - Focus remains on product, not infrastructure
+
+**Path to local detection**:
+- Keep the `/api/captures` contract flexible so the extension can optionally attach polygon detections later
+- Wrap ML integrations behind behaviours so swapping in fal.ai or a self-hosted service does not leak into business logic
 
 ### Future Considerations
 
@@ -151,7 +155,7 @@ This document covers key technology choices and the rationale behind them.
 
 ### MVP Strategy
 
-**Primary Source**: Google Fonts
+**Primary Source**: Google Fonts bundled via [Fontsource](https://fontsource.org/) (deterministic npm packages for each family)
 
 **Curated Selection**:
 - 50-100 carefully chosen families
@@ -175,20 +179,19 @@ This document covers key technology choices and the rationale behind them.
 
 ### Implementation
 
-1. **Download fonts**:
+1. **Install fonts via Fontsource** during build:
    ```bash
-   # Use google-webfonts-helper or similar
-   curl https://google-webfonts-helper.herokuapp.com/api/fonts/inter
+   pnpm add @fontsource/inter @fontsource/merriweather
    ```
 
 2. **Organize fonts**:
    ```
    priv/static/fonts/
      inter/
-       inter-regular.woff2
-       inter-bold.woff2
+       inter-400.woff2
+       inter-700.woff2
      roboto/
-       roboto-regular.woff2
+       roboto-400.woff2
        ...
    ```
 
@@ -196,14 +199,17 @@ This document covers key technology choices and the rationale behind them.
    ```css
    @font-face {
      font-family: 'Inter';
-     src: url('/fonts/inter/inter-regular.woff2') format('woff2');
+     src: url('/fonts/inter/inter-400.woff2') format('woff2');
      font-weight: 400;
    }
    ```
 
 4. **Server-side access**:
-   - Install TTF versions in system font directory or configure ImageMagick to use custom font path
-   - Or convert WOFF2 to TTF for server use
+   - Keep matching TTF/OTF variants (Fontsource exposes these) for ImageMagick/libvips
+   - Configure ImageMagick `type.xml` or libvips font search path to include `priv/static/fonts`
+
+5. **Future expansion**:
+   - Layer in Adobe’s open-source catalog or licensed libraries once collaboration/premium tiers require more variety; track usage per font via metadata stored alongside the asset
 
 ---
 
@@ -342,6 +348,82 @@ At that point, Ash's benefits (especially AshTypescript for full-stack types) be
 - Authentication (future): Use proven library (phx.gen.auth, Guardian)
 - GDPR compliance: Allow data export and deletion
 - Encrypt sensitive data at rest
+
+---
+
+## Configuration Management
+
+### Backend Configuration Strategy
+
+**Elixir Config Files** (`config/*.exs`):
+- Primary source of truth for operational settings
+- Environment-specific overrides (`dev.exs`, `prod.exs`)
+- Compile-time defaults with runtime overrides via environment variables
+
+**Categories**:
+- **ML Pipeline**: Thresholds, model versions, processing parameters
+- **Job Processing**: Retry logic, timeouts, concurrency limits
+- **Asset Storage**: Backends, paths, size limits, cleanup policies
+- **Image Processing**: Quality settings, dimension limits, defaults
+
+**Environment Variables**:
+- Secrets (API keys, database credentials)
+- Deployment-specific overrides
+- Read via `System.get_env/1` in config files
+
+**Example**:
+```elixir
+config :lossy, :ml_pipeline,
+  pre_upscale_min_dimension: 500,
+  mask_padding_multiplier: 0.4
+
+# Override in production with env var:
+# ML_PIPELINE_PRE_UPSCALE_MIN_DIMENSION=600
+```
+
+### Extension Configuration Strategy
+
+**chrome.storage.sync**:
+- User-facing preferences (UI settings, feature flags)
+- Synced across devices automatically
+- Accessed via async API in extension code
+
+**Feature Flags**:
+- Local detection toggle (future)
+- Experimental features
+- Performance preferences
+
+**Hardcoded Defaults**:
+- Fallbacks when storage is unavailable
+- Defined in `extension/lib/config.ts`
+
+### Configuration Validation
+
+**Backend startup validation**:
+- Check required API keys present
+- Validate numeric ranges make sense
+- Fail fast on misconfiguration
+
+**Extension settings UI**:
+- Validate user input before saving
+- Show helpful error messages
+- Provide sensible defaults
+
+### Config Documentation
+
+**Centralized reference**: [Configuration](configuration.md)
+- Complete catalog of all config values
+- Where each value lives
+- Valid ranges and defaults
+- When to override values
+
+### Best Practices
+
+1. **Never commit secrets** - Use environment variables
+2. **Document all config** - Add comments explaining purpose and valid ranges
+3. **Validate on startup** - Fail fast on invalid config
+4. **Provide defaults** - Every value should have a sensible default
+5. **Separate concerns** - User preferences vs. operational settings vs. secrets
 
 ---
 

@@ -23,6 +23,9 @@ lib/
 │   │   ├── text_region.ex
 │   │   ├── processing_job.ex
 │   │   └── logic.ex                # Pure business logic
+│   ├── assets/                     # Asset storage + helpers
+│   │   ├── asset.ex
+│   │   └── store.ex
 │   ├── ml/                         # ML service integration
 │   │   ├── replicate_client.ex
 │   │   ├── text_detection.ex
@@ -61,7 +64,13 @@ lib/
     "y": 0,
     "width": 800,
     "height": 600
-  }
+  },
+  "text_regions": [
+    {
+      "polygon": [{"x": 10, "y": 20}, ...],
+      "bbox": {"x": 8, "y": 16, "w": 120, "h": 48}
+    }
+  ] // optional: supplied when the extension runs local detection
 }
 ```
 
@@ -72,6 +81,8 @@ lib/
   "status": "pending_detection"
 }
 ```
+
+If `text_regions` are supplied, the backend will persist them immediately and transition the document directly into the `:awaiting_edits` state without enqueueing the cloud detection job.
 
 **Implementation** (`capture_controller.ex`):
 
@@ -134,7 +145,7 @@ defmodule Lossy.Documents do
 
   def get_document(id) do
     Repo.get(Document, id)
-    |> Repo.preload([:text_regions, :processing_jobs])
+    |> Repo.preload([:text_regions, :processing_jobs, :original_asset, :working_asset])
   end
 
   ## Text detection
@@ -142,10 +153,13 @@ defmodule Lossy.Documents do
   def enqueue_text_detection(%Document{} = document) do
     {:ok, job} = create_processing_job(%{
       document_id: document.id,
+      subject_type: :document,
       type: :text_detection,
       status: :queued,
       payload: %{}
     })
+
+    update_document_status(document, :queued_detection)
 
     # Spawn async task
     Task.Supervisor.start_child(Lossy.TaskSupervisor, fn ->
@@ -158,8 +172,11 @@ defmodule Lossy.Documents do
   defp execute_text_detection(%ProcessingJob{} = job) do
     job = mark_job_running(job)
     document = get_document(job.document_id)
+    update_document_status(document, :detecting)
 
-    case Lossy.ML.TextDetection.detect(document.original_image_path) do
+    original_path = Lossy.Assets.local_path(document.original_asset)
+
+    case Lossy.ML.TextDetection.detect(original_path) do
       {:ok, regions} ->
         Enum.each(regions, fn region_data ->
           create_text_region(%{
@@ -175,7 +192,7 @@ defmodule Lossy.Documents do
         end)
 
         mark_job_done(job)
-        update_document_status(document, :ready)
+        update_document_status(document, :awaiting_edits)
         broadcast_document_updated(document)
 
       {:error, reason} ->
@@ -188,6 +205,8 @@ defmodule Lossy.Documents do
   def inpaint_region(%TextRegion{} = region) do
     {:ok, job} = create_processing_job(%{
       document_id: region.document_id,
+      subject_type: :text_region,
+      text_region_id: region.id,
       type: :inpaint_region,
       status: :queued,
       payload: %{region_id: region.id}
@@ -203,33 +222,43 @@ defmodule Lossy.Documents do
   defp execute_inpainting(%ProcessingJob{} = job, %TextRegion{} = region) do
     job = mark_job_running(job)
     document = get_document(region.document_id)
+    update_text_region(region, %{status: :inpainting})
 
     # Calculate inpaint region (bbox + padding)
     inpaint_bbox = Logic.calculate_inpaint_region(region, 10)
 
-    case Lossy.ML.Inpainting.inpaint(document.original_image_path, inpaint_bbox) do
+    original_path = Lossy.Assets.local_path(document.original_asset)
+
+    case Lossy.ML.Inpainting.inpaint(original_path, inpaint_bbox) do
       {:ok, inpainted_patch_path} ->
         # Update region
+        {:ok, inpainted_asset} =
+          Lossy.Assets.create_inpainted_patch(region, inpainted_patch_path, inpaint_bbox)
+
         update_text_region(region, %{
-          inpainted_bg_path: inpainted_patch_path,
-          status: :inpainted
+          inpainted_asset_id: inpainted_asset.id
         })
 
         # Composite into working image
-        {:ok, working_path} = Lossy.ImageProcessing.Compositor.composite_patch(
-          document.working_image_path,
-          inpainted_patch_path,
-          inpaint_bbox
-        )
+        working_path = Lossy.Assets.local_path(document.working_asset)
+
+        {:ok, updated_path} =
+          Lossy.ImageProcessing.Compositor.composite_patch(
+            working_path,
+            inpainted_patch_path,
+            inpaint_bbox
+          )
 
         # Render new text
-        {:ok, final_path} = Lossy.ImageProcessing.TextRenderer.render_text(
-          working_path,
-          region
-        )
+        {:ok, final_path} =
+          Lossy.ImageProcessing.TextRenderer.render_text(
+            updated_path,
+            region
+          )
 
         update_text_region(region, %{status: :rendered})
-        update_document(document, %{working_image_path: final_path})
+        {:ok, working_asset} = Lossy.Assets.replace_working(document, final_path)
+        update_document(document, %{working_asset_id: working_asset.id})
 
         mark_job_done(job)
         broadcast_region_updated(region)
@@ -288,10 +317,13 @@ defmodule Lossy.Documents.Document do
 
   schema "documents" do
     field :source_url, :string
-    field :image_source, Ecto.Enum, values: [:direct_url, :screenshot]
-    field :original_image_path, :string
-    field :working_image_path, :string
-    field :status, Ecto.Enum, values: [:pending_detection, :ready, :error]
+    field :capture_mode, Ecto.Enum, values: [:direct_asset, :screenshot, :composited_region]
+    field :dimensions, :map
+    field :metrics, :map, default: %{}
+    field :status, Ecto.Enum, values: [:queued_detection, :detecting, :awaiting_edits, :rendering, :export_ready, :error]
+
+    belongs_to :original_asset, Lossy.Documents.Asset
+    belongs_to :working_asset, Lossy.Documents.Asset
 
     belongs_to :user, Lossy.Accounts.User
     has_many :text_regions, Lossy.Documents.TextRegion
@@ -302,9 +334,9 @@ defmodule Lossy.Documents.Document do
 
   def changeset(document, attrs) do
     document
-    |> cast(attrs, [:source_url, :image_source, :original_image_path, :working_image_path, :status, :user_id])
-    |> validate_required([:source_url, :image_source, :original_image_path])
-    |> validate_inclusion(:image_source, [:direct_url, :screenshot])
+    |> cast(attrs, [:source_url, :capture_mode, :dimensions, :metrics, :status, :user_id, :original_asset_id, :working_asset_id])
+    |> validate_required([:source_url, :capture_mode, :original_asset_id])
+    |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot, :composited_region])
   end
 end
 ```
@@ -323,17 +355,20 @@ defmodule Lossy.Documents.TextRegion do
 
   schema "text_regions" do
     field :bbox, :map  # %{x: int, y: int, w: int, h: int}
+    field :polygon, {:array, :map}
     field :padding_px, :integer, default: 10
     field :original_text, :string
     field :current_text, :string
+    field :style_snapshot, :map, default: %{}
     field :font_family, :string, default: "Inter"
     field :font_weight, :integer, default: 400
     field :font_size_px, :integer, default: 16
     field :color_rgba, :string, default: "rgba(0,0,0,1)"
     field :alignment, Ecto.Enum, values: [:left, :center, :right], default: :left
-    field :inpainted_bg_path, :string
     field :z_index, :integer, default: 0
-    field :status, Ecto.Enum, values: [:detected, :inpainted, :rendered], default: :detected
+    field :status, Ecto.Enum, values: [:detected, :inpainting, :rendered, :error], default: :detected
+
+    belongs_to :inpainted_asset, Lossy.Documents.Asset
 
     belongs_to :document, Lossy.Documents.Document
 
@@ -342,10 +377,10 @@ defmodule Lossy.Documents.TextRegion do
 
   def changeset(region, attrs) do
     region
-    |> cast(attrs, [:document_id, :bbox, :padding_px, :original_text, :current_text,
-                    :font_family, :font_weight, :font_size_px, :color_rgba, :alignment,
-                    :inpainted_bg_path, :z_index, :status])
-    |> validate_required([:document_id, :bbox, :current_text])
+    |> cast(attrs, [:document_id, :bbox, :polygon, :padding_px, :original_text, :current_text,
+                    :style_snapshot, :font_family, :font_weight, :font_size_px, :color_rgba,
+                    :alignment, :inpainted_asset_id, :z_index, :status])
+    |> validate_required([:document_id, :bbox])
     |> validate_number(:font_size_px, greater_than: 0)
     |> foreign_key_constraint(:document_id)
   end
@@ -366,19 +401,24 @@ defmodule Lossy.Documents.ProcessingJob do
 
   schema "processing_jobs" do
     field :type, Ecto.Enum, values: [:text_detection, :inpaint_region, :upscale_document, :font_guess]
+    field :subject_type, Ecto.Enum, values: [:document, :text_region]
     field :payload, :map
     field :status, Ecto.Enum, values: [:queued, :running, :done, :error]
+    field :attempts, :integer, default: 0
+    field :max_attempts, :integer, default: 3
+    field :locked_at, :utc_datetime
     field :error_message, :string
 
     belongs_to :document, Lossy.Documents.Document
+    belongs_to :text_region, Lossy.Documents.TextRegion
 
     timestamps()
   end
 
   def changeset(job, attrs) do
     job
-    |> cast(attrs, [:document_id, :type, :payload, :status, :error_message])
-    |> validate_required([:document_id, :type, :status])
+    |> cast(attrs, [:document_id, :text_region_id, :subject_type, :type, :payload, :status, :attempts, :max_attempts, :locked_at, :error_message])
+    |> validate_required([:document_id, :subject_type, :type, :status])
     |> foreign_key_constraint(:document_id)
   end
 end
@@ -642,8 +682,8 @@ defmodule Lossy.DocumentsTest do
     test "creates a document with valid attributes" do
       attrs = %{
         source_url: "https://example.com",
-        image_source: :direct_url,
-        original_image_path: "/path/to/image.jpg"
+        capture_mode: :direct_asset,
+        original_asset_id: Ecto.UUID.generate()
       }
 
       assert {:ok, %Document{} = document} = Documents.create_capture(attrs)
@@ -673,8 +713,7 @@ Test full flow:
 
 ```elixir
 config :lossy,
-  ecto_repos: [Lossy.Repo],
-  replicate_api_key: System.get_env("REPLICATE_API_KEY")
+  ecto_repos: [Lossy.Repo]
 
 config :lossy, Lossy.Repo,
   database: "lossy_dev",
@@ -687,9 +726,73 @@ config :lossy, Lossy.PubSub,
   name: Lossy.PubSub,
   adapter: Phoenix.PubSub.PG2
 
-# File uploads
-config :lossy, :uploads_dir, "priv/static/uploads"
+# ML Pipeline Settings
+config :lossy, :ml_pipeline,
+  pre_upscale_min_dimension: 500,
+  pre_upscale_factor: 2.0,
+  mask_padding_multiplier: 0.4,
+  mask_padding_min: 6,
+  mask_padding_max: 24,
+  text_detection_confidence_threshold: 0.7,
+  default_upscale_factor: 4,
+  max_upscale_factor: 8
+
+# Job Processing
+config :lossy, :jobs,
+  default_max_attempts: 3,
+  retry_backoff_base_ms: 1000,
+  retry_backoff_max_ms: 30_000,
+  text_detection_timeout_ms: 60_000,
+  inpainting_timeout_ms: 120_000,
+  upscaling_timeout_ms: 180_000,
+  allow_duplicate_jobs: false
+
+# Asset Storage
+config :lossy, :assets,
+  storage_backend: Lossy.Storage.Local,
+  local_base_path: "priv/static/uploads",
+  max_upload_size_mb: 50,
+  max_dimension_px: 8192,
+  cleanup_working_assets_after_days: 30,
+  cleanup_export_assets_after_days: 7
+
+# Image Processing
+config :lossy, :image_processing,
+  warn_large_image_threshold: 4096,
+  max_canvas_dimension: 8192,
+  export_jpeg_quality: 90,
+  export_png_compression: 6,
+  default_font: "Inter",
+  fallback_fonts: ["Roboto", "Arial", "sans-serif"]
+
+# External Services (secrets via env vars)
+config :lossy, :ml_services,
+  replicate_api_key: System.get_env("REPLICATE_API_KEY"),
+  fal_api_key: System.get_env("FAL_API_KEY"),
+  paddleocr_version: "version-id-here",
+  lama_version: "version-id-here",
+  real_esrgan_version: "version-id-here"
 ```
+
+**Accessing config in code**:
+
+```elixir
+defmodule Lossy.ML.Config do
+  def pre_upscale_threshold do
+    Application.get_env(:lossy, :ml_pipeline)[:pre_upscale_min_dimension]
+  end
+
+  def calculate_mask_padding(font_size) do
+    ml_config = Application.get_env(:lossy, :ml_pipeline)
+    padding = font_size * ml_config[:mask_padding_multiplier]
+    clamp(padding, ml_config[:mask_padding_min], ml_config[:mask_padding_max])
+  end
+
+  defp clamp(value, min, max), do: value |> max(min) |> min(max)
+end
+```
+
+**See also**: [Configuration Reference](../configuration.md) for complete documentation of all config values.
 
 ---
 
@@ -714,3 +817,55 @@ config :lossy, :uploads_dir, "priv/static/uploads"
 ## Next Steps
 
 See [Editor Implementation](editor.md) for LiveView details and [Roadmap](roadmap.md) for implementation phases.
+
+### Asset Schema
+
+**File**: `lib/lossy/documents/asset.ex`
+
+```elixir
+defmodule Lossy.Documents.Asset do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+
+  schema "assets" do
+    field :kind, Ecto.Enum, values: [:original, :working, :mask, :inpainted_patch, :export]
+    field :storage_uri, :string
+    field :width, :integer
+    field :height, :integer
+    field :sha256, :string
+    field :metadata, :map, default: %{}
+
+    belongs_to :document, Lossy.Documents.Document
+
+    timestamps()
+  end
+
+  def changeset(asset, attrs) do
+    asset
+    |> cast(attrs, [:document_id, :kind, :storage_uri, :width, :height, :sha256, :metadata])
+    |> validate_required([:document_id, :kind, :storage_uri])
+  end
+end
+```
+
+Pair this with a dedicated module:
+
+```elixir
+defmodule Lossy.Assets do
+  alias Lossy.Documents.{Asset, Document}
+
+  def local_path(%Asset{storage_uri: "file://" <> path}), do: path
+  def local_path(asset), do: Lossy.Storage.download(asset)
+
+  def create_inpainted_patch(region, path, bbox) do
+    # Persist metadata + dimensions
+  end
+
+  def replace_working(%Document{} = doc, path) do
+    # Create/update working asset record and return it
+  end
+end
+```

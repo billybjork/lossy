@@ -266,6 +266,19 @@ export class CaptureOverlay {
   private overlay: HTMLDivElement;
   private candidates: CandidateImage[];
   private currentIndex = 0;
+  private handleKeydown = (e: KeyboardEvent) => {
+    if (e.key === 'ArrowRight') {
+      this.currentIndex = (this.currentIndex + 1) % this.candidates.length;
+      this.updateHighlight();
+    } else if (e.key === 'ArrowLeft') {
+      this.currentIndex = (this.currentIndex - 1 + this.candidates.length) % this.candidates.length;
+      this.updateHighlight();
+    } else if (e.key === 'Enter') {
+      this.selectCandidate(this.currentIndex);
+    } else if (e.key === 'Escape') {
+      this.cancel();
+    }
+  };
 
   constructor(candidates: CandidateImage[]) {
     this.candidates = candidates;
@@ -282,8 +295,8 @@ export class CaptureOverlay {
       left: 0;
       width: 100vw;
       height: 100vh;
-      background: rgba(0, 0, 0, 0.5);
-      z-index: 999999;
+      background: rgba(0, 0, 0, 0.45);
+      z-index: 2147483647;
       cursor: crosshair;
     `;
 
@@ -292,31 +305,14 @@ export class CaptureOverlay {
   }
 
   private attachEventListeners() {
-    // Highlight on hover
     this.candidates.forEach((candidate, index) => {
       const highlight = this.createHighlight(candidate.rect);
 
-      highlight.addEventListener('click', () => {
-        this.selectCandidate(index);
-      });
-
+      highlight.addEventListener('click', () => this.selectCandidate(index));
       this.overlay.appendChild(highlight);
     });
 
-    // Keyboard navigation
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowRight') {
-        this.currentIndex = (this.currentIndex + 1) % this.candidates.length;
-        this.updateHighlight();
-      } else if (e.key === 'ArrowLeft') {
-        this.currentIndex = (this.currentIndex - 1 + this.candidates.length) % this.candidates.length;
-        this.updateHighlight();
-      } else if (e.key === 'Enter') {
-        this.selectCandidate(this.currentIndex);
-      } else if (e.key === 'Escape') {
-        this.cancel();
-      }
-    });
+    document.addEventListener('keydown', this.handleKeydown, true);
   }
 
   private createHighlight(rect: DOMRect): HTMLDivElement {
@@ -348,7 +344,7 @@ export class CaptureOverlay {
 
   private cleanup() {
     this.overlay.remove();
-    document.removeEventListener('keydown', this.handleKeydown);
+    document.removeEventListener('keydown', this.handleKeydown, true);
   }
 }
 ```
@@ -383,27 +379,34 @@ function isDirectImage(candidate: CandidateImage): boolean {
 }
 
 async function captureRegionScreenshot(rect: DOMRect): Promise<string> {
-  // Request screenshot from background script
   const response = await chrome.runtime.sendMessage({
-    type: 'CAPTURE_TAB',
-    rect: rectToJSON(rect)
+    type: 'CAPTURE_TAB'
   });
 
-  // Crop to region using canvas
   const canvas = document.createElement('canvas');
-  canvas.width = rect.width;
-  canvas.height = rect.height;
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width = Math.round(rect.width * dpr);
+  canvas.height = Math.round(rect.height * dpr);
 
   const ctx = canvas.getContext('2d')!;
   const img = new Image();
   img.src = response.dataUrl;
 
-  await new Promise(resolve => img.onload = resolve);
+  await new Promise(resolve => (img.onload = resolve));
+
+  const viewX = Math.max(rect.left + window.scrollX, 0);
+  const viewY = Math.max(rect.top + window.scrollY, 0);
 
   ctx.drawImage(
     img,
-    rect.left, rect.top, rect.width, rect.height,
-    0, 0, rect.width, rect.height
+    Math.round(viewX * dpr),
+    Math.round(viewY * dpr),
+    Math.round(rect.width * dpr),
+    Math.round(rect.height * dpr),
+    0,
+    0,
+    Math.round(rect.width * dpr),
+    Math.round(rect.height * dpr)
   );
 
   return canvas.toDataURL('image/png');
@@ -438,7 +441,7 @@ async function startCapture() {
   const candidates = findCandidateImages();
 
   if (candidates.length === 0) {
-    alert('No images found on this page');
+    showOverlayToast('No sizeable images detected. Try scrolling or choose a different page.');
     return;
   }
 
@@ -447,6 +450,25 @@ async function startCapture() {
 
   // Wait for user selection...
   // (handled by overlay event listeners)
+}
+
+function showOverlayToast(message: string) {
+  const toast = document.createElement('div');
+  toast.textContent = message;
+  toast.style.cssText = `
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(31, 41, 55, 0.9);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 6px;
+    z-index: 2147483647;
+    font-family: sans-serif;
+  `;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 2500);
 }
 ```
 
@@ -466,12 +488,19 @@ export interface CapturePayload {
     width: number;
     height: number;
   };
+  textRegions?: DetectedRegion[]; // Optional: local detection payload
 }
 
 export interface CaptureResponse {
   success: boolean;
   captureId?: string;
   error?: string;
+}
+
+export interface DetectedRegion {
+  bbox: { x: number; y: number; width: number; height: number };
+  polygon: Array<{ x: number; y: number }>;
+  confidence?: number;
 }
 ```
 
@@ -531,6 +560,12 @@ Test on variety of sites:
 - News sites with varied layouts
 - Sites with background images
 - Sites with transformed images (rotated, scaled)
+
+### Optional Local Text Detection (Post-MVP)
+
+- Bundle a quantized DBNet/PP-OCR detector via ONNX Runtime Web + WebGPU
+- On successful inference, attach `textRegions` to the `CapturePayload` so the backend can skip cloud detection
+- Feature flag this behavior (e.g., "Instant Text Preview" setting) and fall back to cloud detection if inference fails or the model exceeds timeouts
 
 ---
 
