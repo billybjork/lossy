@@ -1,0 +1,242 @@
+# Data Model
+
+> "Your data model is your destiny."
+
+The data model is the foundation of Lossy. It's designed to be:
+- **Small**: A focused set of stable, composable entities
+- **Evolvable**: New features fit as "more of the same", not ad-hoc flags
+- **Clear**: Each entity has a single, well-defined purpose
+
+## Core Entities
+
+### User
+
+Basic user identity for associating captures with accounts.
+
+**Fields**:
+- `id` (UUID, primary key)
+
+**Future**:
+- Authentication fields (email, password hash, etc.)
+- Preferences, quotas, plan information
+
+---
+
+### Document (aka Capture)
+
+Represents one captured image and its editing session.
+
+**Fields**:
+- `id` (UUID, primary key)
+- `user_id` (UUID, foreign key → User)
+- `source_url` (string) - The web page URL where image was captured
+- `image_source` (enum: `direct_url` | `screenshot`) - How the image was obtained
+- `original_image_path` (string) - Path/URL to the unmodified source image
+- `working_image_path` (string) - Path/URL to the current composited image with edits
+- `status` (enum: `pending_detection` | `ready` | `error`) - Document processing state
+- `created_at` (timestamp)
+- `updated_at` (timestamp)
+
+**Relationships**:
+- `has_many :text_regions`
+- `has_many :processing_jobs`
+
+**Status Flow**:
+```
+pending_detection → ready
+                 ↘ error
+```
+
+**Future Extensions**:
+- Add `width`, `height` for image dimensions
+- Add `metadata` JSON field for EXIF data, capture context, etc.
+- Add `project_id` for organizing multiple documents
+
+---
+
+### TextRegion
+
+Represents one detected text area within a document, including its styling and current state.
+
+**Fields**:
+- `id` (UUID, primary key)
+- `document_id` (UUID, foreign key → Document)
+- `bbox` (JSON: `{x, y, w, h}`) - Bounding box in image coordinates (pixels)
+- `padding_px` (integer) - Extra expansion for inpainting mask
+- `original_text` (string, nullable) - OCR output (optional, for reference)
+- `current_text` (string) - The text currently displayed (user-editable)
+- `font_family` (string) - e.g., "Inter", "Roboto"
+- `font_weight` (integer) - e.g., 400, 700
+- `font_size_px` (integer) - Font size in pixels
+- `color_rgba` (string) - e.g., "rgba(255,255,255,1.0)"
+- `alignment` (enum: `left` | `center` | `right`)
+- `inpainted_bg_path` (string, nullable) - Path to the background-only patch (text removed)
+- `z_index` (integer) - Layering order (for future multi-layer support)
+- `status` (enum: `detected` | `inpainted` | `rendered`) - Processing state
+
+**Relationships**:
+- `belongs_to :document`
+
+**Status Flow**:
+```
+detected → inpainted → rendered
+```
+
+**Future Extensions**:
+- Support for rotated/transformed text (add rotation, skew fields)
+- Support for multi-line text (add line_height, text_align_vertical)
+- Rich styling (shadow, stroke, gradient)
+
+---
+
+### ProcessingJob
+
+Represents an asynchronous ML or image processing task.
+
+**Fields**:
+- `id` (UUID, primary key)
+- `document_id` (UUID, foreign key → Document)
+- `type` (enum: `text_detection` | `inpaint_region` | `upscale_document` | `font_guess`)
+- `payload` (JSON) - Job-specific parameters (e.g., region_id, model params)
+- `status` (enum: `queued` | `running` | `done` | `error`)
+- `error_message` (string, nullable)
+- `created_at` (timestamp)
+- `updated_at` (timestamp)
+
+**Relationships**:
+- `belongs_to :document`
+
+**Status Flow**:
+```
+queued → running → done
+                ↘ error
+```
+
+**Job Types**:
+- `text_detection`: Detect all text regions in a document
+- `inpaint_region`: Remove text from a specific region
+- `upscale_document`: Super-resolution enhancement
+- `font_guess`: Infer font characteristics from image
+
+**Future Extensions**:
+- Add `priority` field for queue ordering
+- Add `result` JSON field for storing job outputs
+- Add `retries` counter for failure handling
+
+---
+
+## Entity Relationships
+
+```
+User
+ └─ has_many Documents
+         ├─ has_many TextRegions
+         └─ has_many ProcessingJobs
+```
+
+## Evolution Strategy
+
+This structure is **composable** and **extensible**:
+
+### Adding Non-Text Layers (v2+)
+
+Introduce a `Layer` table that generalizes `TextRegion`:
+
+```
+Layer
+- id
+- document_id
+- type (enum: text | sticker | shape | filter)
+- position (JSON: x, y, w, h)
+- z_index
+- status
+- layer_data (JSON, type-specific fields)
+```
+
+`TextRegion` can either:
+1. Remain as-is and reference `Layer` via `layer_id`, or
+2. Migrate to become a specialized view/subtype of `Layer`
+
+### Adding Projects/Folders
+
+```
+Project
+- id
+- user_id
+- name
+- created_at
+
+Document gains:
+- project_id (foreign key → Project)
+```
+
+### Adding Collaboration
+
+```
+ProjectMember
+- project_id
+- user_id
+- role (owner | editor | viewer)
+```
+
+### Adding Version History
+
+```
+DocumentVersion
+- id
+- document_id
+- working_image_path
+- version_number
+- created_at
+```
+
+## Database Indexes
+
+**Essential indexes for MVP**:
+- `documents.user_id`
+- `documents.status`
+- `text_regions.document_id`
+- `processing_jobs.document_id`
+- `processing_jobs.status`
+
+**Composite indexes for common queries**:
+- `(document_id, status)` on `text_regions`
+- `(document_id, status)` on `processing_jobs`
+
+## Data Storage Strategy
+
+**Structured Data**: PostgreSQL
+- User accounts, documents, regions, jobs
+- ACID guarantees, rich querying
+
+**File Storage**: S3-compatible (or local file system for MVP)
+- Original images
+- Working/composited images
+- Inpainted patches
+- Exported results
+
+**File Path Convention**:
+```
+/uploads/{user_id}/documents/{document_id}/original.{ext}
+/uploads/{user_id}/documents/{document_id}/working.png
+/uploads/{user_id}/documents/{document_id}/regions/{region_id}/inpainted.png
+```
+
+## Data Lifecycle
+
+1. **Capture**: Create `Document`, store `original_image_path`
+2. **Detection**: Create `ProcessingJob` (text_detection) → Create `TextRegion` records
+3. **Edit**: Update `TextRegion.current_text` → Create `ProcessingJob` (inpaint_region)
+4. **Composite**: Update `Document.working_image_path` with rendered result
+5. **Export**: Generate final PNG from `working_image_path`, optionally upscale
+6. **Cleanup**: (Future) Delete old working files, archive documents
+
+## Why This Model?
+
+1. **Normalized but not over-normalized**: Balances DRY with query simplicity
+2. **Job tracking**: `ProcessingJob` makes async operations visible and debuggable
+3. **Incremental processing**: Each `TextRegion` tracks its own processing state
+4. **Audit trail**: Timestamps on everything
+5. **Extensible**: Clear path to add layers, versions, projects without major refactoring
+
+This model embodies "composition over extension": new features are new entities or new types within existing entities, not scattered flags.
