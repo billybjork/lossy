@@ -15,19 +15,44 @@ chrome.action.onClicked.addListener(() => {
 async function activateCapture() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
-  if (!tab.id || !tab.url) return;
+  if (!tab.id || !tab.url) {
+    console.error('[Lossy] No active tab found');
+    return;
+  }
 
   // Check if URL is valid for content script injection
   if (!isValidUrl(tab.url)) {
-    console.warn('Cannot capture on this page:', tab.url);
+    console.warn('[Lossy] Cannot capture on this page:', tab.url);
     return;
   }
 
   try {
-    // Content script is already loaded via manifest, just send message
-    chrome.tabs.sendMessage(tab.id, { type: 'START_CAPTURE' });
+    // Try to send message to content script
+    console.log('[Lossy] Attempting to communicate with content script...');
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'START_CAPTURE' });
+    console.log('[Lossy] Content script responded:', response);
   } catch (error) {
-    console.error('Failed to send message to content script:', error);
+    // Content script not loaded - inject it programmatically
+    console.log('[Lossy] Content script not found, injecting programmatically...');
+
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        files: ['content/content.js']
+      });
+
+      console.log('[Lossy] Content script injected, retrying...');
+
+      // Wait a moment for the script to initialize
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Try sending message again
+      const response = await chrome.tabs.sendMessage(tab.id, { type: 'START_CAPTURE' });
+      console.log('[Lossy] Content script responded after injection:', response);
+    } catch (injectionError) {
+      console.error('[Lossy] Failed to inject content script:', injectionError);
+      console.error('[Lossy] This page may not allow script injection');
+    }
   }
 }
 
@@ -37,15 +62,42 @@ function isValidUrl(url: string): boolean {
   return !restrictedProtocols.some(protocol => url.startsWith(protocol));
 }
 
-// Listen for captured images from content script
+// Listen for messages from content script
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'IMAGE_CAPTURED') {
+  if (message.type === 'REQUEST_SCREENSHOT') {
+    // Capture screenshot of the active tab
+    captureScreenshot(sender.tab!)
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ error: error.message }));
+    return true;  // Keep channel open for async response
+  } else if (message.type === 'IMAGE_CAPTURED') {
     handleImageCapture(message.payload, sender.tab!)
       .then(sendResponse)
       .catch(error => sendResponse({ error: error.message }));
     return true;  // Keep channel open for async response
   }
 });
+
+async function captureScreenshot(tab: chrome.tabs.Tab) {
+  if (!tab.id) return;
+
+  // Capture visible tab as PNG data URL
+  const imageData = await chrome.tabs.captureVisibleTab(tab.windowId, {
+    format: 'png'
+  });
+
+  // Send screenshot back to content script with error handling
+  try {
+    await chrome.tabs.sendMessage(tab.id, {
+      type: 'SCREENSHOT_CAPTURED',
+      imageData: imageData
+    });
+  } catch (error) {
+    console.error('Failed to send screenshot to content script:', error);
+    // If content script isn't responding, we can't recover from this
+    throw error;
+  }
+}
 
 async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab) {
   // POST to backend API
