@@ -1,95 +1,230 @@
-# Lossy - Next Session Continuation Prompt
+# Lossy - Next Session: Complete Phase 1 Image Selection
 
-## Context
+## Current State
 
-Lossy is a browser extension + Phoenix backend for editing text in captured web images. We've completed Phase 0 (foundational infrastructure) and have a working skeleton.
+Phase 1 is **partially complete**. We have:
 
-## What We've Built (Phase 0 - COMPLETED ✅)
+✅ **Working Infrastructure**
+- Extension: manifest, build system (Vite), keyboard shortcut (Cmd+Shift+L)
+- Background worker: programmatic injection, API integration, tab management
+- Backend: Phoenix API, Asset storage, CORS support, LiveView editor
+- Simple viewport screenshot capture (captures entire visible page)
+- Database: documents, assets, text_regions with stubbed detection
+- Real-time LiveView updates via PubSub
 
-### Phoenix Backend (`lossy/`)
-- **Database**: 5 tables (users, assets, documents, text_regions, processing_jobs) with migrations run successfully
-- **Schemas**: All domain models with validations, relationships, and Document status state machine
-- **Contexts**: `Documents` and `Assets` modules with CRUD operations
-- **API**: `POST /api/captures` endpoint working (tested with curl)
-- **LiveView**: `/capture/:id` route displaying document details
-- **Config**: Full configuration from docs/configuration.md applied
-- **Task.Supervisor**: Set up for async job processing
+✅ **End-to-End Flow (Current)**
+1. Press Cmd+Shift+L on any page
+2. Extension captures entire viewport screenshot
+3. Uploads to backend, creates Document + Asset
+4. Editor opens in new tab with LiveView
+5. After ~1s, 3 stubbed text regions appear (no page reload needed)
+6. Click to select regions, edit text, save to database
 
-### Browser Extension (`extension/`)
-- **Build**: TypeScript + Vite + Manifest V3
-- **Keyboard Shortcut**: Cmd/Ctrl+Shift+L activates capture
-- **Content Script**: Shows overlay, sends capture to API
-- **Background Worker**: Handles shortcuts, API integration, opens editor tab
-- **Working**: Loads in Chrome, activates on web pages, opens editor correctly
+**Latest commit:** `5e2aab3` - "Complete Phase 1: End-to-end screenshot capture and editor"
 
-### Current State
-- Phoenix server: Running at `http://localhost:4000`
-- Extension: Built in `extension/dist/`, loaded in Chrome
-- Git: All changes committed (commit: 9e42a2e)
+## What's Missing: The Real Phase 1 UX
 
-## What's Next (Phase 1)
+According to `docs/implementation/roadmap.md` and `docs/implementation/extension.md`, Phase 1 should have:
 
-According to `docs/implementation/roadmap.md`, Phase 1 focuses on:
+❌ **DOM Scanner** (`extension/lib/dom-scanner.ts`)
+- Find all `<img>` elements on the page
+- Find `<picture>` elements
+- Find elements with CSS `background-image`
+- Filter by minimum size (≥100x100px)
+- Filter by visibility (in viewport, not hidden)
+- Return array of candidate images with bounding rects
 
-1. **Image Capture Flow**
-   - Actually capture screenshots from web pages (HTML2Canvas or native APIs)
-   - Upload image data to backend
-   - Save as Asset records
-   - Associate with Document
+❌ **Selection Overlay UI** (`extension/content/overlay.ts`)
+- Dim entire page with semi-transparent overlay
+- Highlight ALL candidate images with blue borders
+- User clicks an image OR uses arrow keys to navigate
+- Press Enter to select, Escape to cancel
+- Clean event listener management (no memory leaks)
 
-2. **Basic Text Detection (Stubbed)**
-   - For MVP, manually create fake text regions to test the flow
-   - Update Document status: `queued_detection` → `detecting` → `awaiting_edits`
-   - Create TextRegion records with bbox data
+❌ **Smart Capture Logic** (`extension/lib/capture.ts`)
+- **Direct URL extraction**: For normal `<img>` tags, extract `img.currentSrc` or `img.src`
+  - Send URL to backend (faster, better quality than screenshot)
+- **Background image extraction**: Parse CSS `background-image` for URL
+- **Screenshot fallback**: For transformed/rotated images or when direct URL unavailable
+  - Crop screenshot to selected region only
+  - Handle `devicePixelRatio` correctly
+  - Account for scroll position
+- Return `CapturePayload` with either `imageUrl` OR `imageData`
 
-3. **LiveView Editor UI (Basic)**
-   - Display the captured image
-   - Show text region overlays (rectangles showing detected text)
-   - Basic text editing interface (just update `current_text` field)
-   - Save changes back to database
+❌ **Edge Cases**
+- No images found: show friendly toast message
+- CORS issues: gracefully fall back to screenshot
+- Very large images: handle appropriately
+- Test on diverse websites
 
-4. **Working End-to-End Flow**
-   - Capture image from web → Upload → Create document → Show in editor → Edit text → See changes
+## Goal for This Session
+
+**Implement Option A: Full Phase 1 completion (5-9 hours)**
+
+Build proper image selection flow matching the design docs:
+1. User presses Cmd+Shift+L
+2. Extension scans DOM for candidate images
+3. Page dims, all candidate images highlighted with borders
+4. User selects image (click or keyboard)
+5. Extension intelligently captures (URL or cropped screenshot)
+6. Uploads to backend
+7. Editor opens with selected image
+
+## Implementation Plan
+
+### 1. Create DOM Scanner (1-2 hours)
+
+**File**: `extension/lib/dom-scanner.ts`
+
+```typescript
+interface CandidateImage {
+  element: HTMLElement;
+  type: 'img' | 'picture' | 'background';
+  rect: DOMRect;
+  imageUrl?: string;
+}
+
+export function findCandidateImages(): CandidateImage[]
+```
+
+**Requirements**:
+- Find `<img>` elements: use `document.querySelectorAll('img')`
+- Find `<picture>` elements: extract the active `<img>` child
+- Find background images: scan computed styles for `background-image`
+- Filter: `rect.width >= 100 && rect.height >= 100`
+- Filter: element is visible (not `display: none`, has dimensions)
+- Extract URLs where possible
+
+**Reference**: `docs/implementation/extension.md` lines 184-260
+
+### 2. Create Selection Overlay (2-3 hours)
+
+**File**: `extension/content/overlay.ts`
+
+```typescript
+export class CaptureOverlay {
+  constructor(candidates: CandidateImage[]);
+  // Show overlay, handle selection, cleanup
+}
+```
+
+**Requirements**:
+- Full-page dim overlay (`background: rgba(0, 0, 0, 0.45)`)
+- Highlight boxes for each candidate (`border: 3px solid #3B82F6`)
+- Click handler on each highlight
+- Keyboard navigation:
+  - Arrow keys: cycle through candidates
+  - Enter: select current
+  - Escape: cancel and cleanup
+- Proper event listener cleanup (remove on destroy)
+- Pass selected candidate to capture logic
+
+**Reference**: `docs/implementation/extension.md` lines 262-350
+
+### 3. Create Smart Capture (1-2 hours)
+
+**File**: `extension/lib/capture.ts`
+
+```typescript
+export async function captureImage(candidate: CandidateImage): Promise<CapturePayload>
+```
+
+**Requirements**:
+- **Case 1: Direct Image** - For `<img>` tags with accessible URLs
+  - Check image is not transformed (rotated, skewed)
+  - Extract `img.currentSrc || img.src`
+  - Return `{ imageUrl: url, boundingRect: rect }`
+
+- **Case 2: Background Image** - For CSS backgrounds
+  - Parse URL from `background-image: url(...)`
+  - Return `{ imageUrl: url, boundingRect: rect }`
+
+- **Case 3: Screenshot Fallback**
+  - Request full viewport screenshot from background worker
+  - Create canvas with correct dimensions (account for devicePixelRatio)
+  - Crop to selected region using bounding rect
+  - Account for scroll position
+  - Return `{ imageData: base64, boundingRect: rect }`
+
+**Reference**: `docs/implementation/extension.md` lines 352-423
+
+### 4. Update Content Script (1 hour)
+
+**File**: `extension/content/content.ts`
+
+**Changes**:
+- Import and use `findCandidateImages()` from dom-scanner
+- Import and use `CaptureOverlay` from overlay
+- Import and use `captureImage()` from capture
+- Replace current simple screenshot with full selection flow:
+
+```typescript
+function startCapture() {
+  const candidates = findCandidateImages();
+
+  if (candidates.length === 0) {
+    showToast('No images found on this page');
+    return;
+  }
+
+  new CaptureOverlay(candidates, async (selected) => {
+    const payload = await captureImage(selected);
+    sendToBackground(payload);
+  });
+}
+```
+
+**Reference**: `docs/implementation/extension.md` lines 425-473
+
+### 5. Update Backend (30 min)
+
+**File**: `lossy/lib/lossy_web/controllers/capture_controller.ex`
+
+**Changes**:
+- Handle `image_url` in payload (direct URL from extension)
+- If `image_url` provided: download image from URL and save
+- If `image_data` provided: decode base64 and save (current behavior)
+- Create Asset record with appropriate metadata
+
+### 6. Testing & Edge Cases (1-2 hours)
+
+Test on variety of sites:
+- ✅ Image galleries: Unsplash, Pinterest
+- ✅ News sites: NY Times, TechCrunch (mixed content)
+- ✅ Social media: Twitter, Reddit (avatars, embedded images)
+- ✅ E-commerce: Amazon (product images)
+- ✅ Background images: Sites using CSS backgrounds
+- ✅ Edge cases: No images, CORS errors, transformed images
 
 ## Key Files to Reference
 
-**Design Docs:**
-- `docs/implementation/roadmap.md` - Phase 1 checklist
-- `docs/data-model.md` - Database schema and status transitions
-- `docs/implementation/backend.md` - Phoenix implementation details
-- `docs/implementation/extension.md` - Extension implementation details
+**Design Docs**:
+- `docs/implementation/roadmap.md` - Phase 1 checklist (lines 56-108)
+- `docs/implementation/extension.md` - Complete implementation guide
+- `docs/data-model.md` - CapturePayload schema
 
-**Phoenix Code:**
-- `lossy/lib/lossy_web/controllers/capture_controller.ex` - API endpoint
-- `lossy/lib/lossy_web/live/capture_live.ex` - Editor UI
-- `lossy/lib/lossy/documents.ex` - Context module
-
-**Extension Code:**
+**Current Code**:
+- `extension/content/content.ts` - Current simple capture
 - `extension/background/service-worker.ts` - Background worker
-- `extension/content/content.ts` - Content script
+- `extension/types/capture.ts` - Type definitions
+- `lossy/lib/lossy_web/controllers/capture_controller.ex` - API endpoint
+- `lossy/lib/lossy/assets.ex` - Image storage
 
-## Starting the Session
+## Expected Outcome
 
-1. Start Phoenix server: `cd lossy && mix phx.server`
-2. Verify extension is loaded in Chrome at `chrome://extensions/`
-3. Test current flow: Press Cmd+Shift+L on any web page
+After this session, Phase 1 will be **fully complete**:
+- ✅ User can select specific images from page (not just viewport screenshot)
+- ✅ DOM scanning finds all candidate images
+- ✅ Professional selection UI with dimmed overlay and highlights
+- ✅ Smart capture logic (direct URL vs screenshot)
+- ✅ Works across diverse websites
+- ✅ Ready for Phase 2: Real ML text detection
 
-## Session Goal
+## Notes
 
-Implement Phase 1 to get a working end-to-end flow:
-- Capture actual screenshots from web pages
-- Upload images to backend and save as Assets
-- Create fake text regions for testing
-- Build basic LiveView editor to display image and edit text
-
-Target: 2-3 hours of work to complete Phase 1.
-
-## Important Notes
-
-- Data model spec is non-negotiable - follow docs/data-model.md exactly
-- Validate Document status transitions per state machine
-- Extension already has keyboard shortcut working - just need real capture
-- LiveView editor should be simple for MVP - no fancy canvas yet
-- Use stubbed text detection (no ML integration yet)
-
-Let's build Phase 1 and get the first complete capture-to-edit flow working!
+- Extension already has proper initialization guard (prevents duplicate listeners)
+- Phoenix server running at `http://localhost:4000`
+- Extension built with `npm run build` in `extension/` directory
+- Commit changes when complete with descriptive message
+- Follow TypeScript patterns from existing extension code
+- Match UX inspiration: Screenity (capture UI) and Shottr (minimal overlay)
