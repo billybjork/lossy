@@ -12,6 +12,7 @@ defmodule LossyWeb.Router do
 
   pipeline :api do
     plug :accepts, ["json"]
+    plug LossyWeb.Plugs.CORS
   end
 
   scope "/", LossyWeb do
