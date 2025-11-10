@@ -100,23 +100,44 @@ async function captureScreenshot(tab: chrome.tabs.Tab) {
 }
 
 async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab) {
-  // POST to backend API
-  const response = await fetch('http://localhost:4000/api/captures', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      source_url: tab.url || '',
+  try {
+    console.log('[Lossy] Sending capture to backend:', {
+      source_url: tab.url,
       capture_mode: payload.capture_mode,
-      image_url: payload.image_url,
-      image_data: payload.image_data,
-      bounding_rect: payload.bounding_rect
-    })
-  });
+      has_image_url: !!payload.image_url,
+      has_image_data: !!payload.image_data
+    });
 
-  const data: CaptureResponse = await response.json();
+    // POST to backend API
+    const response = await fetch('http://localhost:4000/api/captures', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_url: tab.url || '',
+        capture_mode: payload.capture_mode,
+        image_url: payload.image_url,
+        image_data: payload.image_data,
+        bounding_rect: payload.bounding_rect
+      })
+    });
 
-  // Open editor in new tab
-  chrome.tabs.create({ url: `http://localhost:4000/capture/${data.id}` });
+    console.log('[Lossy] Backend response status:', response.status);
 
-  return { success: true, captureId: data.id };
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('[Lossy] Backend error:', errorText);
+      throw new Error(`Backend returned ${response.status}: ${errorText}`);
+    }
+
+    const data: CaptureResponse = await response.json();
+    console.log('[Lossy] Capture created with ID:', data.id);
+
+    // Open editor in new tab
+    chrome.tabs.create({ url: `http://localhost:4000/capture/${data.id}` });
+
+    return { success: true, captureId: data.id };
+  } catch (error) {
+    console.error('[Lossy] Failed to handle image capture:', error);
+    throw error;
+  }
 }
