@@ -1,0 +1,27 @@
+defmodule Lossy.Documents.Asset do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  @primary_key {:id, :binary_id, autogenerate: true}
+  @foreign_key_type :binary_id
+
+  schema "assets" do
+    field :kind, Ecto.Enum, values: [:original, :working, :mask, :inpainted_patch, :export]
+    field :storage_uri, :string
+    field :width, :integer
+    field :height, :integer
+    field :sha256, :string
+    field :metadata, :map, default: %{}
+
+    belongs_to :document, Lossy.Documents.Document
+
+    timestamps()
+  end
+
+  def changeset(asset, attrs) do
+    asset
+    |> cast(attrs, [:document_id, :kind, :storage_uri, :width, :height, :sha256, :metadata])
+    |> validate_required([:document_id, :kind, :storage_uri])
+    |> validate_inclusion(:kind, [:original, :working, :mask, :inpainted_patch, :export])
+  end
+end
