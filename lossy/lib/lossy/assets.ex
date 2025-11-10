@@ -47,6 +47,27 @@ defmodule Lossy.Assets do
   end
 
   @doc """
+  Downloads an image from a URL and creates an Asset record.
+  Returns {:ok, asset} on success, {:error, reason} on failure.
+  """
+  def save_image_from_url(document_id, image_url, kind \\ :original) do
+    with {:ok, binary_data, content_type} <- download_image(image_url),
+         {:ok, dimensions} <- get_image_dimensions(binary_data),
+         {:ok, file_path} <- write_image_file(document_id, kind, binary_data),
+         sha256 <- compute_sha256(binary_data) do
+      create_asset(%{
+        document_id: document_id,
+        kind: kind,
+        storage_uri: file_path,
+        width: dimensions.width,
+        height: dimensions.height,
+        sha256: sha256,
+        metadata: %{content_type: content_type, source_url: image_url}
+      })
+    end
+  end
+
+  @doc """
   Returns the local file system path for an asset.
   For MVP, assumes storage_uri is a local path.
   """
@@ -66,6 +87,28 @@ defmodule Lossy.Assets do
   end
 
   # Private functions
+
+  defp download_image(url) do
+    # Use Req to download the image
+    case Req.get(url) do
+      {:ok, %Req.Response{status: 200, body: body, headers: headers}} ->
+        # Extract content type from headers
+        content_type =
+          headers
+          |> Map.get("content-type", ["image/png"])
+          |> List.first()
+          |> String.split(";")
+          |> List.first()
+
+        {:ok, body, content_type}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, "HTTP #{status}"}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
 
   defp decode_base64_image(base64_data) do
     # Handle data URLs: "data:image/png;base64,..."
