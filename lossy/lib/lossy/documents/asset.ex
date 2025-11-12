@@ -1,4 +1,11 @@
 defmodule Lossy.Documents.Asset do
+  @moduledoc """
+  Schema for binary assets (images) associated with documents.
+
+  Stores references to original, working, mask, inpainted, and export
+  images with metadata and checksums for integrity verification.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 

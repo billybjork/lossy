@@ -1,4 +1,10 @@
 defmodule Lossy.Accounts.User do
+  @moduledoc """
+  Schema for user accounts.
+
+  Basic user model for associating documents with users.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 

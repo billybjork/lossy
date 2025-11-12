@@ -12,6 +12,8 @@ defmodule Lossy.Application do
       Lossy.Repo,
       {DNSCluster, query: Application.get_env(:lossy, :dns_cluster_query) || :ignore},
       {Phoenix.PubSub, name: Lossy.PubSub},
+      # Oban job processing
+      {Oban, Application.fetch_env!(:lossy, Oban)},
       # Task supervisor for async job processing
       {Task.Supervisor, name: Lossy.TaskSupervisor},
       # Start a worker by calling: Lossy.Worker.start_link(arg)

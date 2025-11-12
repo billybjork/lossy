@@ -45,7 +45,9 @@ defmodule LossyWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
-    json_decoder: Phoenix.json_library()
+    json_decoder: Phoenix.json_library(),
+    # 50MB max request body size
+    length: 50_000_000
 
   plug Plug.MethodOverride
   plug Plug.Head

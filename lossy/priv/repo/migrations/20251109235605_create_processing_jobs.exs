@@ -4,7 +4,10 @@ defmodule Lossy.Repo.Migrations.CreateProcessingJobs do
   def change do
     create table(:processing_jobs, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :document_id, references(:documents, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :document_id, references(:documents, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :text_region_id, references(:text_regions, type: :binary_id, on_delete: :delete_all)
       add :subject_type, :string, null: false
       add :type, :string, null: false

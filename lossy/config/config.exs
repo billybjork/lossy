@@ -31,6 +31,15 @@ config :lossy, LossyWeb.Endpoint,
 # at the `config/runtime.exs`.
 config :lossy, Lossy.Mailer, adapter: Swoosh.Adapters.Local
 
+# Configure Oban job processing
+config :lossy, Oban,
+  repo: Lossy.Repo,
+  queues: [default: 10, ml: 5],
+  plugins: [
+    # Prune jobs after 7 days
+    {Oban.Plugins.Pruner, max_age: 60 * 60 * 24 * 7}
+  ]
+
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
