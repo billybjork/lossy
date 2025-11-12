@@ -1,11 +1,26 @@
 defmodule Lossy.Documents.Document do
+  @moduledoc """
+  Schema for documents with text detection and editing workflow.
+
+  Manages the document lifecycle from capture through text detection,
+  editing, and rendering with a state machine for status transitions.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @valid_statuses [:queued_detection, :detecting, :awaiting_edits, :rendering, :export_ready, :error]
+  @valid_statuses [
+    :queued_detection,
+    :detecting,
+    :awaiting_edits,
+    :rendering,
+    :export_ready,
+    :error
+  ]
+  @valid_url_statuses [:not_checked, :accessible, :unreachable, :timeout]
   @status_transitions %{
     queued_detection: [:detecting, :error],
     detecting: [:awaiting_edits, :error],
@@ -17,8 +32,11 @@ defmodule Lossy.Documents.Document do
 
   schema "documents" do
     field :source_url, :string
-    field :capture_mode, Ecto.Enum, values: [:direct_asset, :screenshot, :composited_region]
-    field :dimensions, :map
+    field :source_url_verified_at, :utc_datetime
+    field :source_url_status, Ecto.Enum, values: @valid_url_statuses, default: :not_checked
+    field :capture_mode, Ecto.Enum, values: [:direct_asset, :screenshot]
+    field :width, :integer
+    field :height, :integer
     field :metrics, :map, default: %{}
     field :status, Ecto.Enum, values: @valid_statuses, default: :queued_detection
 
@@ -34,11 +52,23 @@ defmodule Lossy.Documents.Document do
 
   def changeset(document, attrs) do
     document
-    |> cast(attrs, [:user_id, :source_url, :capture_mode, :dimensions, :original_asset_id,
-                     :working_asset_id, :status, :metrics])
+    |> cast(attrs, [
+      :user_id,
+      :source_url,
+      :source_url_verified_at,
+      :source_url_status,
+      :capture_mode,
+      :width,
+      :height,
+      :original_asset_id,
+      :working_asset_id,
+      :status,
+      :metrics
+    ])
     |> validate_required([:source_url, :capture_mode])
-    |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot, :composited_region])
+    |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot])
     |> validate_inclusion(:status, @valid_statuses)
+    |> validate_inclusion(:source_url_status, @valid_url_statuses)
     |> validate_status_transition()
   end
 

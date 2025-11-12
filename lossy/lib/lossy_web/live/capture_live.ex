@@ -1,8 +1,8 @@
 defmodule LossyWeb.CaptureLive do
   use LossyWeb, :live_view
 
-  alias Lossy.Documents
   alias Lossy.Assets
+  alias Lossy.Documents
 
   @impl true
   def mount(%{"id" => id}, _session, socket) do
@@ -80,7 +80,7 @@ defmodule LossyWeb.CaptureLive do
               "ml-2 px-2.5 py-0.5 rounded-full text-xs font-medium",
               status_color(@document.status)
             ]}>
-              <%= format_status(@document.status) %>
+              {format_status(@document.status)}
             </span>
           </div>
         </div>
@@ -103,7 +103,10 @@ defmodule LossyWeb.CaptureLive do
                     <div
                       class={[
                         "absolute border-2 cursor-pointer transition-all",
-                        if(@selected_region_id == region.id, do: "border-blue-500 bg-blue-500/10", else: "border-red-500 bg-red-500/5 hover:bg-red-500/10")
+                        if(@selected_region_id == region.id,
+                          do: "border-blue-500 bg-blue-500/10",
+                          else: "border-red-500 bg-red-500/5 hover:bg-red-500/10"
+                        )
                       ]}
                       style={"left: #{region.bbox["x"]}px; top: #{region.bbox["y"]}px; width: #{region.bbox["w"]}px; height: #{region.bbox["h"]}px;"}
                       phx-click="select_region"
@@ -111,7 +114,11 @@ defmodule LossyWeb.CaptureLive do
                       title={region.current_text || region.original_text}
                     >
                       <%= if @editing_region_id == region.id do %>
-                        <form phx-submit="update_region_text" phx-value-region-id={region.id} class="w-full h-full">
+                        <form
+                          phx-submit="update_region_text"
+                          phx-value-region-id={region.id}
+                          class="w-full h-full"
+                        >
                           <input
                             type="text"
                             name="text"
@@ -140,8 +147,8 @@ defmodule LossyWeb.CaptureLive do
               <% end %>
             </div>
           </div>
-
-          <!-- Sidebar with region list -->
+          
+    <!-- Sidebar with region list -->
           <div class="lg:col-span-1">
             <div class="bg-white rounded-lg shadow-lg p-6">
               <h2 class="text-lg font-bold mb-4">Text Regions</h2>
@@ -155,15 +162,21 @@ defmodule LossyWeb.CaptureLive do
               <% else %>
                 <div class="space-y-3">
                   <%= for region <- @document.text_regions do %>
-                    <div class={[
-                      "border rounded-lg p-3 cursor-pointer transition-all",
-                      if(@selected_region_id == region.id, do: "border-blue-500 bg-blue-50", else: "border-gray-200 hover:border-gray-300")
-                    ]}
-                    phx-click="select_region"
-                    phx-value-region-id={region.id}
+                    <div
+                      class={[
+                        "border rounded-lg p-3 cursor-pointer transition-all",
+                        if(@selected_region_id == region.id,
+                          do: "border-blue-500 bg-blue-50",
+                          else: "border-gray-200 hover:border-gray-300"
+                        )
+                      ]}
+                      phx-click="select_region"
+                      phx-value-region-id={region.id}
                     >
                       <div class="flex justify-between items-start mb-2">
-                        <span class="text-xs font-medium text-gray-500">Region #{region.z_index}</span>
+                        <span class="text-xs font-medium text-gray-500">
+                          Region #{region.z_index}
+                        </span>
                         <button
                           class="text-xs text-blue-600 hover:text-blue-800"
                           phx-click="edit_region"
@@ -173,10 +186,10 @@ defmodule LossyWeb.CaptureLive do
                         </button>
                       </div>
                       <p class="text-sm text-gray-900 font-medium break-words">
-                        <%= region.current_text || region.original_text || "(no text)" %>
+                        {region.current_text || region.original_text || "(no text)"}
                       </p>
                       <div class="mt-2 text-xs text-gray-500">
-                        <%= region.font_family %>, <%= region.font_size_px %>px
+                        {region.font_family}, {region.font_size_px}px
                       </div>
                     </div>
                   <% end %>
@@ -191,7 +204,7 @@ defmodule LossyWeb.CaptureLive do
                     target="_blank"
                     class="text-xs text-blue-600 hover:text-blue-800 break-all"
                   >
-                    <%= @document.source_url %>
+                    {@document.source_url}
                   </a>
                 </div>
               <% end %>

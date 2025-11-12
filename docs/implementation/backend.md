@@ -317,7 +317,7 @@ defmodule Lossy.Documents.Document do
 
   schema "documents" do
     field :source_url, :string
-    field :capture_mode, Ecto.Enum, values: [:direct_asset, :screenshot, :composited_region]
+    field :capture_mode, Ecto.Enum, values: [:direct_asset, :screenshot]
     field :dimensions, :map
     field :metrics, :map, default: %{}
     field :status, Ecto.Enum, values: [:queued_detection, :detecting, :awaiting_edits, :rendering, :export_ready, :error]
@@ -336,7 +336,7 @@ defmodule Lossy.Documents.Document do
     document
     |> cast(attrs, [:source_url, :capture_mode, :dimensions, :metrics, :status, :user_id, :original_asset_id, :working_asset_id])
     |> validate_required([:source_url, :capture_mode, :original_asset_id])
-    |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot, :composited_region])
+    |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot])
   end
 end
 ```

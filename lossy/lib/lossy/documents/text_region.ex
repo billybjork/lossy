@@ -1,4 +1,11 @@
 defmodule Lossy.Documents.TextRegion do
+  @moduledoc """
+  Schema for detected text regions within a document.
+
+  Stores bounding box, polygon, original/edited text, and styling
+  information for text regions that can be inpainted and replaced.
+  """
+
   use Ecto.Schema
   import Ecto.Changeset
 
@@ -18,7 +25,10 @@ defmodule Lossy.Documents.TextRegion do
     field :color_rgba, :string, default: "rgba(0,0,0,1)"
     field :alignment, Ecto.Enum, values: [:left, :center, :right], default: :left
     field :z_index, :integer, default: 0
-    field :status, Ecto.Enum, values: [:detected, :inpainting, :rendered, :error], default: :detected
+
+    field :status, Ecto.Enum,
+      values: [:detected, :inpainting, :rendered, :error],
+      default: :detected
 
     belongs_to :document, Lossy.Documents.Document
     belongs_to :inpainted_asset, Lossy.Documents.Asset
@@ -28,9 +38,23 @@ defmodule Lossy.Documents.TextRegion do
 
   def changeset(region, attrs) do
     region
-    |> cast(attrs, [:document_id, :bbox, :polygon, :padding_px, :original_text, :current_text,
-                    :style_snapshot, :font_family, :font_weight, :font_size_px, :color_rgba,
-                    :alignment, :inpainted_asset_id, :z_index, :status])
+    |> cast(attrs, [
+      :document_id,
+      :bbox,
+      :polygon,
+      :padding_px,
+      :original_text,
+      :current_text,
+      :style_snapshot,
+      :font_family,
+      :font_weight,
+      :font_size_px,
+      :color_rgba,
+      :alignment,
+      :inpainted_asset_id,
+      :z_index,
+      :status
+    ])
     |> validate_required([:document_id, :bbox])
     |> validate_number(:font_size_px, greater_than: 0)
     |> validate_inclusion(:alignment, [:left, :center, :right])

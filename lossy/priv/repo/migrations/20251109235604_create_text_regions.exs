@@ -4,7 +4,10 @@ defmodule Lossy.Repo.Migrations.CreateTextRegions do
   def change do
     create table(:text_regions, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :document_id, references(:documents, type: :binary_id, on_delete: :delete_all), null: false
+
+      add :document_id, references(:documents, type: :binary_id, on_delete: :delete_all),
+        null: false
+
       add :bbox, :map, null: false
       add :polygon, {:array, :map}
       add :padding_px, :integer, default: 10

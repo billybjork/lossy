@@ -1,5 +1,18 @@
 # Lossy
 
+## System Requirements
+
+Before starting, ensure you have the following dependencies installed:
+
+* **Elixir** 1.15+ and **Erlang** 26+
+* **PostgreSQL** 14+
+* **ImageMagick** - Required for image processing and dimension detection
+  * macOS: `brew install imagemagick`
+  * Ubuntu/Debian: `sudo apt-get install imagemagick`
+  * Verify installation: `identify --version`
+
+## Getting Started
+
 To start your Phoenix server:
 
 * Run `mix setup` to install and setup dependencies

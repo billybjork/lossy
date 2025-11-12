@@ -3,10 +3,11 @@ defmodule Lossy.Documents do
   The Documents context.
   """
 
+  require Logger
   import Ecto.Query, warn: false
   alias Lossy.Repo
 
-  alias Lossy.Documents.{Document, TextRegion, ProcessingJob}
+  alias Lossy.Documents.{Document, ProcessingJob, TextRegion}
 
   ## Documents
 
@@ -14,9 +15,24 @@ defmodule Lossy.Documents do
   Creates a document from a capture request.
   """
   def create_capture(attrs \\ %{}) do
-    %Document{}
-    |> Document.changeset(attrs)
-    |> Repo.insert()
+    Logger.info("Creating capture document",
+      attrs: Map.take(attrs, ["source_url", "capture_mode"])
+    )
+
+    result =
+      %Document{}
+      |> Document.changeset(attrs)
+      |> Repo.insert()
+
+    case result do
+      {:ok, document} ->
+        Logger.info("Capture document created successfully", document_id: document.id)
+        result
+
+      {:error, changeset} ->
+        Logger.error("Failed to create capture document", errors: inspect(changeset.errors))
+        result
+    end
   end
 
   @doc """
@@ -32,15 +48,27 @@ defmodule Lossy.Documents do
   Updates a document.
   """
   def update_document(%Document{} = document, attrs) do
+    Logger.info("Updating document", document_id: document.id, attrs: inspect(Map.keys(attrs)))
+
     case document
          |> Document.changeset(attrs)
          |> Repo.update() do
       {:ok, updated_doc} = result ->
+        Logger.info("Document updated successfully",
+          document_id: updated_doc.id,
+          status: updated_doc.status
+        )
+
         # Broadcast update to LiveView subscribers
         broadcast_document_update(updated_doc)
         result
 
-      error ->
+      {:error, changeset} = error ->
+        Logger.error("Failed to update document",
+          document_id: document.id,
+          errors: inspect(changeset.errors)
+        )
+
         error
     end
   end
@@ -92,22 +120,24 @@ defmodule Lossy.Documents do
   Creates fake text regions for testing the editor UI.
   """
   def enqueue_text_detection(%Document{} = document) do
-    # Update document status to detecting
-    {:ok, document} = update_document(document, %{status: :detecting})
+    Logger.info("Enqueuing text detection job", document_id: document.id)
 
-    # Spawn async task to simulate detection
-    Task.start(fn ->
-      # Simulate processing delay
-      Process.sleep(1000)
+    # Enqueue Oban job for text detection
+    case %{document_id: document.id}
+         |> Lossy.Workers.TextDetection.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        Logger.info("Text detection job enqueued successfully", document_id: document.id)
+        :ok
 
-      # Create stubbed text regions for testing
-      create_stubbed_text_regions(document)
+      {:error, reason} ->
+        Logger.error("Failed to enqueue text detection job",
+          document_id: document.id,
+          reason: inspect(reason)
+        )
 
-      # Update document status to awaiting_edits
-      update_document(document, %{status: :awaiting_edits})
-    end)
-
-    :ok
+        {:error, reason}
+    end
   end
 
   @doc """
@@ -116,9 +146,8 @@ defmodule Lossy.Documents do
   """
   def create_stubbed_text_regions(%Document{} = document) do
     # Get image dimensions, or use defaults if not available
-    dimensions = document.dimensions || %{"width" => 1200, "height" => 800}
-    width = dimensions["width"] || 1200
-    height = dimensions["height"] || 800
+    width = document.width || 1200
+    height = document.height || 800
 
     # Create a few sample text regions
     regions = [

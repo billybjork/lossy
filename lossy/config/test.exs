@@ -26,6 +26,9 @@ config :lossy, Lossy.Mailer, adapter: Swoosh.Adapters.Test
 # Disable swoosh api client as it is only required for production adapters
 config :swoosh, :api_client, false
 
+# Configure Oban for tests - disable all job execution
+config :lossy, Oban, testing: :inline
+
 # Print only warnings and errors during test
 config :logger, level: :warning
 

@@ -30,7 +30,9 @@ Represents one captured image and its editing session.
 - `id` (UUID, primary key)
 - `user_id` (UUID, foreign key → User)
 - `source_url` (string) - The web page URL where image was captured
-- `capture_mode` (enum: `direct_asset` | `screenshot` | `composited_region`) - How the image was obtained
+- `source_url_verified_at` (timestamp, nullable) - When the source URL was last verified
+- `source_url_status` (enum: `not_checked` | `accessible` | `unreachable` | `timeout`) - Accessibility status of the source URL
+- `capture_mode` (enum: `direct_asset` | `screenshot`) - How the image was obtained
 - `dimensions` (JSON: `{width, height}`) - Pixel dimensions at capture time
 - `original_asset_id` (UUID, foreign key → Asset) - Pointer to stored original image
 - `working_asset_id` (UUID, foreign key → Asset) - Pointer to current composited image with edits

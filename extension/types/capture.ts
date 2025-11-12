@@ -1,6 +1,6 @@
 export interface CapturePayload {
   source_url: string;
-  capture_mode: 'screenshot' | 'direct_asset' | 'composited_region';
+  capture_mode: 'screenshot' | 'direct_asset';
   image_url?: string;
   image_data?: string;
   bounding_rect?: {
