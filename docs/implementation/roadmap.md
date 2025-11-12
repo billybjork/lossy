@@ -11,106 +11,148 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 
 **Estimated Timeline**: 6-8 weeks for MVP (Phases 0-4)
 
+### Current Progress (As of Nov 2025)
+
+| Phase | Status | Completion |
+|-------|--------|------------|
+| **Phase 0: Skeleton** | ✅ Complete | 100% |
+| **Phase 1: Extension MVP** | ✅ Complete | 100% |
+| **Phase 2: Text Detection** | ⚠️ In Progress | 60% (Infrastructure ready, ML stubbed) |
+| **Phase 3: Inpainting** | ❌ Not Started | 10% (Basic UI only) |
+| **Phase 4: Export** | ❌ Not Started | 5% (Storage ready) |
+| **Phase 5: UX Polish** | ❌ Not Started | 0% |
+| **Phase 6: Local Detection** | ❌ Not Started | 5% (Type contracts only) |
+
+**Overall MVP Progress**: ~40% complete
+
+**🎯 Next Critical Steps:**
+1. Complete Phase 2: Integrate real ML text detection (replace stub)
+2. Start Phase 3: Implement LaMa inpainting pipeline
+3. Complete Phase 4: Add export functionality
+
+**🏆 Major Achievements:**
+- Production-quality extension with smart capture
+- Robust backend with Oban job processing
+- Comprehensive security hardening (SSRF protection)
+- Real-time LiveView editor with PubSub updates
+
 ---
 
-## Phase 0: Skeleton (Week 1)
+## Phase 0: Skeleton (Week 1) ✅ COMPLETE
 
 **Goal**: Set up project infrastructure with stubbed functionality.
 
 ### Tasks
 
 #### Backend Setup
-- [ ] Create Phoenix project: `mix phx.new lossy`
-- [ ] Configure PostgreSQL database
-- [ ] Create migrations for core tables:
+- [x] Create Phoenix project: `mix phx.new lossy`
+- [x] Configure PostgreSQL database
+- [x] Create migrations for core tables:
   - `users` (minimal, just id for now)
   - `documents` (with new lifecycle fields, asset references, metrics JSONB)
   - `assets`
   - `text_regions` (with polygons + optional text)
   - `processing_jobs` (subject_type, attempts, locked_at)
-- [ ] Run migrations: `mix ecto.migrate`
-- [ ] Generate context: `Lossy.Documents`
-- [ ] Create schema modules: `Document`, `TextRegion`, `ProcessingJob`
+- [x] Run migrations: `mix ecto.migrate`
+- [x] Generate context: `Lossy.Documents`
+- [x] Create schema modules: `Document`, `TextRegion`, `ProcessingJob`
 
 #### API Endpoints
-- [ ] Basic REST API: `POST /api/captures`
+- [x] Basic REST API: `POST /api/captures`
   - Accept JSON payload
   - Create stubbed `Document` record
   - Support optional `text_regions` array (for future local detection payloads)
   - Return document id and status
-- [ ] Test with curl or Postman
+- [x] Test with curl or Postman
 
 #### LiveView Stub
-- [ ] Create LiveView module: `CaptureLive`
-- [ ] Add route: `GET /capture/:id`
-- [ ] Display placeholder image and mock text regions
-- [ ] Verify LiveView loads and renders
+- [x] Create LiveView module: `CaptureLive`
+- [x] Add route: `GET /capture/:id`
+- [x] Display placeholder image and mock text regions
+- [x] Verify LiveView loads and renders
 
 #### Verification
-- [ ] Can POST to `/api/captures` and get document id
-- [ ] Can navigate to `/capture/:id` and see LiveView
-- [ ] Database tables exist and are queryable
+- [x] Can POST to `/api/captures` and get document id
+- [x] Can navigate to `/capture/:id` and see LiveView
+- [x] Database tables exist and are queryable
+
+**Enhancements Beyond Roadmap:**
+- ✨ Migrated to Oban job processing (more robust than Task.Supervisor)
+- ✨ Added SSRF protection and comprehensive security validation
+- ✨ Implemented comprehensive state machine with 6 status states
+- ✨ Enhanced data model with width/height columns and source URL verification
 
 ---
 
-## Phase 1: Extension MVP (Week 2)
+## Phase 1: Extension MVP (Week 2) ✅ COMPLETE
 
 **Goal**: Build working browser extension that captures images and sends to backend.
 
 ### Tasks
 
 #### Extension Structure
-- [ ] Create `extension/` directory
-- [ ] Set up build tool (Vite or Webpack)
-- [ ] Create `manifest.json` with:
+- [x] Create `extension/` directory
+- [x] Set up build tool (Vite or Webpack)
+- [x] Create `manifest.json` with:
   - Manifest V3 config
   - Permissions: `activeTab`, `scripting`
   - Commands: `Cmd+Shift+L` / `Ctrl+Shift+L`
   - Browser action
 
 #### Background Script
-- [ ] Implement service worker: `background/service-worker.ts`
-- [ ] Listen for keyboard shortcut and browser action
-- [ ] Inject content script into active tab
-- [ ] Handle messages from content script
-- [ ] POST captured image to backend API
-- [ ] Open new tab with editor URL
+- [x] Implement service worker: `background/service-worker.ts`
+- [x] Listen for keyboard shortcut and browser action
+- [x] Inject content script into active tab
+- [x] Handle messages from content script
+- [x] POST captured image to backend API
+- [x] Open new tab with editor URL
 
 #### Content Script
-- [ ] Implement DOM scanner: `lib/dom-scanner.ts`
+- [x] Implement DOM scanner: `lib/dom-scanner.ts`
   - Find `<img>` elements
   - Find `<picture>` elements
   - Find elements with `background-image`
   - Filter by size and visibility
-- [ ] Implement overlay UI: `content/overlay.ts`
+- [x] Implement overlay UI: `content/overlay.ts`
   - Dim page
   - Highlight candidate images
   - Handle click and keyboard selection
   - Bind/unbind keyboard listeners cleanly to avoid memory leaks
-- [ ] Implement capture logic: `lib/capture.ts`
+- [x] Implement capture logic: `lib/capture.ts`
   - Extract direct image URL when possible
   - Fall back to region screenshot
   - Crop screenshots using device pixel ratio + scroll offsets
   - Show inline overlay toast instead of `alert()` when no images are found
   - Send to background script
-- [ ] Define optional local text detection payload contract (`textRegions`) for future WebGPU mode
+- [x] Define optional local text detection payload contract (`textRegions`) for future WebGPU mode
 
 #### Integration
-- [ ] Wire up extension → backend flow
-- [ ] Test on various websites (news, social media, image galleries)
-- [ ] Handle edge cases (no images found, CORS issues)
+- [x] Wire up extension → backend flow
+- [x] Test on various websites (news, social media, image galleries)
+- [x] Handle edge cases (no images found, CORS issues)
 
 #### Verification
-- [ ] Can trigger extension with keyboard shortcut
-- [ ] Can select image from page
-- [ ] Image is sent to backend and document is created
-- [ ] Editor tab opens with correct document id
+- [x] Can trigger extension with keyboard shortcut
+- [x] Can select image from page
+- [x] Image is sent to backend and document is created
+- [x] Editor tab opens with correct document id
+
+**Enhancements Beyond Roadmap:**
+- ✨ SVG mask overlay with professional spotlight effect
+- ✨ Smart capture decision-making (URL vs screenshot based on accessibility)
+- ✨ Keyboard navigation with arrow keys
+- ✨ Auto-scrolling to keep selected images in viewport
+- ✨ Duplicate initialization prevention
+- ✨ Inline toast notifications (no alerts)
+- ✨ Comprehensive TypeScript type safety throughout
 
 ---
 
-## Phase 2: Cloud Text Detection (Week 3)
+## Phase 2: Cloud Text Detection (Week 3) ⚠️ IN PROGRESS
 
 **Goal**: Integrate text detection model and display detected regions in editor.
+
+**Status**: Infrastructure complete, ML integration pending (currently using stubbed data)
 
 ### Tasks
 
@@ -126,42 +168,53 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
   - Parse model output into structured format
 
 #### Backend Processing
-- [ ] Implement `Documents.enqueue_text_detection/1`
-  - Create `ProcessingJob` record
-  - Spawn async task via `Task.Supervisor`
-- [ ] Implement `Documents.execute_text_detection/1`
-  - Call ML service
-  - Parse results
-  - Create `TextRegion` records for each detected box
-  - Update document status to `:awaiting_edits`
-  - Broadcast update via PubSub
-- [ ] Support bypassing cloud detection when `text_regions` are provided by the extension (future flag but code path ready)
+- [x] Implement `Documents.enqueue_text_detection/1`
+  - ✅ Create `ProcessingJob` record (using Oban, not Task.Supervisor)
+  - ✅ Enqueue async job via Oban worker
+- [x] Implement `Documents.execute_text_detection/1` (STUBBED)
+  - ⚠️ Currently creates 3 fake text regions for testing
+  - [ ] Call actual ML service
+  - [ ] Parse real results
+  - [x] Create `TextRegion` records for each detected box
+  - [x] Update document status to `:awaiting_edits`
+  - [x] Broadcast update via PubSub
+- [x] Support bypassing cloud detection when `text_regions` are provided by the extension (future flag but code path ready)
 
 #### LiveView Updates
-- [ ] Subscribe to PubSub updates in `CaptureLive.mount/3`
-- [ ] Show "Finding text..." skeleton while `status == :pending_detection`
-- [ ] Handle `{:document_updated, document}` message
-- [ ] Display detected text boxes when regions arrive
+- [x] Subscribe to PubSub updates in `CaptureLive.mount/3`
+- [x] Show "Finding text..." skeleton while `status == :pending_detection`
+- [x] Handle `{:document_updated, document}` message
+- [x] Display detected text boxes when regions arrive
 
-#### Canvas Rendering
-- [ ] Implement `CanvasEditor` JS hook
-  - Load image onto canvas
-  - Draw bounding boxes for each region
-  - Highlight regions on hover
-- [ ] Register hook in `app.js`
-- [ ] Add CSS styling for canvas and overlays
+#### Canvas Rendering (Implemented via HTML/CSS instead)
+- [x] ~~Implement `CanvasEditor` JS hook~~ (Used HTML overlay approach instead)
+  - [x] Display image
+  - [x] Draw bounding boxes for each region (as positioned divs)
+  - [x] Highlight regions on hover
+- [x] ~~Register hook in `app.js`~~ (Not needed with HTML approach)
+- [x] Add CSS styling for canvas and overlays
 
 #### Verification
-- [ ] Upload image via extension
-- [ ] Text detection runs automatically
-- [ ] LiveView shows loading state, then displays detected regions
-- [ ] Regions are visible as overlays on canvas
+- [x] Upload image via extension
+- [x] Text detection runs automatically (with stubbed data)
+- [x] LiveView shows loading state, then displays detected regions
+- [x] Regions are visible as overlays ~~on canvas~~ on image
+
+**Implementation Improvements:**
+- ✨ Upgraded to Oban workers for reliable job processing
+- ✨ Comprehensive error handling and retry logic
+- ✨ HTML/CSS overlay rendering (simpler than Canvas, works great for bounding boxes)
+
+**Next Steps:**
+- 🔴 **CRITICAL**: Replace stubbed text detection in `lossy/lib/lossy/workers/text_detection.ex:13-35` with actual Replicate/PaddleOCR integration
 
 ---
 
-## Phase 3: Inpainting & Single-Region Edit (Week 4)
+## Phase 3: Inpainting & Single-Region Edit (Week 4) ❌ NOT STARTED
 
 **Goal**: Enable editing text in a single region with background inpainting.
+
+**Status**: Basic editing UI exists, but no inpainting pipeline implemented
 
 ### Tasks
 
@@ -196,27 +249,40 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
   - Broadcast update
 
 #### Editor UI: Text Editing
-- [ ] Add click handler to select region
-- [ ] Show inline contenteditable div over region
-- [ ] On blur/Enter, send `phx-push-event` to LiveView with new text
-- [ ] Handle `update_region_text` event in LiveView
-  - Update `TextRegion.current_text` in DB
-  - Enqueue inpainting job
-  - Optimistically update UI
+- [x] Add click handler to select region
+- [x] Show inline ~~contenteditable div~~ input field over region
+- [x] On blur/Enter, send `phx-push-event` to LiveView with new text
+- [x] Handle `update_region_text` event in LiveView
+  - [x] Update `TextRegion.current_text` in DB
+  - [ ] Enqueue inpainting job
+  - [x] Optimistically update UI
 
 #### Verification
-- [ ] Click on detected text region
-- [ ] Edit text in inline editor
-- [ ] Press Enter or click away
+- [x] Click on detected text region
+- [x] Edit text in inline editor
+- [x] Press Enter or click away
 - [ ] Background is inpainted (text removed)
 - [ ] New text is rendered in place
 - [ ] Canvas updates with final result
 
+**Foundation in Place:**
+- ✅ Database schema supports `inpainted_asset_id` in TextRegion
+- ✅ Status enums support `:inpainting` and `:rendered` states
+- ✅ Basic text editing UI fully functional
+- ✅ Asset management system ready for composited images
+
+**Next Steps:**
+- 🔴 Implement LaMa inpainting integration
+- 🔴 Implement ImageMagick compositor and text renderer
+- 🔴 Wire up inpainting workflow when text is edited
+
 ---
 
-## Phase 4: Export & Upscaling (Week 5)
+## Phase 4: Export & Upscaling (Week 5) ❌ NOT STARTED
 
 **Goal**: Allow users to download edited images, optionally with HD upscaling.
+
+**Status**: Storage infrastructure ready, export features not implemented
 
 ### Tasks
 
@@ -243,15 +309,21 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
   - Trigger download
 
 #### File Storage
-- [ ] Configure local file storage for MVP
-  - Create `priv/static/uploads/` directory
-  - Store images there during development
+- [x] Configure local file storage for MVP
+  - [x] Create `priv/static/uploads/` directory
+  - [x] Store images there during development
 - [ ] Add cleanup task (optional) to delete old files
 
 #### Verification
 - [ ] Click "Download PNG" and verify file downloads
 - [ ] File is the edited image with new text
 - [ ] (If implemented) Click "Enhance (HD)" and download upscaled version
+
+**Foundation in Place:**
+- ✅ Local file storage configured in `priv/static/uploads/`
+- ✅ Asset management system with SHA256 hashing
+- ✅ Static file serving configured
+- ✅ Document status supports `:export_ready` state
 
 ---
 
@@ -357,34 +429,40 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 
 ## Success Metrics
 
-### Phase 0-1 (Extension + Backend)
-- Extension successfully captures images
-- Backend receives and stores images
-- Editor loads and displays image
+### Phase 0-1 (Extension + Backend) ✅ ACHIEVED
+- ✅ Extension successfully captures images
+- ✅ Backend receives and stores images
+- ✅ Editor loads and displays image
+- ✅ **BONUS**: Extension works with keyboard shortcuts, smart URL detection, and professional UI
+- ✅ **BONUS**: Backend includes Oban job processing and SSRF protection
 
-### Phase 2 (Text Detection)
-- Detection accuracy >90% on varied images
-- Detection completes in <5 seconds
+### Phase 2 (Text Detection) ⚠️ PARTIAL
+- ⏳ Detection accuracy >90% on varied images (stubbed, not yet measured)
+- ⏳ Detection completes in <5 seconds (infrastructure ready, ML integration pending)
+- ✅ LiveView real-time updates working
+- ✅ Region display and interaction functional
 
-### Phase 3 (Editing)
-- Inpainting quality is good (background looks natural)
-- Text rendering matches original style reasonably well
-- End-to-end edit takes <20 seconds
+### Phase 3 (Editing) ❌ NOT ACHIEVED
+- ⏳ Inpainting quality is good (background looks natural)
+- ⏳ Text rendering matches original style reasonably well
+- ⏳ End-to-end edit takes <20 seconds
+- ✅ Basic text editing UI functional (no inpainting yet)
 
-### Phase 4 (Export)
-- Downloaded images are high quality
-- File size is reasonable (<5MB for typical images)
+### Phase 4 (Export) ❌ NOT ACHIEVED
+- ⏳ Downloaded images are high quality
+- ⏳ File size is reasonable (<5MB for typical images)
+- ✅ Storage infrastructure ready
 
-### Phase 5 (Polish)
-- Editing feels fast and responsive
-- No major UX friction points
-- Users can successfully edit multiple regions
+### Phase 5 (Polish) ❌ NOT ACHIEVED
+- ⏳ Editing feels fast and responsive
+- ⏳ No major UX friction points
+- ⏳ Users can successfully edit multiple regions
 
-### MVP Overall
-- Can capture, edit, and export an image in <60 seconds
-- Works on at least 80% of tested websites
-- No critical bugs
-- Ready for alpha user testing
+### MVP Overall - Target Metrics
+- ⏳ Can capture, edit, and export an image in <60 seconds
+- ✅ Works on at least 80% of tested websites (extension capture phase)
+- ✅ No critical bugs (so far)
+- ⏳ Ready for alpha user testing (needs Phase 2-4 completion)
 
 ---
 
@@ -416,10 +494,24 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 
 ## Next Steps
 
-1. **Start with Phase 0**: Set up Phoenix project and database
-2. **Work sequentially**: Don't skip ahead; each phase builds on previous
-3. **Test constantly**: Manual testing after each task
-4. **Iterate**: If something doesn't work, adjust and continue
-5. **Ship early**: Get MVP in front of users as soon as Phase 4 is done
+### ✅ Completed
+1. ~~**Start with Phase 0**: Set up Phoenix project and database~~ ✅ Done
+2. ~~**Phase 1**: Build browser extension~~ ✅ Done
 
-**Ready to begin?** Start with [Backend Implementation](backend.md) for detailed setup instructions.
+### 🔄 In Progress
+3. **Complete Phase 2**: Replace stubbed text detection with real ML integration
+   - File to update: `lossy/lib/lossy/workers/text_detection.ex:13-35`
+   - Integrate Replicate API + PaddleOCR/DBNet model
+   - See [Text Detection Implementation](ml-integration.md) for details
+
+### 🎯 Coming Next
+4. **Phase 3**: Implement LaMa inpainting pipeline
+   - LaMa model for background removal
+   - ImageMagick compositor
+   - Text rendering with font matching
+5. **Phase 4**: Add export and upscaling features
+6. **Test constantly**: Manual testing after each task
+7. **Iterate**: If something doesn't work, adjust and continue
+8. **Ship early**: Get MVP in front of users as soon as Phase 4 is done
+
+**Current Status**: Foundation is rock-solid. Phases 0-1 exceeded expectations with production-quality implementations. Now focus on ML integration (Phase 2-3) to unlock the core editing workflow.
