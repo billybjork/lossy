@@ -9,41 +9,62 @@ import type { CandidateImage } from '../lib/dom-scanner';
 
 export class CaptureOverlay {
   private overlay: HTMLDivElement;
-  private highlights: HTMLDivElement[] = [];
+  private spotlights: HTMLImageElement[] = [];
   private candidates: CandidateImage[];
   private currentIndex = 0;
   private onSelect: (candidate: CandidateImage) => void;
   private handleKeydown: (e: KeyboardEvent) => void;
+  private handleScroll: () => void;
+  private handleResize: () => void;
 
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
     this.candidates = candidates;
     this.onSelect = onSelect;
     this.overlay = this.createOverlay();
 
-    // Bind keyboard handler to this instance
+    // Bind event handlers to this instance
     this.handleKeydown = (e: KeyboardEvent) => {
       this.onKeydown(e);
     };
 
-    this.createHighlights();
+    this.handleScroll = () => {
+      this.updateSpotlightPositions();
+    };
+
+    this.handleResize = () => {
+      this.updateSpotlightPositions();
+    };
+
+    this.createSpotlights();
     this.attachEventListeners();
 
     // Highlight first candidate by default
-    if (this.highlights.length > 0) {
-      this.updateHighlight();
+    if (this.spotlights.length > 0) {
+      this.updateHighlight(false); // Don't scroll on initial setup
     }
   }
 
   private createOverlay(): HTMLDivElement {
     const overlay = document.createElement('div');
     overlay.id = 'lossy-capture-overlay';
+
+    // Get full document dimensions to support scrolling
+    const documentHeight = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight
+    );
+    const documentWidth = Math.max(
+      document.documentElement.scrollWidth,
+      document.body.scrollWidth
+    );
+
     overlay.style.cssText = `
-      position: fixed;
+      position: absolute;
       top: 0;
       left: 0;
-      width: 100vw;
-      height: 100vh;
-      z-index: 2147483647;
+      width: ${documentWidth}px;
+      height: ${documentHeight}px;
+      z-index: 2147483640;
       cursor: crosshair;
       pointer-events: none;
     `;
@@ -71,10 +92,14 @@ export class CaptureOverlay {
     mask.appendChild(maskBg);
 
     // Black rectangles for each image (cuts holes)
+    // Use scroll offset for absolute positioning
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
     this.candidates.forEach(c => {
       const hole = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      hole.setAttribute('x', String(c.rect.left));
-      hole.setAttribute('y', String(c.rect.top));
+      hole.setAttribute('x', String(c.rect.left + scrollLeft));
+      hole.setAttribute('y', String(c.rect.top + scrollTop));
       hole.setAttribute('width', String(c.rect.width));
       hole.setAttribute('height', String(c.rect.height));
       hole.setAttribute('fill', 'black');
@@ -101,7 +126,8 @@ export class CaptureOverlay {
     this.candidates.forEach((candidate, index) => {
       const highlight = this.createHighlight(candidate.rect, index);
       this.highlights.push(highlight);
-      this.overlay.appendChild(highlight);
+      // Append to body, not overlay, so highlights participate in page's natural z-index stacking
+      document.body.appendChild(highlight);
     });
   }
 
@@ -109,10 +135,15 @@ export class CaptureOverlay {
     const highlight = document.createElement('div');
     highlight.className = 'lossy-highlight';
     highlight.dataset.index = String(index);
+
+    // Use absolute positioning with scroll offset so highlights move with page content
+    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
+    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+
     highlight.style.cssText = `
-      position: fixed;
-      top: ${rect.top}px;
-      left: ${rect.left}px;
+      position: absolute;
+      top: ${rect.top + scrollTop}px;
+      left: ${rect.left + scrollLeft}px;
       width: ${rect.width}px;
       height: ${rect.height}px;
       border: 3px solid #3B82F6;
@@ -120,7 +151,7 @@ export class CaptureOverlay {
       pointer-events: auto;
       transition: all 0.2s ease;
       cursor: pointer;
-      z-index: 2147483648;
+      z-index: 100;
     `;
 
     // Add click handler
@@ -156,10 +187,10 @@ export class CaptureOverlay {
 
     if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
       this.currentIndex = (this.currentIndex + 1) % this.candidates.length;
-      this.updateHighlight();
+      this.updateHighlight(true); // Allow scrolling when user navigates
     } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
       this.currentIndex = (this.currentIndex - 1 + this.candidates.length) % this.candidates.length;
-      this.updateHighlight();
+      this.updateHighlight(true); // Allow scrolling when user navigates
     } else if (e.key === 'Enter') {
       this.selectCandidate(this.currentIndex);
     } else if (e.key === 'Escape') {
@@ -167,7 +198,7 @@ export class CaptureOverlay {
     }
   }
 
-  private updateHighlight() {
+  private updateHighlight(shouldScroll: boolean = false) {
     // Reset all highlights
     this.highlights.forEach((highlight, index) => {
       if (index === this.currentIndex) {
@@ -181,20 +212,22 @@ export class CaptureOverlay {
       }
     });
 
-    // Scroll current highlight into view if needed
-    const currentHighlight = this.highlights[this.currentIndex];
-    if (currentHighlight) {
-      const rect = this.candidates[this.currentIndex].rect;
-      const viewportHeight = window.innerHeight;
-      const viewportWidth = window.innerWidth;
+    // Scroll current highlight into view if needed (only when user is navigating)
+    if (shouldScroll) {
+      const currentHighlight = this.highlights[this.currentIndex];
+      if (currentHighlight) {
+        const rect = this.candidates[this.currentIndex].rect;
+        const viewportHeight = window.innerHeight;
+        const viewportWidth = window.innerWidth;
 
-      // Check if element is outside viewport
-      if (rect.top < 0 || rect.bottom > viewportHeight || rect.left < 0 || rect.right > viewportWidth) {
-        this.candidates[this.currentIndex].element.scrollIntoView({
-          behavior: 'smooth',
-          block: 'center',
-          inline: 'center'
-        });
+        // Check if element is outside viewport
+        if (rect.top < 0 || rect.bottom > viewportHeight || rect.left < 0 || rect.right > viewportWidth) {
+          this.candidates[this.currentIndex].element.scrollIntoView({
+            behavior: 'smooth',
+            block: 'center',
+            inline: 'center'
+          });
+        }
       }
     }
   }
@@ -212,6 +245,9 @@ export class CaptureOverlay {
   private cleanup() {
     // Remove keyboard listener
     document.removeEventListener('keydown', this.handleKeydown, true);
+
+    // Remove all highlights from DOM
+    this.highlights.forEach(h => h.remove());
 
     // Remove overlay from DOM
     this.overlay.remove();

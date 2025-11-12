@@ -26,6 +26,12 @@ if ((window as any).lossyInitialized) {
   async function startCapture() {
     console.log('[Lossy] Starting capture with image selection...');
 
+    // Check if overlay already exists - prevent stacking
+    if (document.getElementById('lossy-capture-overlay')) {
+      console.log('[Lossy] Overlay already active, ignoring duplicate activation');
+      return;
+    }
+
     // Find all candidate images on the page
     const candidates = findCandidateImages();
 
