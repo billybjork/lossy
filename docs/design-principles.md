@@ -271,18 +271,18 @@ defmodule Lossy.ML.Inpainting do
   @callback inpaint(image_path, mask) :: {:ok, result} | {:error, reason}
 end
 
-defmodule Lossy.ML.Replicate.Inpainting do
+defmodule Lossy.ML.Fal.Inpainting do
   @behaviour Lossy.ML.Inpainting
   # Implementation
 end
 
-# Easy to swap for fal.ai or self-hosted later
+# Easy to swap for self-hosted later
 ```
 
 **Avoid**: Tight coupling
 ```elixir
-# Replicate API calls scattered throughout codebase
-HTTPoison.post("https://api.replicate.com/...")
+# fal.ai API calls scattered throughout codebase
+HTTPoison.post("https://fal.run/fal-ai/...")
 ```
 
 **Why**:
@@ -327,6 +327,99 @@ HTTPoison.post("https://api.replicate.com/...")
 ### ML Pipeline
 - **Progressive enhancement**: Cloud → local → hybrid
 - **Optimize for change**: ML interface allows swapping providers
+
+---
+
+### 9. Work With The Platform, Not Against It
+
+**What it means**: Understand and leverage the platform's native capabilities instead of fighting them with JavaScript.
+
+**In practice**:
+
+**Web Platform**:
+- Use CSS for what CSS does best (positioning, transitions, layout)
+- Use JavaScript for what JavaScript does best (logic, interactivity)
+- Don't try to reimplement browser features in JS
+
+**Example: Browser Extension Overlay**
+
+**Bad - Fighting the browser:**
+```typescript
+// ❌ Trying to track positions during scroll
+onScroll() {
+  images.forEach(img => {
+    const rect = img.getBoundingClientRect();  // 60 times/second!
+    clone.style.top = `${rect.top + scrollY}px`;  // Causes jitter
+    clone.style.width = `${rect.width}px`;  // Size drift from rounding
+  });
+}
+// Problems:
+// - Layout thrashing (measure/write loop)
+// - Floating-point rounding errors accumulate
+// - 60+ DOM reads/writes per second
+// - Fighting natural scroll behavior
+```
+
+**Good - Working with the browser:**
+```typescript
+// ✅ Let CSS handle scrolling
+createClone(element) {
+  const rect = element.getBoundingClientRect();  // Once
+  const scrollTop = window.pageYOffset;  // Once
+
+  clone.style.position = 'absolute';  // Document-relative!
+  clone.style.top = `${rect.top + scrollTop}px`;  // Set once
+  clone.style.left = `${rect.left + scrollLeft}px`;
+
+  // Never update positions again!
+  // The browser scrolls absolutely-positioned elements naturally
+}
+
+// Only update visual effects, not positions
+onScroll() {
+  updateGlowEffects();  // CSS filter changes only
+}
+```
+
+**Why this works:**
+- `position: absolute` = document-relative positioning
+- Browser handles scroll math automatically
+- Zero JavaScript in scroll hot path
+- Perfect 60fps performance
+
+**More Examples:**
+
+**Elixir/Phoenix**:
+- Use LiveView's push/patch model (don't fight it with client state)
+- Use process message passing (don't reinvent with manual locking)
+- Use pattern matching (don't use if/else chains)
+
+**TypeScript**:
+- Use type narrowing (don't cast everywhere)
+- Use discriminated unions (don't use lots of optional fields)
+- Use const assertions (don't manually type every literal)
+
+**Why**:
+- Platform features are optimized (browser C++, BEAM VM, V8)
+- Less code = less bugs
+- More maintainable (idiomatic patterns)
+- Better performance (native implementations)
+- Easier for others to understand
+
+**How to identify this pattern:**
+- You're working very hard to do something "simple"
+- You're fighting weird edge cases
+- Performance is poor despite optimization
+- You're reimplementing platform features
+
+**Solution:**
+1. Step back and ask: "How does the platform want me to do this?"
+2. Read the docs/spec for the native approach
+3. Try the simple, platform-native way first
+4. Only add complexity if the simple way truly doesn't work
+
+**Real-world lesson from Lossy:**
+> We spent hours trying to track image positions during scroll with complex position updates, ResizeObservers, and careful rounding. The solution was deleting all that code and setting `position: absolute` once. The browser already knows how to scroll positioned elements—we just needed to get out of its way.
 
 ---
 

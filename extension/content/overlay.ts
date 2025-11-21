@@ -76,6 +76,10 @@ export class CaptureOverlay {
   }
 
   private createClones() {
+    // Key insight: Measure ONCE, set position ONCE, never update during scroll.
+    // position: absolute means document-relative, so these clones scroll naturally
+    // with the page without any JavaScript intervention. This avoids layout thrashing,
+    // floating-point drift, and gives us perfect 60fps scrolling for free.
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
 
