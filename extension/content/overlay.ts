@@ -111,15 +111,19 @@ export class CaptureOverlay {
         this.selectCandidate(index);
       });
 
-      // Add hover handlers for hover-only mode
+      // Add hover handlers for hover-only mode + scale effect
       clone.addEventListener('mouseenter', () => {
         this.hoveredIndex = index;
+        // Grow slightly on hover
+        clone.style.transform = 'scale(1.05)';
         if (this.hasScrolled) {
           this.updateHighlight();
         }
       });
 
       clone.addEventListener('mouseleave', () => {
+        // Return to normal size
+        clone.style.transform = 'scale(1)';
         if (this.hoveredIndex === index) {
           this.hoveredIndex = null;
           if (this.hasScrolled) {
@@ -192,9 +196,9 @@ export class CaptureOverlay {
 
   private updateHighlight() {
     this.clones.forEach((clone, index) => {
-      if (this.hasScrolled) {
-        // Hover-only mode: Only spotlight hovered image
-        if (this.hoveredIndex !== null && index === this.hoveredIndex) {
+      if (this.hasScrolled && this.hoveredIndex !== null) {
+        // Hover-only mode: Only spotlight hovered image (others dim)
+        if (index === this.hoveredIndex) {
           // Hovered: bright spotlight
           clone.style.filter = `
             drop-shadow(0 0 20px rgba(255, 255, 255, 0.9))
@@ -203,14 +207,14 @@ export class CaptureOverlay {
           `;
           clone.style.opacity = '1';
         } else {
-          // Not hovered: very dim or hidden
+          // Not hovered: very dim
           clone.style.filter = `
             drop-shadow(0 0 5px rgba(255, 255, 255, 0.15))
           `;
           clone.style.opacity = '0.3';
         }
       } else {
-        // Initial mode: Show all with keyboard navigation highlight
+        // Initial mode OR hover mode but not hovering anything: Show all
         if (index === this.currentIndex) {
           // Active: bright cinematic glow
           clone.style.filter = `
