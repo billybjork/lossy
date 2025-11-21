@@ -25,11 +25,13 @@ export class CaptureOverlay {
   // Continuous scanning fields
   private trackedElements = new WeakSet<HTMLElement>();
   private mutationObserver?: MutationObserver;
+  private intersectionObserver?: IntersectionObserver;
   private idleCallbackId?: number;
   private scanTimeoutId?: number;
   private isScanning = false;
   private lastScanTime = 0;
   private readonly SCAN_THROTTLE_MS = 1000; // Max 1 scan per second
+  private readonly VIEWPORT_BUFFER = '500px'; // Buffer zone around viewport
 
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
     // Defensive cleanup: Remove any lingering overlay elements from previous sessions
@@ -218,33 +220,52 @@ export class CaptureOverlay {
     // Enable scanning
     this.isScanning = true;
 
-    // Setup MutationObserver to watch for new img/picture elements
-    this.mutationObserver = new MutationObserver((mutations) => {
-      // Check if any mutations added new img or picture elements
-      let hasNewImages = false;
+    // Setup IntersectionObserver with buffer zone to catch images approaching viewport
+    // This ensures images are spotted ~500px before entering viewport for immediate availability
+    this.intersectionObserver = new IntersectionObserver(
+      (entries) => {
+        // Only scan if any images entered the buffer zone
+        const hasIntersecting = entries.some(entry => entry.isIntersecting);
+        if (hasIntersecting) {
+          this.scanForNewCandidates();
+        }
+      },
+      {
+        // Buffer zone: start watching images 500px before they enter viewport
+        rootMargin: this.VIEWPORT_BUFFER,
+        // Trigger on any intersection (entering buffer)
+        threshold: 0
+      }
+    );
 
+    // Observe all existing images
+    document.querySelectorAll('img').forEach(img => {
+      // Skip our own clones
+      if (!img.hasAttribute('data-lossy-clone')) {
+        this.intersectionObserver?.observe(img);
+      }
+    });
+
+    // Setup MutationObserver to watch for new img/picture elements
+    // When new images are added, add them to IntersectionObserver
+    this.mutationObserver = new MutationObserver((mutations) => {
       for (const mutation of mutations) {
         if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
           for (const node of Array.from(mutation.addedNodes)) {
             if (node instanceof HTMLElement) {
-              // Check if it's an img/picture or contains img/picture elements
-              if (
-                node.tagName === 'IMG' ||
-                node.tagName === 'PICTURE' ||
-                node.querySelector('img, picture')
-              ) {
-                hasNewImages = true;
-                break;
+              // If it's an img element, observe it
+              if (node.tagName === 'IMG' && !node.hasAttribute('data-lossy-clone')) {
+                this.intersectionObserver?.observe(node);
               }
+              // If it contains img elements, observe them
+              node.querySelectorAll('img').forEach(img => {
+                if (!img.hasAttribute('data-lossy-clone')) {
+                  this.intersectionObserver?.observe(img);
+                }
+              });
             }
           }
         }
-        if (hasNewImages) break;
-      }
-
-      // If new images detected, scan for candidates
-      if (hasNewImages) {
-        this.scanForNewCandidates();
       }
     });
 
@@ -277,6 +298,12 @@ export class CaptureOverlay {
   private stopContinuousScanning() {
     // Stop scanning flag (prevents any pending callbacks from running)
     this.isScanning = false;
+
+    // Disconnect IntersectionObserver
+    if (this.intersectionObserver) {
+      this.intersectionObserver.disconnect();
+      this.intersectionObserver = undefined;
+    }
 
     // Disconnect MutationObserver
     if (this.mutationObserver) {
