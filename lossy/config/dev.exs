@@ -86,3 +86,7 @@ config :phoenix_live_view,
 
 # Disable swoosh api client as it is only required for production adapters.
 config :swoosh, :api_client, false
+
+# ML services configuration for development
+config :lossy, :ml_services,
+  fal_api_key: System.get_env("FAL_API_KEY")

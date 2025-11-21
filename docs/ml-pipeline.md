@@ -20,7 +20,7 @@ This document covers all machine learning and computer vision decisions for Loss
 
 ### MVP Strategy
 
-**Run ALL ML in the cloud** (Replicate to start):
+**Run ALL ML in the cloud** (fal.ai to start):
 - Simpler deployment and debugging
 - Single round-trip for complete text detection
 - Predictable infrastructure while the MVP ships
@@ -53,7 +53,7 @@ This keeps concurrency and pipeline complexity in Elixir (where it's easier) ear
 
 ### MVP Choice
 
-**Use PaddleOCR/DBNet-based text detection in the cloud** (via Replicate or self-hosted).
+**Use PaddleOCR/DBNet-based text detection in the cloud** (via fal.ai or self-hosted).
 
 **Output Format**:
 - List of bounding boxes (quadrilaterals preferred for rotated text support)
@@ -95,7 +95,7 @@ Convert **DBNet with MobileNet backbone** to ONNX:
 
 ### MVP Choice
 
-**Use LaMa** (via Replicate or dedicated microservice).
+**Use LaMa** (via fal.ai or dedicated microservice).
 
 **Input**:
 - Image patch around text region
@@ -326,22 +326,22 @@ Export
 
 ## Model Hosting & Integration
 
-See [Technology Stack](technology-stack.md) for platform decisions (Replicate vs fal.ai vs self-hosted).
+See [Technology Stack](technology-stack.md) for platform decisions (fal.ai vs self-hosted).
 
-### MVP: Replicate API
+### MVP: fal.ai API
 
 **Text Detection**:
-- Use PaddleOCR model on Replicate
+- Use PaddleOCR model on fal.ai
 - Input: Image URL or base64
 - Output: JSON list of bounding boxes
 
 **Inpainting**:
-- Use LaMa model on Replicate
+- Use LaMa model on fal.ai
 - Input: Image + mask
 - Output: Inpainted image
 
 **Upscaling**:
-- Use Real-ESRGAN model on Replicate
+- Use Real-ESRGAN model on fal.ai
 - Input: Image, scale factor
 - Output: Upscaled image
 
@@ -349,20 +349,20 @@ See [Technology Stack](technology-stack.md) for platform decisions (Replicate vs
 
 ```elixir
 # Pseudo-code
-defmodule Lossy.ML.ReplicateClient do
+defmodule Lossy.ML.FalClient do
   def detect_text(image_url) do
     HTTPoison.post(
-      "https://api.replicate.com/v1/predictions",
-      %{version: "paddleocr-version-id", input: %{image: image_url}},
-      headers: [{"Authorization", "Token #{api_key}"}]
+      "https://fal.run/fal-ai/paddleocr",
+      %{input: %{image_url: image_url}},
+      headers: [{"Authorization", "Key #{api_key}"}]
     )
   end
 
   def inpaint_region(image_url, mask_url) do
     HTTPoison.post(
-      "https://api.replicate.com/v1/predictions",
-      %{version: "lama-version-id", input: %{image: image_url, mask: mask_url}},
-      headers: [{"Authorization", "Token #{api_key}"}]
+      "https://fal.run/fal-ai/lama",
+      %{input: %{image_url: image_url, mask_url: mask_url}},
+      headers: [{"Authorization", "Key #{api_key}"}]
     )
   end
 end

@@ -53,19 +53,6 @@ This document covers key technology choices and the rationale behind them.
 
 ### Platform Options
 
-#### Replicate
-**Pros**:
-- Simple HTTP API
-- Marketplace of pre-built models (LaMa, Real-ESRGAN, PaddleOCR, etc.)
-- Per-second or per-image pricing
-- Easy to experiment and swap models
-- Great developer experience
-
-**Cons**:
-- Less control over infrastructure
-- Potential cold starts
-- Cost can scale unpredictably
-
 #### fal.ai
 **Pros**:
 - High-performance image/video infrastructure
@@ -93,7 +80,7 @@ This document covers key technology choices and the rationale behind them.
 
 ### MVP Decision
 
-**Run every ML stage in the cloud (Replicate to start).**
+**Run every ML stage in the cloud (fal.ai to start).**
 
 **Reasoning**:
 - Quick to integrate (HTTP API with SDKs)
@@ -115,7 +102,7 @@ This document covers key technology choices and the rationale behind them.
 
 **Hybrid Approach** (likely end-state):
 - Text detection: Local (ONNX in browser)
-- Inpainting: Cloud (Replicate/fal/self-hosted)
+- Inpainting: Cloud (fal.ai/self-hosted)
 - Upscaling: Cloud with caching
 
 ---
@@ -432,7 +419,7 @@ config :lossy, :ml_pipeline,
 1. **Elixir + Phoenix**: Best-in-class for real-time, concurrent apps
 2. **LiveView**: Eliminates frontend complexity while maintaining rich interactivity
 3. **PostgreSQL**: Industry standard, rock-solid, great Elixir support
-4. **Replicate**: Fastest path to ML capabilities without infrastructure burden
+4. **fal.ai**: High-performance ML inference without infrastructure burden
 5. **Google Fonts**: Largest high-quality open-source font library
 6. **Plain Phoenix/Ecto**: Right-sized for MVP, clear upgrade path if needed
 

@@ -38,7 +38,7 @@ See [Implementation Roadmap](docs/implementation/roadmap.md) for the step-by-ste
 - **Frontend**: TypeScript, Manifest V3 browser extension
 - **Backend**: Elixir, Phoenix, LiveView
 - **Database**: PostgreSQL
-- **ML Inference**: Cloud-based (Replicate) with future local inference
+- **ML Inference**: Cloud-based (fal.ai) with future local inference
 - **Image Processing**: ImageMagick/libvips
 
 ## MVP Goal

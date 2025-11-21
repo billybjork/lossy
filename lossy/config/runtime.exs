@@ -117,3 +117,8 @@ if config_env() == :prod do
   #
   # See https://hexdocs.pm/swoosh/Swoosh.html#module-installation for details.
 end
+
+# ML services configuration (all environments)
+# Load API keys from environment variables
+config :lossy, :ml_services,
+  fal_api_key: System.get_env("FAL_API_KEY")

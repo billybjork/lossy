@@ -64,7 +64,24 @@ config :tailwind,
 # Configures Elixir's Logger
 config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id]
+  metadata: [
+    :request_id,
+    :document_id,
+    :kind,
+    :url,
+    :reason,
+    :width,
+    :height,
+    :errors,
+    :status,
+    :capture_mode,
+    :has_image_url,
+    :has_image_data,
+    :attrs,
+    :file_path,
+    :error,
+    :stacktrace
+  ]
 
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
@@ -104,6 +121,10 @@ config :lossy, :image_processing,
   export_png_compression: 6,
   default_font: "Inter",
   fallback_fonts: ["Roboto", "Arial", "sans-serif"]
+
+# ML services configuration (API keys loaded from environment)
+config :lossy, :ml_services,
+  fal_api_key: nil  # Set via environment variable in dev.exs/runtime.exs
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

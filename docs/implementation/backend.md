@@ -27,7 +27,7 @@ lib/
 │   │   ├── asset.ex
 │   │   └── store.ex
 │   ├── ml/                         # ML service integration
-│   │   ├── replicate_client.ex
+│   │   ├── fal_client.ex
 │   │   ├── text_detection.ex
 │   │   ├── inpainting.ex
 │   │   └── upscaling.ex
@@ -428,34 +428,24 @@ end
 
 ## ML Service Integration
 
-### Replicate Client
+### fal.ai Client
 
-**File**: `lib/lossy/ml/replicate_client.ex`
+**File**: `lib/lossy/ml/fal_client.ex`
 
 ```elixir
-defmodule Lossy.ML.ReplicateClient do
-  @api_url "https://api.replicate.com/v1/predictions"
+defmodule Lossy.ML.FalClient do
+  @base_url "https://fal.run/fal-ai"
 
-  def create_prediction(version_id, input) do
-    api_key = Application.get_env(:lossy, :replicate_api_key)
+  def run_model(model_path, input) do
+    api_key = Application.get_env(:lossy, :fal_api_key)
 
     HTTPoison.post(
-      @api_url,
-      Jason.encode!(%{version: version_id, input: input}),
+      "#{@base_url}/#{model_path}",
+      Jason.encode!(%{input: input}),
       [
-        {"Authorization", "Token #{api_key}"},
+        {"Authorization", "Key #{api_key}"},
         {"Content-Type", "application/json"}
       ]
-    )
-    |> handle_response()
-  end
-
-  def get_prediction(prediction_id) do
-    api_key = Application.get_env(:lossy, :replicate_api_key)
-
-    HTTPoison.get(
-      "#{@api_url}/#{prediction_id}",
-      [{"Authorization", "Token #{api_key}"}]
     )
     |> handle_response()
   end
@@ -480,30 +470,15 @@ end
 
 ```elixir
 defmodule Lossy.ML.TextDetection do
-  alias Lossy.ML.ReplicateClient
+  alias Lossy.ML.FalClient
 
-  @paddleocr_version "version-id-here"
+  @paddleocr_model "paddleocr"
 
   def detect(image_path) do
-    input = %{image: image_path}
+    input = %{image_url: image_path}
 
-    with {:ok, prediction} <- ReplicateClient.create_prediction(@paddleocr_version, input),
-         {:ok, result} <- await_completion(prediction["id"]) do
+    with {:ok, result} <- FalClient.run_model(@paddleocr_model, input) do
       parse_detection_result(result)
-    end
-  end
-
-  defp await_completion(prediction_id, attempts \\ 0) do
-    if attempts > 60, do: {:error, :timeout}
-
-    {:ok, prediction} = ReplicateClient.get_prediction(prediction_id)
-
-    case prediction["status"] do
-      "succeeded" -> {:ok, prediction["output"]}
-      "failed" -> {:error, prediction["error"]}
-      _ ->
-        Process.sleep(1000)
-        await_completion(prediction_id, attempts + 1)
     end
   end
 
@@ -536,22 +511,21 @@ end
 
 ```elixir
 defmodule Lossy.ML.Inpainting do
-  alias Lossy.ML.ReplicateClient
+  alias Lossy.ML.FalClient
 
-  @lama_version "version-id-here"
+  @lama_model "lama"
 
   def inpaint(image_path, bbox) do
     # Create mask image
     mask_path = create_mask(image_path, bbox)
 
     input = %{
-      image: image_path,
-      mask: mask_path
+      image_url: image_path,
+      mask_url: mask_path
     }
 
-    with {:ok, prediction} <- ReplicateClient.create_prediction(@lama_version, input),
-         {:ok, result_url} <- await_completion(prediction["id"]),
-         {:ok, local_path} <- download_result(result_url) do
+    with {:ok, result} <- FalClient.run_model(@lama_model, input),
+         {:ok, local_path} <- download_result(result["image"]["url"]) do
       {:ok, local_path}
     end
   end
@@ -568,7 +542,6 @@ defmodule Lossy.ML.Inpainting do
     # ... implementation using Mogrify ...
   end
 
-  defp await_completion(prediction_id), do: # Similar to text detection
   defp download_result(url), do: # Download file from URL and save locally
 end
 ```
@@ -767,11 +740,7 @@ config :lossy, :image_processing,
 
 # External Services (secrets via env vars)
 config :lossy, :ml_services,
-  replicate_api_key: System.get_env("REPLICATE_API_KEY"),
-  fal_api_key: System.get_env("FAL_API_KEY"),
-  paddleocr_version: "version-id-here",
-  lama_version: "version-id-here",
-  real_esrgan_version: "version-id-here"
+  fal_api_key: System.get_env("FAL_API_KEY")
 ```
 
 **Accessing config in code**:
@@ -799,7 +768,7 @@ end
 ## Deployment Considerations
 
 ### Environment Variables
-- `REPLICATE_API_KEY`: API key for ML services
+- `FAL_API_KEY`: API key for ML services
 - `DATABASE_URL`: PostgreSQL connection string
 - `SECRET_KEY_BASE`: Phoenix secret
 

@@ -31,7 +31,7 @@ See [Extension Implementation Guide](implementation/extension.md) for details.
 **Responsibilities**:
 - Domain model and persistence
 - Job orchestration for ML pipeline
-- Integration with external inference services (fal/Replicate)
+- Integration with external inference services (fal.ai)
 - LiveView hosting for the editor interface
 
 **Key Design Principles**:
@@ -82,9 +82,9 @@ See [Editor Implementation Guide](implementation/editor.md) for details.
 - Font detection (optional, heuristic-based initially)
 
 **Deployment Strategy**:
-- **MVP**: All ML runs in the cloud (Replicate/fal) for consistent latency and simpler ops
+- **MVP**: All ML runs in the cloud (fal.ai) for consistent latency and simpler ops
 - **v2**: Allow the extension to post optional text-region payloads produced locally (ONNX Runtime Web + WebGPU) while keeping the backend detector as the default
-- **Later**: Consider self-hosted or fal.ai for performance-critical models, and evaluate lightweight local inpainting for tiny edits
+- **Later**: Consider self-hosted for performance-critical models, and evaluate lightweight local inpainting for tiny edits
 
 See [ML Pipeline](ml-pipeline.md) for model choices and [Technology Stack](technology-stack.md) for platform decisions.
 
@@ -100,7 +100,7 @@ Web Page → Extension (capture) → POST /api/captures → Phoenix Backend
                                                             ↓
                                                     Enqueue text detection job
                                                             ↓
-                                                    Call ML service (Replicate)
+                                                    Call ML service (fal.ai)
                                                             ↓
                                                     Create TextRegion records
                                                             ↓
@@ -113,7 +113,7 @@ User edits text → LiveView event → Update TextRegion.current_text
                                             ↓
                                     Enqueue inpainting job
                                             ↓
-                                    Call LaMa model (Replicate)
+                                    Call LaMa model (fal.ai)
                                             ↓
                                     Composite patch into working_image_path
                                             ↓
@@ -155,7 +155,7 @@ User clicks "Download" → Generate final composite image
 ### ML Layer
 - **What**: Computer vision tasks (detection, inpainting, upscaling)
 - **Not What**: Application logic, data persistence
-- **Tools**: Replicate API, PaddleOCR, LaMa, Real-ESRGAN
+- **Tools**: fal.ai API, PaddleOCR, LaMa, Real-ESRGAN
 
 ## Concurrency Model
 
@@ -178,9 +178,9 @@ User clicks "Download" → Generate final composite image
 
 ### MVP (Current Focus)
 - Single Phoenix server
-- External ML inference (Replicate)
+- External ML inference (fal.ai)
 - Postgres for persistence
-- Simple Task.Supervisor for jobs
+- Oban for job processing
 
 ### Future Optimization Paths
 1. **Local ML**: Move text detection to browser (WebGPU)
