@@ -15,23 +15,46 @@ export class CaptureOverlay {
   private currentIndex = 0;
   private onSelect: (candidate: CandidateImage) => void;
   private handleKeydown: (e: KeyboardEvent) => void;
-  private handleScroll: () => void;
   private handleResize: () => void;
   private fadeOutTimeout?: number;
-  private lastScrollY = 0;
-  private scrollDirection: 'up' | 'down' | null = null;
   private hoveredIndex: number | null = null;
 
   // Continuous scanning fields
   private trackedElements = new WeakSet<HTMLElement>();
   private mutationObserver?: MutationObserver;
   private intersectionObserver?: IntersectionObserver;
-  private idleCallbackId?: number;
-  private scanTimeoutId?: number;
+  private scanIntervalId?: number;
   private isScanning = false;
   private lastScanTime = 0;
+  private cloneListenersController = new AbortController();
+
+  // Constants
   private readonly SCAN_THROTTLE_MS = 1000; // Max 1 scan per second
+  private readonly SCAN_INTERVAL_MS = 2500; // Periodic scan interval
   private readonly VIEWPORT_BUFFER = '500px'; // Buffer zone around viewport
+  private readonly Z_INDEX_OVERLAY = 2147483640; // Overlay layer z-index
+  private readonly Z_INDEX_CLONE = 2147483641; // Clone layer z-index (above overlay)
+  private readonly STAGGER_DELAY_MS = 60; // Delay between clone animations
+  private readonly FADE_OUT_DURATION_MS = 300; // Fade out animation duration
+
+  // Spotlight filter styles
+  private readonly FILTER_HOVER_ACTIVE = `
+    drop-shadow(0 0 20px rgba(255, 255, 255, 0.45))
+    drop-shadow(0 0 40px rgba(255, 255, 255, 0.3))
+    drop-shadow(0 0 80px rgba(255, 255, 255, 0.15))
+  `;
+  private readonly FILTER_HOVER_INACTIVE = `
+    drop-shadow(0 0 5px rgba(255, 255, 255, 0.1))
+  `;
+  private readonly FILTER_KEYBOARD_ACTIVE = `
+    drop-shadow(0 0 20px rgba(255, 255, 255, 0.6))
+    drop-shadow(0 0 40px rgba(255, 255, 255, 0.4))
+    drop-shadow(0 0 80px rgba(255, 255, 255, 0.2))
+  `;
+  private readonly FILTER_KEYBOARD_INACTIVE = `
+    drop-shadow(0 0 10px rgba(255, 255, 255, 0.25))
+    drop-shadow(0 0 20px rgba(255, 255, 255, 0.12))
+  `;
 
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
     // Defensive cleanup: Remove any lingering overlay elements from previous sessions
@@ -43,13 +66,7 @@ export class CaptureOverlay {
 
     // Bind event handlers
     this.handleKeydown = (e: KeyboardEvent) => this.onKeydown(e);
-    this.handleScroll = () => {
-      // Track scroll for potential future use (currently unused)
-    };
     this.handleResize = () => this.fadeOutAndExit();
-
-    // Store initial scroll position
-    this.lastScrollY = window.pageYOffset || document.documentElement.scrollTop;
 
     this.createClones();
     this.attachEventListeners();
@@ -74,7 +91,7 @@ export class CaptureOverlay {
       inset: 0;
       background: rgba(0, 0, 0, 0.92);
       backdrop-filter: blur(2px);
-      z-index: 2147483640;
+      z-index: ${this.Z_INDEX_OVERLAY};
       cursor: crosshair;
       opacity: 0;
       transition: opacity 0.2s ease-out;
@@ -127,7 +144,7 @@ export class CaptureOverlay {
       width: ${rect.width}px;
       height: ${rect.height}px;
       object-fit: cover;
-      z-index: 2147483641;
+      z-index: ${this.Z_INDEX_CLONE};
       cursor: pointer;
       transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       pointer-events: auto;
@@ -135,11 +152,14 @@ export class CaptureOverlay {
       transform: scale(0.85);
     `;
 
+    // Add event listeners using AbortController for clean cleanup
+    const signal = this.cloneListenersController.signal;
+
     // Add click handler
     clone.addEventListener('click', (e) => {
       e.stopPropagation();
       this.selectCandidate(index);
-    });
+    }, { signal });
 
     // Add hover handlers for single spotlight mode + scale effect
     clone.addEventListener('mouseenter', () => {
@@ -147,7 +167,7 @@ export class CaptureOverlay {
       // Grow slightly on hover
       clone.style.transform = 'scale(1.05)';
       this.updateHighlight();
-    });
+    }, { signal });
 
     clone.addEventListener('mouseleave', () => {
       // Return to normal size
@@ -156,7 +176,7 @@ export class CaptureOverlay {
         this.hoveredIndex = null;
         this.updateHighlight();
       }
-    });
+    }, { signal });
 
     this.clones.push(clone);
 
@@ -175,7 +195,7 @@ export class CaptureOverlay {
         clone.style.transition = 'opacity 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.4s ease-out';
         clone.style.opacity = '1';
         clone.style.transform = 'scale(1)';
-      }, index * 60); // Slightly longer stagger for dramatic effect
+      }, index * this.STAGGER_DELAY_MS);
     });
   }
 
@@ -275,24 +295,12 @@ export class CaptureOverlay {
       subtree: true
     });
 
-    // Setup periodic idle callback for edge cases (background-image changes, etc.)
-    const scheduleIdleScan = () => {
-      // Don't schedule if scanning has been stopped
-      if (!this.isScanning) {
-        return;
-      }
-
-      this.idleCallbackId = requestIdleCallback(() => {
-        this.scanForNewCandidates();
-
-        // Schedule next scan in 2-3 seconds (store the timeout ID)
-        this.scanTimeoutId = window.setTimeout(() => {
-          scheduleIdleScan();
-        }, 2500);
-      });
-    };
-
-    scheduleIdleScan();
+    // Setup periodic scanning for edge cases (background-image changes, etc.)
+    // Use interval to avoid recursive pattern complexity
+    this.scanIntervalId = window.setInterval(() => {
+      if (!this.isScanning) return;
+      requestIdleCallback(() => this.scanForNewCandidates());
+    }, this.SCAN_INTERVAL_MS);
   }
 
   private stopContinuousScanning() {
@@ -311,16 +319,10 @@ export class CaptureOverlay {
       this.mutationObserver = undefined;
     }
 
-    // Cancel idle callback
-    if (this.idleCallbackId) {
-      cancelIdleCallback(this.idleCallbackId);
-      this.idleCallbackId = undefined;
-    }
-
-    // Clear pending timeout
-    if (this.scanTimeoutId) {
-      clearTimeout(this.scanTimeoutId);
-      this.scanTimeoutId = undefined;
+    // Clear scan interval
+    if (this.scanIntervalId) {
+      clearInterval(this.scanIntervalId);
+      this.scanIntervalId = undefined;
     }
   }
 
@@ -340,7 +342,6 @@ export class CaptureOverlay {
 
   private attachEventListeners() {
     document.addEventListener('keydown', this.handleKeydown, true);
-    window.addEventListener('scroll', this.handleScroll, { passive: true });
     window.addEventListener('resize', this.handleResize, { passive: true });
   }
 
@@ -376,36 +377,19 @@ export class CaptureOverlay {
       if (this.hoveredIndex !== null) {
         // Single spotlight mode: Only spotlight hovered image (others dim)
         if (index === this.hoveredIndex) {
-          // Hovered: subtle spotlight
-          clone.style.filter = `
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.45))
-            drop-shadow(0 0 40px rgba(255, 255, 255, 0.3))
-            drop-shadow(0 0 80px rgba(255, 255, 255, 0.15))
-          `;
+          clone.style.filter = this.FILTER_HOVER_ACTIVE;
           clone.style.opacity = '1';
         } else {
-          // Not hovered: very dim
-          clone.style.filter = `
-            drop-shadow(0 0 5px rgba(255, 255, 255, 0.1))
-          `;
+          clone.style.filter = this.FILTER_HOVER_INACTIVE;
           clone.style.opacity = '0.3';
         }
       } else {
-        // Initial mode OR hover mode but not hovering anything: Show all
+        // Keyboard navigation mode: Show all with current highlighted
         if (index === this.currentIndex) {
-          // Active: bright cinematic glow
-          clone.style.filter = `
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.6))
-            drop-shadow(0 0 40px rgba(255, 255, 255, 0.4))
-            drop-shadow(0 0 80px rgba(255, 255, 255, 0.2))
-          `;
+          clone.style.filter = this.FILTER_KEYBOARD_ACTIVE;
           clone.style.opacity = '1';
         } else {
-          // Inactive: subtle glow
-          clone.style.filter = `
-            drop-shadow(0 0 10px rgba(255, 255, 255, 0.25))
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.12))
-          `;
+          clone.style.filter = this.FILTER_KEYBOARD_INACTIVE;
           clone.style.opacity = '1';
         }
       }
@@ -429,21 +413,18 @@ export class CaptureOverlay {
     // Fade out overlay
     this.overlay.style.opacity = '0';
 
-    // Directional fade-out with blur based on scroll direction
-    const translateY = this.scrollDirection === 'down' ? '20px' :
-                       this.scrollDirection === 'up' ? '-20px' : '0';
-
+    // Fade-out with blur and slight scale
     this.clones.forEach(clone => {
       clone.style.transition = 'opacity 0.4s cubic-bezier(0.4, 0, 1, 1), transform 0.4s cubic-bezier(0.4, 0, 1, 1), filter 0.4s cubic-bezier(0.4, 0, 1, 1)';
       clone.style.opacity = '0';
-      clone.style.transform = `translateY(${translateY}) scale(0.9)`;
-      clone.style.filter = 'blur(12px)';  // More aggressive blur
+      clone.style.transform = 'scale(0.9)';
+      clone.style.filter = 'blur(12px)';
     });
 
     // Wait for animation, then cleanup
     this.fadeOutTimeout = window.setTimeout(() => {
       this.cleanup();
-    }, 300);
+    }, this.FADE_OUT_DURATION_MS);
   }
 
   private cleanupLingering() {
@@ -464,9 +445,11 @@ export class CaptureOverlay {
     // Stop continuous scanning
     this.stopContinuousScanning();
 
-    // Remove event listeners
+    // Abort all clone event listeners
+    this.cloneListenersController.abort();
+
+    // Remove global event listeners
     document.removeEventListener('keydown', this.handleKeydown, true);
-    window.removeEventListener('scroll', this.handleScroll);
     window.removeEventListener('resize', this.handleResize);
 
     // Robust cleanup: Query DOM directly for all our elements
