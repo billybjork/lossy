@@ -23,8 +23,13 @@ const MIN_SIZE = 100; // Minimum width and height in pixels
 export function findCandidateImages(): CandidateImage[] {
   const candidates: CandidateImage[] = [];
 
-  // 1. Find <img> elements
+  // 1. Find <img> elements (excluding Lossy's own clones)
   document.querySelectorAll('img').forEach(img => {
+    // Skip our own overlay clones
+    if (img.hasAttribute('data-lossy-clone')) {
+      return;
+    }
+
     const rect = img.getBoundingClientRect();
     if (isVisible(img) && isLargeEnough(rect)) {
       candidates.push({

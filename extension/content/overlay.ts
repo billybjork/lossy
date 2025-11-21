@@ -22,7 +22,19 @@ export class CaptureOverlay {
   private scrollDirection: 'up' | 'down' | null = null;
   private hoveredIndex: number | null = null;
 
+  // Continuous scanning fields
+  private trackedElements = new WeakSet<HTMLElement>();
+  private mutationObserver?: MutationObserver;
+  private idleCallbackId?: number;
+  private scanTimeoutId?: number;
+  private isScanning = false;
+  private lastScanTime = 0;
+  private readonly SCAN_THROTTLE_MS = 1000; // Max 1 scan per second
+
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
+    // Defensive cleanup: Remove any lingering overlay elements from previous sessions
+    this.cleanupLingering();
+
     this.candidates = candidates;
     this.onSelect = onSelect;
     this.overlay = this.createOverlay();
@@ -40,11 +52,21 @@ export class CaptureOverlay {
     this.createClones();
     this.attachEventListeners();
     this.updateHighlight();
+
+    // Initialize continuous scanning
+    // First, track all initial candidates
+    this.candidates.forEach(candidate => {
+      this.trackedElements.add(candidate.element);
+    });
+
+    // Start watching for new images
+    this.setupContinuousScanning();
   }
 
   private createOverlay(): HTMLDivElement {
     const overlay = document.createElement('div');
     overlay.id = 'lossy-capture-overlay';
+    overlay.setAttribute('data-lossy-overlay', 'true');
     overlay.style.cssText = `
       position: fixed;
       inset: 0;
@@ -75,71 +97,204 @@ export class CaptureOverlay {
     // position: absolute means document-relative, so these clones scroll naturally
     // with the page without any JavaScript intervention. This avoids layout thrashing,
     // floating-point drift, and gives us perfect 60fps scrolling for free.
+    this.candidates.forEach((candidate, index) => {
+      this.createSingleClone(candidate, index);
+    });
+  }
+
+  private createSingleClone(candidate: CandidateImage, index: number) {
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
+    const rect = candidate.element.getBoundingClientRect();
+    const clone = document.createElement('img');
 
-    this.candidates.forEach((candidate, index) => {
-      const rect = candidate.element.getBoundingClientRect();
-      const clone = document.createElement('img');
+    // Mark as Lossy clone for robust cleanup
+    clone.setAttribute('data-lossy-clone', 'true');
 
-      // Get image source
-      const src = this.getImageSrc(candidate.element);
-      if (src) {
-        clone.src = src;
+    // Get image source
+    const src = this.getImageSrc(candidate.element);
+    if (src) {
+      clone.src = src;
+    }
+
+    // Position clone at same location as original (absolute positioning)
+    clone.style.cssText = `
+      position: absolute;
+      top: ${rect.top + scrollTop}px;
+      left: ${rect.left + scrollLeft}px;
+      width: ${rect.width}px;
+      height: ${rect.height}px;
+      object-fit: cover;
+      z-index: 2147483641;
+      cursor: pointer;
+      transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: auto;
+      opacity: 0;
+      transform: scale(0.85);
+    `;
+
+    // Add click handler
+    clone.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.selectCandidate(index);
+    });
+
+    // Add hover handlers for single spotlight mode + scale effect
+    clone.addEventListener('mouseenter', () => {
+      this.hoveredIndex = index;
+      // Grow slightly on hover
+      clone.style.transform = 'scale(1.05)';
+      this.updateHighlight();
+    });
+
+    clone.addEventListener('mouseleave', () => {
+      // Return to normal size
+      clone.style.transform = 'scale(1)';
+      if (this.hoveredIndex === index) {
+        this.hoveredIndex = null;
+        this.updateHighlight();
+      }
+    });
+
+    this.clones.push(clone);
+
+    // Track the clone BEFORE appending to DOM to prevent race condition:
+    // MutationObserver could fire immediately after appendChild and try to clone the clone
+    // if it's not already tracked. Adding to WeakSet first closes this race condition window.
+    this.trackedElements.add(clone);
+
+    // Now safe to append - clone is already tracked
+    document.body.appendChild(clone);
+
+    // Staggered fade-in animation with bounce
+    requestAnimationFrame(() => {
+      setTimeout(() => {
+        // Bouncy spring easing for more energy
+        clone.style.transition = 'opacity 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.4s ease-out';
+        clone.style.opacity = '1';
+        clone.style.transform = 'scale(1)';
+      }, index * 60); // Slightly longer stagger for dramatic effect
+    });
+  }
+
+  private scanForNewCandidates() {
+    // Early exit if scanning has been stopped
+    if (!this.isScanning) {
+      return;
+    }
+
+    // Throttle: Only scan once per second
+    const now = Date.now();
+    if (now - this.lastScanTime < this.SCAN_THROTTLE_MS) {
+      return;
+    }
+    this.lastScanTime = now;
+
+    // Find all current candidate images
+    const allCandidates = findCandidateImages();
+
+    // Filter out images we've already cloned
+    const newCandidates = allCandidates.filter(
+      candidate => !this.trackedElements.has(candidate.element)
+    );
+
+    // Early exit if no new candidates
+    if (newCandidates.length === 0) {
+      return;
+    }
+
+    // Add new candidates to our tracking
+    newCandidates.forEach(candidate => {
+      this.trackedElements.add(candidate.element);
+
+      // Add to candidates array and create clone
+      const index = this.candidates.length;
+      this.candidates.push(candidate);
+      this.createSingleClone(candidate, index);
+    });
+  }
+
+  private setupContinuousScanning() {
+    // Enable scanning
+    this.isScanning = true;
+
+    // Setup MutationObserver to watch for new img/picture elements
+    this.mutationObserver = new MutationObserver((mutations) => {
+      // Check if any mutations added new img or picture elements
+      let hasNewImages = false;
+
+      for (const mutation of mutations) {
+        if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+          for (const node of Array.from(mutation.addedNodes)) {
+            if (node instanceof HTMLElement) {
+              // Check if it's an img/picture or contains img/picture elements
+              if (
+                node.tagName === 'IMG' ||
+                node.tagName === 'PICTURE' ||
+                node.querySelector('img, picture')
+              ) {
+                hasNewImages = true;
+                break;
+              }
+            }
+          }
+        }
+        if (hasNewImages) break;
       }
 
-      // Position clone at same location as original (absolute positioning)
-      clone.style.cssText = `
-        position: absolute;
-        top: ${rect.top + scrollTop}px;
-        left: ${rect.left + scrollLeft}px;
-        width: ${rect.width}px;
-        height: ${rect.height}px;
-        object-fit: cover;
-        z-index: 2147483641;
-        cursor: pointer;
-        transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        pointer-events: auto;
-        opacity: 0;
-        transform: scale(0.85);
-      `;
-
-      // Add click handler
-      clone.addEventListener('click', (e) => {
-        e.stopPropagation();
-        this.selectCandidate(index);
-      });
-
-      // Add hover handlers for single spotlight mode + scale effect
-      clone.addEventListener('mouseenter', () => {
-        this.hoveredIndex = index;
-        // Grow slightly on hover
-        clone.style.transform = 'scale(1.05)';
-        this.updateHighlight();
-      });
-
-      clone.addEventListener('mouseleave', () => {
-        // Return to normal size
-        clone.style.transform = 'scale(1)';
-        if (this.hoveredIndex === index) {
-          this.hoveredIndex = null;
-          this.updateHighlight();
-        }
-      });
-
-      this.clones.push(clone);
-      document.body.appendChild(clone);
-
-      // Staggered fade-in animation with bounce
-      requestAnimationFrame(() => {
-        setTimeout(() => {
-          // Bouncy spring easing for more energy
-          clone.style.transition = 'opacity 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.4s ease-out';
-          clone.style.opacity = '1';
-          clone.style.transform = 'scale(1)';
-        }, index * 60); // Slightly longer stagger for dramatic effect
-      });
+      // If new images detected, scan for candidates
+      if (hasNewImages) {
+        this.scanForNewCandidates();
+      }
     });
+
+    // Start observing the entire document for new elements
+    this.mutationObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+
+    // Setup periodic idle callback for edge cases (background-image changes, etc.)
+    const scheduleIdleScan = () => {
+      // Don't schedule if scanning has been stopped
+      if (!this.isScanning) {
+        return;
+      }
+
+      this.idleCallbackId = requestIdleCallback(() => {
+        this.scanForNewCandidates();
+
+        // Schedule next scan in 2-3 seconds (store the timeout ID)
+        this.scanTimeoutId = window.setTimeout(() => {
+          scheduleIdleScan();
+        }, 2500);
+      });
+    };
+
+    scheduleIdleScan();
+  }
+
+  private stopContinuousScanning() {
+    // Stop scanning flag (prevents any pending callbacks from running)
+    this.isScanning = false;
+
+    // Disconnect MutationObserver
+    if (this.mutationObserver) {
+      this.mutationObserver.disconnect();
+      this.mutationObserver = undefined;
+    }
+
+    // Cancel idle callback
+    if (this.idleCallbackId) {
+      cancelIdleCallback(this.idleCallbackId);
+      this.idleCallbackId = undefined;
+    }
+
+    // Clear pending timeout
+    if (this.scanTimeoutId) {
+      clearTimeout(this.scanTimeoutId);
+      this.scanTimeoutId = undefined;
+    }
   }
 
   private getImageSrc(element: HTMLElement): string | null {
@@ -264,21 +419,35 @@ export class CaptureOverlay {
     }, 300);
   }
 
+  private cleanupLingering() {
+    // Remove any lingering overlay elements from previous sessions
+    // This is a "clean slate" approach - query DOM directly rather than relying on memory
+    document.querySelectorAll('[data-lossy-clone="true"]').forEach(el => el.remove());
+    document.querySelectorAll('[data-lossy-overlay="true"]').forEach(el => el.remove());
+    // Also remove by ID as backup
+    document.getElementById('lossy-capture-overlay')?.remove();
+  }
+
   private cleanup() {
     // Clear timeout if exists
     if (this.fadeOutTimeout) {
       clearTimeout(this.fadeOutTimeout);
     }
 
+    // Stop continuous scanning
+    this.stopContinuousScanning();
+
     // Remove event listeners
     document.removeEventListener('keydown', this.handleKeydown, true);
     window.removeEventListener('scroll', this.handleScroll);
     window.removeEventListener('resize', this.handleResize);
 
-    // Remove clones
-    this.clones.forEach(clone => clone.remove());
+    // Robust cleanup: Query DOM directly for all our elements
+    // This ensures we remove EVERYTHING, even if something escaped our tracking
+    this.cleanupLingering();
 
-    // Remove overlay
-    this.overlay.remove();
+    // Clear arrays for good measure
+    this.clones = [];
+    this.candidates = [];
   }
 }
