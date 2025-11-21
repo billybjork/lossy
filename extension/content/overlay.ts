@@ -20,7 +20,6 @@ export class CaptureOverlay {
   private fadeOutTimeout?: number;
   private lastScrollY = 0;
   private scrollDirection: 'up' | 'down' | null = null;
-  private hasScrolled = false;
   private hoveredIndex: number | null = null;
 
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
@@ -31,11 +30,7 @@ export class CaptureOverlay {
     // Bind event handlers
     this.handleKeydown = (e: KeyboardEvent) => this.onKeydown(e);
     this.handleScroll = () => {
-      // On first scroll, switch to hover-only mode (don't fade out)
-      if (!this.hasScrolled) {
-        this.hasScrolled = true;
-        this.updateHighlight();
-      }
+      // Track scroll for potential future use (currently unused)
     };
     this.handleResize = () => this.fadeOutAndExit();
 
@@ -115,14 +110,12 @@ export class CaptureOverlay {
         this.selectCandidate(index);
       });
 
-      // Add hover handlers for hover-only mode + scale effect
+      // Add hover handlers for single spotlight mode + scale effect
       clone.addEventListener('mouseenter', () => {
         this.hoveredIndex = index;
         // Grow slightly on hover
         clone.style.transform = 'scale(1.05)';
-        if (this.hasScrolled) {
-          this.updateHighlight();
-        }
+        this.updateHighlight();
       });
 
       clone.addEventListener('mouseleave', () => {
@@ -130,9 +123,7 @@ export class CaptureOverlay {
         clone.style.transform = 'scale(1)';
         if (this.hoveredIndex === index) {
           this.hoveredIndex = null;
-          if (this.hasScrolled) {
-            this.updateHighlight();
-          }
+          this.updateHighlight();
         }
       });
 
@@ -200,20 +191,20 @@ export class CaptureOverlay {
 
   private updateHighlight() {
     this.clones.forEach((clone, index) => {
-      if (this.hasScrolled && this.hoveredIndex !== null) {
-        // Hover-only mode: Only spotlight hovered image (others dim)
+      if (this.hoveredIndex !== null) {
+        // Single spotlight mode: Only spotlight hovered image (others dim)
         if (index === this.hoveredIndex) {
-          // Hovered: bright spotlight
+          // Hovered: subtle spotlight
           clone.style.filter = `
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.9))
-            drop-shadow(0 0 40px rgba(255, 255, 255, 0.6))
-            drop-shadow(0 0 80px rgba(255, 255, 255, 0.3))
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.45))
+            drop-shadow(0 0 40px rgba(255, 255, 255, 0.3))
+            drop-shadow(0 0 80px rgba(255, 255, 255, 0.15))
           `;
           clone.style.opacity = '1';
         } else {
           // Not hovered: very dim
           clone.style.filter = `
-            drop-shadow(0 0 5px rgba(255, 255, 255, 0.15))
+            drop-shadow(0 0 5px rgba(255, 255, 255, 0.1))
           `;
           clone.style.opacity = '0.3';
         }
@@ -222,16 +213,16 @@ export class CaptureOverlay {
         if (index === this.currentIndex) {
           // Active: bright cinematic glow
           clone.style.filter = `
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.9))
-            drop-shadow(0 0 40px rgba(255, 255, 255, 0.6))
-            drop-shadow(0 0 80px rgba(255, 255, 255, 0.3))
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.6))
+            drop-shadow(0 0 40px rgba(255, 255, 255, 0.4))
+            drop-shadow(0 0 80px rgba(255, 255, 255, 0.2))
           `;
           clone.style.opacity = '1';
         } else {
           // Inactive: subtle glow
           clone.style.filter = `
-            drop-shadow(0 0 10px rgba(255, 255, 255, 0.4))
-            drop-shadow(0 0 20px rgba(255, 255, 255, 0.2))
+            drop-shadow(0 0 10px rgba(255, 255, 255, 0.25))
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.12))
           `;
           clone.style.opacity = '1';
         }
