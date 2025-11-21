@@ -1,235 +1,234 @@
 /**
- * Selection Overlay - Interactive UI for selecting images
+ * Selection Overlay - Minimal cinematic spotlight effect
  *
- * Shows a dimmed overlay with highlighted candidate images.
- * Supports click and keyboard navigation.
+ * Clones candidate images above a dark overlay with spotlight glow.
+ * Fades out gracefully on scroll/resize.
  */
 
 import type { CandidateImage } from '../lib/dom-scanner';
+import { findCandidateImages } from '../lib/dom-scanner';
 
 export class CaptureOverlay {
   private overlay: HTMLDivElement;
-  private spotlights: HTMLImageElement[] = [];
   private candidates: CandidateImage[];
+  private clones: HTMLImageElement[] = [];
   private currentIndex = 0;
   private onSelect: (candidate: CandidateImage) => void;
   private handleKeydown: (e: KeyboardEvent) => void;
   private handleScroll: () => void;
   private handleResize: () => void;
+  private fadeOutTimeout?: number;
+  private lastScrollY = 0;
+  private scrollDirection: 'up' | 'down' | null = null;
+  private hasScrolled = false;
+  private hoveredIndex: number | null = null;
 
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
     this.candidates = candidates;
     this.onSelect = onSelect;
     this.overlay = this.createOverlay();
 
-    // Bind event handlers to this instance
-    this.handleKeydown = (e: KeyboardEvent) => {
-      this.onKeydown(e);
-    };
-
+    // Bind event handlers
+    this.handleKeydown = (e: KeyboardEvent) => this.onKeydown(e);
     this.handleScroll = () => {
-      this.updateSpotlightPositions();
+      // On first scroll, switch to hover-only mode (don't fade out)
+      if (!this.hasScrolled) {
+        this.hasScrolled = true;
+        this.updateHighlight();
+      }
     };
+    this.handleResize = () => this.fadeOutAndExit();
 
-    this.handleResize = () => {
-      this.updateSpotlightPositions();
-    };
+    // Store initial scroll position
+    this.lastScrollY = window.pageYOffset || document.documentElement.scrollTop;
 
-    this.createSpotlights();
+    this.createClones();
     this.attachEventListeners();
-
-    // Highlight first candidate by default
-    if (this.spotlights.length > 0) {
-      this.updateHighlight(false); // Don't scroll on initial setup
-    }
+    this.updateHighlight();
   }
 
   private createOverlay(): HTMLDivElement {
     const overlay = document.createElement('div');
     overlay.id = 'lossy-capture-overlay';
-
-    // Get full document dimensions to support scrolling
-    const documentHeight = Math.max(
-      document.documentElement.scrollHeight,
-      document.body.scrollHeight
-    );
-    const documentWidth = Math.max(
-      document.documentElement.scrollWidth,
-      document.body.scrollWidth
-    );
-
     overlay.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: ${documentWidth}px;
-      height: ${documentHeight}px;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.92);
+      backdrop-filter: blur(2px);
       z-index: 2147483640;
       cursor: crosshair;
-      pointer-events: none;
+      opacity: 0;
+      transition: opacity 0.2s ease-out;
+      pointer-events: auto;
     `;
 
-    // Create SVG with mask to cut holes for images
-    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-    svg.style.cssText = `
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 100%;
-      pointer-events: none;
-    `;
+    document.body.appendChild(overlay);
 
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const mask = document.createElementNS('http://www.w3.org/2000/svg', 'mask');
-    mask.id = 'lossy-spotlight-mask';
-
-    // White background (shows the dim)
-    const maskBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    maskBg.setAttribute('width', '100%');
-    maskBg.setAttribute('height', '100%');
-    maskBg.setAttribute('fill', 'white');
-    mask.appendChild(maskBg);
-
-    // Black rectangles for each image (cuts holes)
-    // Use scroll offset for absolute positioning
-    const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
-    const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
-
-    this.candidates.forEach(c => {
-      const hole = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-      hole.setAttribute('x', String(c.rect.left + scrollLeft));
-      hole.setAttribute('y', String(c.rect.top + scrollTop));
-      hole.setAttribute('width', String(c.rect.width));
-      hole.setAttribute('height', String(c.rect.height));
-      hole.setAttribute('fill', 'black');
-      mask.appendChild(hole);
+    // Trigger fade in
+    requestAnimationFrame(() => {
+      overlay.style.opacity = '1';
     });
 
-    defs.appendChild(mask);
-    svg.appendChild(defs);
+    // Cancel on overlay click
+    overlay.addEventListener('click', () => this.cancel());
 
-    // Dim rectangle with mask applied
-    const dimRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-    dimRect.setAttribute('width', '100%');
-    dimRect.setAttribute('height', '100%');
-    dimRect.setAttribute('fill', 'rgba(0, 0, 0, 0.45)');
-    dimRect.setAttribute('mask', 'url(#lossy-spotlight-mask)');
-    svg.appendChild(dimRect);
-
-    overlay.appendChild(svg);
-    document.body.appendChild(overlay);
     return overlay;
   }
 
-  private createHighlights() {
-    this.candidates.forEach((candidate, index) => {
-      const highlight = this.createHighlight(candidate.rect, index);
-      this.highlights.push(highlight);
-      // Append to body, not overlay, so highlights participate in page's natural z-index stacking
-      document.body.appendChild(highlight);
-    });
-  }
-
-  private createHighlight(rect: DOMRect, index: number): HTMLDivElement {
-    const highlight = document.createElement('div');
-    highlight.className = 'lossy-highlight';
-    highlight.dataset.index = String(index);
-
-    // Use absolute positioning with scroll offset so highlights move with page content
+  private createClones() {
     const scrollTop = window.pageYOffset || document.documentElement.scrollTop;
     const scrollLeft = window.pageXOffset || document.documentElement.scrollLeft;
 
-    highlight.style.cssText = `
-      position: absolute;
-      top: ${rect.top + scrollTop}px;
-      left: ${rect.left + scrollLeft}px;
-      width: ${rect.width}px;
-      height: ${rect.height}px;
-      border: 3px solid #3B82F6;
-      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.3);
-      pointer-events: auto;
-      transition: all 0.2s ease;
-      cursor: pointer;
-      z-index: 100;
-    `;
+    this.candidates.forEach((candidate, index) => {
+      const rect = candidate.element.getBoundingClientRect();
+      const clone = document.createElement('img');
 
-    // Add click handler
-    highlight.addEventListener('click', (e) => {
-      e.stopPropagation();
-      this.selectCandidate(index);
+      // Get image source
+      const src = this.getImageSrc(candidate.element);
+      if (src) {
+        clone.src = src;
+      }
+
+      // Position clone at same location as original (absolute positioning)
+      clone.style.cssText = `
+        position: absolute;
+        top: ${rect.top + scrollTop}px;
+        left: ${rect.left + scrollLeft}px;
+        width: ${rect.width}px;
+        height: ${rect.height}px;
+        object-fit: cover;
+        z-index: 2147483641;
+        cursor: pointer;
+        transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        pointer-events: auto;
+        opacity: 0;
+        transform: scale(0.85);
+      `;
+
+      // Add click handler
+      clone.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.selectCandidate(index);
+      });
+
+      // Add hover handlers for hover-only mode
+      clone.addEventListener('mouseenter', () => {
+        this.hoveredIndex = index;
+        if (this.hasScrolled) {
+          this.updateHighlight();
+        }
+      });
+
+      clone.addEventListener('mouseleave', () => {
+        if (this.hoveredIndex === index) {
+          this.hoveredIndex = null;
+          if (this.hasScrolled) {
+            this.updateHighlight();
+          }
+        }
+      });
+
+      this.clones.push(clone);
+      document.body.appendChild(clone);
+
+      // Staggered fade-in animation with bounce
+      requestAnimationFrame(() => {
+        setTimeout(() => {
+          // Bouncy spring easing for more energy
+          clone.style.transition = 'opacity 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.4s ease-out';
+          clone.style.opacity = '1';
+          clone.style.transform = 'scale(1)';
+        }, index * 60); // Slightly longer stagger for dramatic effect
+      });
     });
+  }
 
-    return highlight;
+  private getImageSrc(element: HTMLElement): string | null {
+    if (element instanceof HTMLImageElement) {
+      return element.currentSrc || element.src;
+    }
+
+    const bgImage = window.getComputedStyle(element).backgroundImage;
+    if (bgImage && bgImage !== 'none') {
+      const match = bgImage.match(/url\(['"]?([^'"]+)['"]?\)/);
+      return match ? match[1] : null;
+    }
+
+    return null;
   }
 
   private attachEventListeners() {
-    // Attach keyboard listener with capture phase to ensure we get events first
     document.addEventListener('keydown', this.handleKeydown, true);
-
-    // Cancel on overlay background click
-    this.overlay.addEventListener('click', (e) => {
-      if (e.target === this.overlay) {
-        this.cancel();
-      }
-    });
+    window.addEventListener('scroll', this.handleScroll, { passive: true });
+    window.addEventListener('resize', this.handleResize, { passive: true });
   }
 
   private onKeydown(e: KeyboardEvent) {
-    // Only handle our keys
     const handledKeys = ['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Enter', 'Escape'];
-    if (!handledKeys.includes(e.key)) {
-      return;
-    }
+    if (!handledKeys.includes(e.key)) return;
 
     e.preventDefault();
     e.stopPropagation();
 
-    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-      this.currentIndex = (this.currentIndex + 1) % this.candidates.length;
-      this.updateHighlight(true); // Allow scrolling when user navigates
-    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-      this.currentIndex = (this.currentIndex - 1 + this.candidates.length) % this.candidates.length;
-      this.updateHighlight(true); // Allow scrolling when user navigates
-    } else if (e.key === 'Enter') {
-      this.selectCandidate(this.currentIndex);
-    } else if (e.key === 'Escape') {
-      this.cancel();
+    switch (e.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        this.currentIndex = (this.currentIndex + 1) % this.candidates.length;
+        this.updateHighlight();
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        this.currentIndex = (this.currentIndex - 1 + this.candidates.length) % this.candidates.length;
+        this.updateHighlight();
+        break;
+      case 'Enter':
+        this.selectCandidate(this.currentIndex);
+        break;
+      case 'Escape':
+        this.cancel();
+        break;
     }
   }
 
-  private updateHighlight(shouldScroll: boolean = false) {
-    // Reset all highlights
-    this.highlights.forEach((highlight, index) => {
-      if (index === this.currentIndex) {
-        // Active highlight: brighter and thicker
-        highlight.style.border = '4px solid #3B82F6';
-        highlight.style.boxShadow = '0 0 0 3px rgba(59, 130, 246, 0.5), 0 0 20px rgba(59, 130, 246, 0.4)';
+  private updateHighlight() {
+    this.clones.forEach((clone, index) => {
+      if (this.hasScrolled) {
+        // Hover-only mode: Only spotlight hovered image
+        if (this.hoveredIndex !== null && index === this.hoveredIndex) {
+          // Hovered: bright spotlight
+          clone.style.filter = `
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.9))
+            drop-shadow(0 0 40px rgba(255, 255, 255, 0.6))
+            drop-shadow(0 0 80px rgba(255, 255, 255, 0.3))
+          `;
+          clone.style.opacity = '1';
+        } else {
+          // Not hovered: very dim or hidden
+          clone.style.filter = `
+            drop-shadow(0 0 5px rgba(255, 255, 255, 0.15))
+          `;
+          clone.style.opacity = '0.3';
+        }
       } else {
-        // Inactive highlight: subtle
-        highlight.style.border = '3px solid #3B82F6';
-        highlight.style.boxShadow = '0 0 0 2px rgba(59, 130, 246, 0.3)';
-      }
-    });
-
-    // Scroll current highlight into view if needed (only when user is navigating)
-    if (shouldScroll) {
-      const currentHighlight = this.highlights[this.currentIndex];
-      if (currentHighlight) {
-        const rect = this.candidates[this.currentIndex].rect;
-        const viewportHeight = window.innerHeight;
-        const viewportWidth = window.innerWidth;
-
-        // Check if element is outside viewport
-        if (rect.top < 0 || rect.bottom > viewportHeight || rect.left < 0 || rect.right > viewportWidth) {
-          this.candidates[this.currentIndex].element.scrollIntoView({
-            behavior: 'smooth',
-            block: 'center',
-            inline: 'center'
-          });
+        // Initial mode: Show all with keyboard navigation highlight
+        if (index === this.currentIndex) {
+          // Active: bright cinematic glow
+          clone.style.filter = `
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.9))
+            drop-shadow(0 0 40px rgba(255, 255, 255, 0.6))
+            drop-shadow(0 0 80px rgba(255, 255, 255, 0.3))
+          `;
+          clone.style.opacity = '1';
+        } else {
+          // Inactive: subtle glow
+          clone.style.filter = `
+            drop-shadow(0 0 10px rgba(255, 255, 255, 0.4))
+            drop-shadow(0 0 20px rgba(255, 255, 255, 0.2))
+          `;
+          clone.style.opacity = '1';
         }
       }
-    }
+    });
   }
 
   private selectCandidate(index: number) {
@@ -242,14 +241,45 @@ export class CaptureOverlay {
     this.cleanup();
   }
 
+  private fadeOutAndExit() {
+    // Prevent multiple fade-outs
+    if (this.fadeOutTimeout) return;
+
+    // Fade out overlay
+    this.overlay.style.opacity = '0';
+
+    // Directional fade-out with blur based on scroll direction
+    const translateY = this.scrollDirection === 'down' ? '20px' :
+                       this.scrollDirection === 'up' ? '-20px' : '0';
+
+    this.clones.forEach(clone => {
+      clone.style.transition = 'opacity 0.4s cubic-bezier(0.4, 0, 1, 1), transform 0.4s cubic-bezier(0.4, 0, 1, 1), filter 0.4s cubic-bezier(0.4, 0, 1, 1)';
+      clone.style.opacity = '0';
+      clone.style.transform = `translateY(${translateY}) scale(0.9)`;
+      clone.style.filter = 'blur(12px)';  // More aggressive blur
+    });
+
+    // Wait for animation, then cleanup
+    this.fadeOutTimeout = window.setTimeout(() => {
+      this.cleanup();
+    }, 300);
+  }
+
   private cleanup() {
-    // Remove keyboard listener
+    // Clear timeout if exists
+    if (this.fadeOutTimeout) {
+      clearTimeout(this.fadeOutTimeout);
+    }
+
+    // Remove event listeners
     document.removeEventListener('keydown', this.handleKeydown, true);
+    window.removeEventListener('scroll', this.handleScroll);
+    window.removeEventListener('resize', this.handleResize);
 
-    // Remove all highlights from DOM
-    this.highlights.forEach(h => h.remove());
+    // Remove clones
+    this.clones.forEach(clone => clone.remove());
 
-    // Remove overlay from DOM
+    // Remove overlay
     this.overlay.remove();
   }
 }
