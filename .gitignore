@@ -28,6 +28,9 @@ lossy-*.tar
 # Ignore macOS system files
 .DS_Store
 
+# Ignore VS Code settings
+.vscode
+
 # Environment variables (contains secrets)
 .env
 .env.*
