@@ -1,9 +1,20 @@
 /**
  * Text Detection using PP-OCRv3 DBNet model
  *
- * Preprocessing: Resize, normalize with ImageNet stats
- * Model: DBNet detection (outputs probability map)
- * Postprocessing: Threshold, find contours, extract bounding boxes
+ * Pipeline overview:
+ * 1. Preprocessing: Resize to multiple of 32 (max 960px), normalize with ImageNet stats
+ * 2. Model inference: DBNet outputs a probability map (same resolution as input)
+ * 3. Postprocessing: Threshold, find connected components, extract bounding boxes
+ *
+ * Coordinate transformation (IMPORTANT - do not modify without understanding):
+ * - The image is resized (potentially with aspect ratio change due to rounding to 32)
+ * - Model outputs coordinates in resized space
+ * - We scale coordinates back to original image space using:
+ *     scaleX = originalWidth / resizedWidth
+ *     scaleY = originalHeight / resizedHeight
+ * - Box expansion uses PaddleOCR's Vatti clipping formula for uniform expansion:
+ *     expandDistance = (area * UNCLIP_RATIO) / perimeter
+ *   This gives equal expansion on all sides regardless of box aspect ratio.
  *
  * NOTE: This module is designed to run in a service worker context.
  * It uses OffscreenCanvas instead of document.createElement('canvas').
@@ -172,8 +183,11 @@ function postprocessOutput(
     binaryMask[i] = probMap[i] > DETECTION_THRESHOLD ? 255 : 0;
   }
 
-  // Find connected components (simple flood fill approach)
+  // Find connected components using flood fill
   const visited = new Set<number>();
+
+  // Scale factors to convert from resized (model) space to original image space
+  // IMPORTANT: Model outputs coordinates in resized space, must scale back to original
   const scaleX = originalWidth / resizedWidth;
   const scaleY = originalHeight / resizedHeight;
 
@@ -200,15 +214,24 @@ function postprocessOutput(
         continue;
       }
 
-      // Apply unclip ratio to expand box slightly
-      const expandX = (bbox.w * (UNCLIP_RATIO - 1)) / 2;
-      const expandY = (bbox.h * (UNCLIP_RATIO - 1)) / 2;
+      // First scale bbox to original coordinates
+      const scaledX = bbox.x * scaleX;
+      const scaledY = bbox.y * scaleY;
+      const scaledW = bbox.w * scaleX;
+      const scaledH = bbox.h * scaleY;
 
+      // Apply unclip expansion using PaddleOCR's area/perimeter formula
+      // This gives uniform expansion on all sides: distance = area * ratio / perimeter
+      const area = scaledW * scaledH;
+      const perimeter = 2 * (scaledW + scaledH);
+      const expandDistance = (area * UNCLIP_RATIO) / perimeter;
+
+      // Clamp expanded bbox to image bounds
       const expandedBbox = {
-        x: Math.max(0, (bbox.x - expandX) * scaleX),
-        y: Math.max(0, (bbox.y - expandY) * scaleY),
-        w: Math.min(originalWidth - bbox.x * scaleX, (bbox.w + 2 * expandX) * scaleX),
-        h: Math.min(originalHeight - bbox.y * scaleY, (bbox.h + 2 * expandY) * scaleY)
+        x: Math.max(0, scaledX - expandDistance),
+        y: Math.max(0, scaledY - expandDistance),
+        w: Math.min(originalWidth - Math.max(0, scaledX - expandDistance), scaledW + 2 * expandDistance),
+        h: Math.min(originalHeight - Math.max(0, scaledY - expandDistance), scaledH + 2 * expandDistance)
       };
 
       // Create polygon from bbox corners
