@@ -13,6 +13,7 @@ defmodule Lossy.Documents.Document do
   @foreign_key_type :binary_id
 
   @valid_statuses [
+    :processing,
     :queued_detection,
     :detecting,
     :awaiting_edits,
@@ -22,13 +23,15 @@ defmodule Lossy.Documents.Document do
   ]
   @valid_url_statuses [:not_checked, :accessible, :unreachable, :timeout]
   @status_transitions %{
+    # processing: initial state when document is created, async processing pending
+    processing: [:queued_detection, :awaiting_edits, :error],
     # Allow direct transition to awaiting_edits when client sends pre-detected regions
     queued_detection: [:detecting, :awaiting_edits, :error],
     detecting: [:awaiting_edits, :error],
     awaiting_edits: [:rendering, :error],
     rendering: [:export_ready, :awaiting_edits, :error],
     export_ready: [:awaiting_edits, :error],
-    error: [:queued_detection]
+    error: [:queued_detection, :processing]
   }
 
   schema "documents" do
@@ -79,16 +82,22 @@ defmodule Lossy.Documents.Document do
         changeset
 
       new_status ->
-        old_status = Map.get(changeset.data, :status)
-
-        if old_status && !valid_transition?(old_status, new_status) do
-          add_error(
-            changeset,
-            :status,
-            "invalid status transition from #{old_status} to #{new_status}"
-          )
-        else
+        # Only validate transitions for existing documents (updates, not creates)
+        # For new documents (id is nil), allow any valid status
+        if changeset.data.id == nil do
           changeset
+        else
+          old_status = changeset.data.status
+
+          if old_status && !valid_transition?(old_status, new_status) do
+            add_error(
+              changeset,
+              :status,
+              "invalid status transition from #{old_status} to #{new_status}"
+            )
+          else
+            changeset
+          end
         end
     end
   end

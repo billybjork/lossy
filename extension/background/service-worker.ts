@@ -79,6 +79,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then(sendResponse)
       .catch(error => sendResponse({ error: error.message }));
     return true;  // Keep channel open for async response
+  } else if (message.type === 'TEST_IMAGE_URL') {
+    // Test if an image URL is accessible (service worker bypasses CORS)
+    testImageUrlAccessibility(message.url)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ accessible: false, error: error.message }));
+    return true;  // Keep channel open for async response
   }
 });
 
@@ -240,4 +246,107 @@ function regionToPayload(region: {
     polygon: region.polygon,
     confidence: region.confidence
   };
+}
+
+/**
+ * Test if an image URL is accessible by attempting a HEAD request.
+ * Service workers bypass CORS, so this works for cross-origin images.
+ */
+async function testImageUrlAccessibility(url: string): Promise<{ accessible: boolean; error?: string }> {
+  try {
+    // Validate URL
+    const parsedUrl = new URL(url);
+
+    // Block known auth-required domains
+    const authRequiredDomains = [
+      'drive.google.com',
+      'docs.google.com',
+      'onedrive.live.com',
+      '1drv.ms',
+      'icloud.com',
+      'dropbox.com',
+      'previews.dropboxusercontent.com'
+    ];
+
+    if (authRequiredDomains.some(domain => parsedUrl.hostname.includes(domain))) {
+      return { accessible: false, error: 'Auth-required domain' };
+    }
+
+    // Try HEAD request first (faster, less bandwidth)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+    try {
+      const response = await fetch(url, {
+        method: 'HEAD',
+        signal: controller.signal,
+        // Don't send credentials to avoid auth complications
+        credentials: 'omit'
+      });
+
+      clearTimeout(timeoutId);
+
+      // Check if it's an image
+      const contentType = response.headers.get('content-type') || '';
+      const isImage = contentType.startsWith('image/');
+
+      if (response.ok && isImage) {
+        return { accessible: true };
+      } else if (response.ok) {
+        // Response OK but not an image
+        return { accessible: false, error: `Not an image: ${contentType}` };
+      } else if (response.status === 405) {
+        // HEAD not allowed, try GET with range header
+        return await tryGetRequest(url);
+      } else {
+        return { accessible: false, error: `HTTP ${response.status}` };
+      }
+    } catch (fetchError: any) {
+      clearTimeout(timeoutId);
+
+      if (fetchError.name === 'AbortError') {
+        return { accessible: false, error: 'Timeout' };
+      }
+
+      // Some servers don't support HEAD, try GET
+      return await tryGetRequest(url);
+    }
+  } catch (error: any) {
+    return { accessible: false, error: error.message };
+  }
+}
+
+/**
+ * Fallback GET request with Range header to minimize data transfer
+ */
+async function tryGetRequest(url: string): Promise<{ accessible: boolean; error?: string }> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch(url, {
+      method: 'GET',
+      signal: controller.signal,
+      credentials: 'omit',
+      headers: {
+        // Request only first byte to minimize bandwidth
+        'Range': 'bytes=0-0'
+      }
+    });
+
+    clearTimeout(timeoutId);
+
+    const contentType = response.headers.get('content-type') || '';
+    const isImage = contentType.startsWith('image/');
+
+    // 200 or 206 (partial content) are both acceptable
+    if ((response.ok || response.status === 206) && isImage) {
+      return { accessible: true };
+    } else {
+      return { accessible: false, error: `HTTP ${response.status}, type: ${contentType}` };
+    }
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    return { accessible: false, error: error.message };
+  }
 }

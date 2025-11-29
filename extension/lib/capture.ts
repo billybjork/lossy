@@ -24,76 +24,52 @@ export function setScreenshotHandler(imageData: string) {
 }
 
 export async function captureImage(candidate: CandidateImage): Promise<CapturePayload> {
-  let payload: CapturePayload;
+  // Try direct URL if available and image isn't transformed
+  if (candidate.imageUrl && isDirectImage(candidate)) {
+    // Test URL accessibility via service worker (bypasses CORS)
+    const accessible = await testUrlAccessibility(candidate.imageUrl);
 
-  // Case 1 & 2: Direct image URL or background image URL available
-  // But only if it's accessible (not cross-origin or protected)
-  if (candidate.imageUrl && isDirectImage(candidate) && isAccessibleUrl(candidate.imageUrl)) {
-    payload = {
-      source_url: window.location.href,
-      capture_mode: 'direct_asset',
-      image_url: candidate.imageUrl,
-      bounding_rect: rectToJSON(candidate.rect)
-    };
-  } else {
-    // Case 3: Need to screenshot (transformed image, cross-origin, or no URL available)
-    const imageDataUrl = await captureRegionScreenshot(candidate.rect);
-    payload = {
-      source_url: window.location.href,
-      capture_mode: 'screenshot',
-      image_data: imageDataUrl,
-      bounding_rect: rectToJSON(candidate.rect)
-    };
+    if (accessible) {
+      return {
+        source_url: window.location.href,
+        capture_mode: 'direct_asset',
+        image_url: candidate.imageUrl,
+        bounding_rect: rectToJSON(candidate.rect)
+      };
+    }
   }
 
-  // Text detection will be performed in the service worker
-  // to avoid CSP restrictions on dynamic imports
-
-  return payload;
+  // Fall back to screenshot (transformed image, inaccessible URL, or no URL)
+  const imageDataUrl = await captureRegionScreenshot(candidate.rect);
+  return {
+    source_url: window.location.href,
+    capture_mode: 'screenshot',
+    image_data: imageDataUrl,
+    bounding_rect: rectToJSON(candidate.rect)
+  };
 }
 
-function isAccessibleUrl(url: string): boolean {
+/**
+ * Test if an image URL is accessible by asking the service worker.
+ * Service workers bypass CORS, allowing us to fetch cross-origin images.
+ */
+async function testUrlAccessibility(url: string): Promise<boolean> {
   try {
+    // Quick check for same-origin (always accessible)
     const imageUrl = new URL(url, window.location.href);
-    const currentOrigin = window.location.origin;
-
-    // Allow same-origin images
-    if (imageUrl.origin === currentOrigin) {
+    if (imageUrl.origin === window.location.origin) {
       return true;
     }
 
-    // Allow common CDN and image hosting domains that are publicly accessible
-    const publicDomains = [
-      'i.imgur.com',
-      'images.unsplash.com',
-      'cdn.pixabay.com',
-      'images.pexels.com',
-      'cdn.shopify.com',
-      'static.wikia.nocookie.net'
-    ];
+    // Ask service worker to test the URL
+    const response = await chrome.runtime.sendMessage({
+      type: 'TEST_IMAGE_URL',
+      url: url
+    });
 
-    const hostname = imageUrl.hostname;
-    if (publicDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain))) {
-      return true;
-    }
-
-    // Disallow known protected/authentication-required domains
-    const protectedDomains = [
-      'previews.dropbox.com',
-      'drive.google.com',
-      'onedrive.live.com',
-      'icloud.com'
-    ];
-
-    if (protectedDomains.some(domain => hostname.includes(domain))) {
-      return false;
-    }
-
-    // For other cross-origin URLs, be conservative and use screenshot
-    // This avoids CORS issues and authentication problems
-    return false;
-  } catch {
-    // Invalid URL, fall back to screenshot
+    return response?.accessible === true;
+  } catch (error) {
+    console.warn('[Lossy] URL accessibility test failed:', error);
     return false;
   }
 }

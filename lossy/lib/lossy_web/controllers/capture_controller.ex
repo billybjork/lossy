@@ -16,19 +16,24 @@ defmodule LossyWeb.CaptureController do
       detection_time_ms: params["detection_time_ms"]
     )
 
-    # Create document and save image if provided
-    with {:ok, document} <- Documents.create_capture(params),
-         {:ok, document} <- maybe_save_image(document, params),
-         :ok <- handle_text_detection(document, params) do
-      Logger.info("Capture created successfully",
-        document_id: document.id,
-        status: document.status
-      )
+    # Create document with :processing status (async processing will happen in background)
+    case Documents.create_capture(Map.put(params, "status", "processing")) do
+      {:ok, document} ->
+        # Spawn async task for image download and text region creation
+        # This allows us to return immediately and open the editor tab faster
+        Task.Supervisor.start_child(Lossy.TaskSupervisor, fn ->
+          process_capture_async(document.id, params)
+        end)
 
-      conn
-      |> put_status(:created)
-      |> json(%{id: document.id, status: document.status})
-    else
+        Logger.info("Capture created, processing async",
+          document_id: document.id,
+          status: :processing
+        )
+
+        conn
+        |> put_status(:created)
+        |> json(%{id: document.id, status: :processing})
+
       {:error, %Ecto.Changeset{} = changeset} ->
         Logger.error("Capture creation failed with validation errors",
           errors: inspect(changeset.errors)
@@ -45,6 +50,53 @@ defmodule LossyWeb.CaptureController do
         |> put_status(:unprocessable_entity)
         |> json(%{error: to_string(reason)})
     end
+  end
+
+  # Async processing of capture - downloads image and creates text regions
+  defp process_capture_async(document_id, params) do
+    Logger.info("Starting async capture processing", document_id: document_id)
+
+    document = Documents.get_document(document_id)
+
+    # Step 1: Download and save image
+    case maybe_save_image(document, params) do
+      {:ok, document} ->
+        Logger.info("Image saved, processing text detection", document_id: document_id)
+
+        # Step 2: Create text regions
+        case handle_text_detection(document, params) do
+          :ok ->
+            Logger.info("Capture processing completed", document_id: document_id)
+
+          {:error, reason} ->
+            Logger.error("Text detection failed",
+              document_id: document_id,
+              reason: inspect(reason)
+            )
+
+            Documents.update_document(document, %{status: :error})
+        end
+
+      {:error, reason} ->
+        Logger.error("Image save failed in async processing",
+          document_id: document_id,
+          reason: inspect(reason)
+        )
+
+        Documents.update_document(document, %{status: :error})
+    end
+  rescue
+    e ->
+      Logger.error("Async capture processing crashed",
+        document_id: document_id,
+        error: Exception.message(e),
+        stacktrace: Exception.format_stacktrace(__STACKTRACE__)
+      )
+
+      # Try to update document status to error
+      if document = Documents.get_document(document_id) do
+        Documents.update_document(document, %{status: :error})
+      end
   end
 
   # Save image from URL if provided
