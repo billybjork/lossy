@@ -5,6 +5,9 @@
  * 1. Direct URL extraction: For <img> and <picture> elements
  * 2. Background image URL extraction: For CSS background-image
  * 3. Screenshot fallback: For transformed images or when URL unavailable
+ *
+ * NOTE: Text detection is performed in the service worker to avoid
+ * Content Security Policy restrictions on dynamic imports.
  */
 
 import type { CandidateImage } from './dom-scanner';
@@ -21,25 +24,32 @@ export function setScreenshotHandler(imageData: string) {
 }
 
 export async function captureImage(candidate: CandidateImage): Promise<CapturePayload> {
+  let payload: CapturePayload;
+
   // Case 1 & 2: Direct image URL or background image URL available
   // But only if it's accessible (not cross-origin or protected)
   if (candidate.imageUrl && isDirectImage(candidate) && isAccessibleUrl(candidate.imageUrl)) {
-    return {
+    payload = {
       source_url: window.location.href,
       capture_mode: 'direct_asset',
       image_url: candidate.imageUrl,
       bounding_rect: rectToJSON(candidate.rect)
     };
+  } else {
+    // Case 3: Need to screenshot (transformed image, cross-origin, or no URL available)
+    const imageDataUrl = await captureRegionScreenshot(candidate.rect);
+    payload = {
+      source_url: window.location.href,
+      capture_mode: 'screenshot',
+      image_data: imageDataUrl,
+      bounding_rect: rectToJSON(candidate.rect)
+    };
   }
 
-  // Case 3: Need to screenshot (transformed image, cross-origin, or no URL available)
-  const imageData = await captureRegionScreenshot(candidate.rect);
-  return {
-    source_url: window.location.href,
-    capture_mode: 'screenshot',
-    image_data: imageData,
-    bounding_rect: rectToJSON(candidate.rect)
-  };
+  // Text detection will be performed in the service worker
+  // to avoid CSP restrictions on dynamic imports
+
+  return payload;
 }
 
 function isAccessibleUrl(url: string): boolean {

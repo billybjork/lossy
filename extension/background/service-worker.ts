@@ -1,4 +1,8 @@
-import type { CapturePayload, CaptureResponse } from '../types/capture';
+import type { CapturePayload, CaptureResponse, TextRegionPayload } from '../types/capture';
+import type { DetectionResult } from '../lib/text-detection';
+
+// Track if offscreen document exists
+let creatingOffscreen: Promise<void> | null = null;
 
 // Listen for keyboard shortcut
 chrome.commands.onCommand.addListener((command) => {
@@ -101,11 +105,31 @@ async function captureScreenshot(tab: chrome.tabs.Tab) {
 
 async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab) {
   try {
+    // Run local text detection in the service worker
+    let textRegions: TextRegionPayload[] | undefined;
+    let detectionBackend: 'webgpu' | 'wasm' | null = null;
+    let detectionTimeMs: number | undefined;
+
+    try {
+      const detectionResult = await runLocalTextDetection(payload);
+      if (detectionResult) {
+        textRegions = detectionResult.regions.map(regionToPayload);
+        detectionBackend = detectionResult.backend;
+        detectionTimeMs = detectionResult.inferenceTimeMs;
+        console.log(`[Lossy] Local detection: ${textRegions.length} regions in ${detectionTimeMs.toFixed(0)}ms (${detectionBackend})`);
+      }
+    } catch (error) {
+      console.warn('[Lossy] Local text detection failed, will use cloud detection:', error);
+    }
+
     console.log('[Lossy] Sending capture to backend:', {
       source_url: tab.url,
       capture_mode: payload.capture_mode,
       has_image_url: !!payload.image_url,
-      has_image_data: !!payload.image_data
+      has_image_data: !!payload.image_data,
+      text_regions_count: textRegions?.length ?? 0,
+      detection_backend: detectionBackend,
+      detection_time_ms: detectionTimeMs
     });
 
     // POST to backend API
@@ -117,7 +141,11 @@ async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab)
         capture_mode: payload.capture_mode,
         image_url: payload.image_url,
         image_data: payload.image_data,
-        bounding_rect: payload.bounding_rect
+        bounding_rect: payload.bounding_rect,
+        // Include local text detection results
+        text_regions: textRegions,
+        detection_backend: detectionBackend,
+        detection_time_ms: detectionTimeMs
       })
     });
 
@@ -140,4 +168,76 @@ async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab)
     console.error('[Lossy] Failed to handle image capture:', error);
     throw error;
   }
+}
+
+/**
+ * Ensure the offscreen document exists
+ */
+async function ensureOffscreenDocument(): Promise<void> {
+  // Check if offscreen document already exists
+  const existingContexts = await chrome.runtime.getContexts({
+    contextTypes: [chrome.runtime.ContextType.OFFSCREEN_DOCUMENT]
+  });
+
+  if (existingContexts.length > 0) {
+    return;
+  }
+
+  // Create offscreen document if not already creating
+  if (creatingOffscreen) {
+    await creatingOffscreen;
+    return;
+  }
+
+  creatingOffscreen = chrome.offscreen.createDocument({
+    url: 'offscreen/offscreen.html',
+    reasons: [chrome.offscreen.Reason.WORKERS],
+    justification: 'Run ONNX text detection model'
+  });
+
+  await creatingOffscreen;
+  creatingOffscreen = null;
+}
+
+/**
+ * Run local text detection via offscreen document
+ */
+async function runLocalTextDetection(payload: CapturePayload): Promise<DetectionResult | null> {
+  console.log('[Lossy] Starting local text detection via offscreen document...');
+
+  // Ensure offscreen document exists
+  await ensureOffscreenDocument();
+
+  // Send detection request to offscreen document
+  const response = await chrome.runtime.sendMessage({
+    type: 'DETECT_TEXT',
+    payload: {
+      capture_mode: payload.capture_mode,
+      image_data: payload.image_data,
+      image_url: payload.image_url
+    }
+  });
+
+  if (response.success) {
+    console.log('[Lossy] Detection complete:', response.result);
+    return response.result;
+  } else {
+    console.error('[Lossy] Detection failed:', response.error);
+    return null;
+  }
+}
+
+/**
+ * Convert DetectedRegion to TextRegionPayload for API
+ */
+function regionToPayload(region: {
+  bbox: { x: number; y: number; w: number; h: number };
+  polygon: Array<{ x: number; y: number }>;
+  confidence: number;
+}): TextRegionPayload {
+  return {
+    bbox: region.bbox,
+    polygon: region.polygon,
+    confidence: region.confidence
+  };
 }

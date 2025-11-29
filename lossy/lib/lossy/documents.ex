@@ -6,8 +6,10 @@ defmodule Lossy.Documents do
   require Logger
   import Ecto.Query, warn: false
   alias Lossy.Repo
+  alias Lossy.Assets
 
   alias Lossy.Documents.{Document, ProcessingJob, TextRegion}
+  alias Lossy.ImageProcessing.Compositor
 
   ## Documents
 
@@ -116,6 +118,30 @@ defmodule Lossy.Documents do
   end
 
   @doc """
+  Enqueue inpainting for a text region.
+  Called when user edits text in a region.
+  """
+  def enqueue_inpainting(%TextRegion{} = region) do
+    Logger.info("Enqueuing inpainting job", region_id: region.id)
+
+    case %{region_id: region.id}
+         |> Lossy.Workers.Inpainting.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        Logger.info("Inpainting job enqueued", region_id: region.id)
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to enqueue inpainting",
+          region_id: region.id,
+          reason: inspect(reason)
+        )
+
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Enqueue text detection for a document (stubbed for MVP).
   Creates fake text regions for testing the editor UI.
   """
@@ -138,6 +164,77 @@ defmodule Lossy.Documents do
 
         {:error, reason}
     end
+  end
+
+  @doc """
+  Creates text regions from extension-provided local detection results.
+  This bypasses cloud detection entirely.
+  """
+  def create_text_regions_from_local_detection(%Document{} = document, text_regions)
+      when is_list(text_regions) do
+    Logger.info("Creating text regions from local detection",
+      document_id: document.id,
+      region_count: length(text_regions)
+    )
+
+    results =
+      text_regions
+      |> Enum.with_index(1)
+      |> Enum.map(fn {region_data, index} ->
+        attrs = %{
+          document_id: document.id,
+          bbox: normalize_bbox(region_data["bbox"] || region_data[:bbox]),
+          polygon: normalize_polygon(region_data["polygon"] || region_data[:polygon] || []),
+          original_text: nil,
+          current_text: nil,
+          font_family: nil,
+          font_weight: nil,
+          font_size_px: nil,
+          color_rgba: nil,
+          alignment: :left,
+          status: :detected,
+          z_index: index,
+          padding_px: 10
+        }
+
+        create_text_region(attrs)
+      end)
+
+    # Check if all succeeded
+    failed =
+      Enum.filter(results, fn
+        {:error, _} -> true
+        _ -> false
+      end)
+
+    if Enum.empty?(failed) do
+      {:ok, length(results)}
+    else
+      Logger.error("Some text regions failed to create", failed_count: length(failed))
+      {:error, :partial_failure}
+    end
+  end
+
+  defp normalize_bbox(nil), do: %{x: 0, y: 0, w: 0, h: 0}
+
+  defp normalize_bbox(bbox) when is_map(bbox) do
+    %{
+      x: bbox["x"] || bbox[:x] || 0,
+      y: bbox["y"] || bbox[:y] || 0,
+      w: bbox["w"] || bbox[:w] || 0,
+      h: bbox["h"] || bbox[:h] || 0
+    }
+  end
+
+  defp normalize_polygon(nil), do: []
+
+  defp normalize_polygon(polygon) when is_list(polygon) do
+    Enum.map(polygon, fn point ->
+      %{
+        x: point["x"] || point[:x] || 0,
+        y: point["y"] || point[:y] || 0
+      }
+    end)
   end
 
   @doc """
@@ -202,5 +299,89 @@ defmodule Lossy.Documents do
     Enum.each(regions, fn region_attrs ->
       create_text_region(region_attrs)
     end)
+  end
+
+  ## Export
+
+  @doc """
+  Generate the final exportable image by compositing all rendered regions.
+
+  Returns {:ok, export_path} where the final image is saved.
+  """
+  def generate_export(%Document{} = document) do
+    Logger.info("Generating export", document_id: document.id)
+
+    # Reload document with all associations
+    document = get_document(document.id)
+
+    # Get the original image path
+    case document.original_asset do
+      nil ->
+        {:error, :no_original_image}
+
+      original_asset ->
+        original_path = Assets.asset_path(original_asset)
+        export_path = generate_export_path(document.id)
+
+        # Create a working copy
+        with {:ok, working_path} <- Compositor.create_working_copy(original_path, export_path),
+             :ok <- composite_all_regions(working_path, document.text_regions) do
+          Logger.info("Export generated", document_id: document.id, path: export_path)
+
+          # Update document status
+          update_document(document, %{status: :export_ready})
+
+          {:ok, export_path}
+        end
+    end
+  end
+
+  defp composite_all_regions(working_path, regions) do
+    # Sort regions by z_index to composite in correct order
+    sorted_regions =
+      regions
+      |> Enum.filter(fn r -> r.status == :rendered && r.inpainted_asset_id != nil end)
+      |> Enum.sort_by(& &1.z_index)
+
+    Enum.reduce_while(sorted_regions, :ok, fn region, :ok ->
+      case Repo.preload(region, :inpainted_asset).inpainted_asset do
+        nil ->
+          {:cont, :ok}
+
+        asset ->
+          patch_path = Assets.asset_path(asset)
+          bbox = normalize_bbox(region.bbox)
+
+          case Compositor.composite_patch(working_path, patch_path, bbox) do
+            {:ok, _} -> {:cont, :ok}
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+      end
+    end)
+  end
+
+  defp generate_export_path(document_id) do
+    dir = Path.join(["priv/static/uploads", document_id])
+    File.mkdir_p!(dir)
+    Path.join(dir, "export_#{System.system_time(:millisecond)}.png")
+  end
+
+  @doc """
+  Check if a document is ready for export.
+
+  Returns true if all text regions have been rendered.
+  """
+  def export_ready?(%Document{} = document) do
+    document = get_document(document.id)
+
+    case document.text_regions do
+      [] ->
+        # No regions means original image can be exported as-is
+        document.original_asset != nil
+
+      regions ->
+        # All regions must be in rendered status
+        Enum.all?(regions, fn r -> r.status == :rendered end)
+    end
   end
 end

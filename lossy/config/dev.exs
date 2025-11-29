@@ -88,5 +88,4 @@ config :phoenix_live_view,
 config :swoosh, :api_client, false
 
 # ML services configuration for development
-config :lossy, :ml_services,
-  fal_api_key: System.get_env("FAL_API_KEY")
+config :lossy, :ml_services, fal_api_key: System.get_env("FAL_API_KEY")

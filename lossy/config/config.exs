@@ -124,7 +124,9 @@ config :lossy, :image_processing,
 
 # ML services configuration (API keys loaded from environment)
 config :lossy, :ml_services,
-  fal_api_key: nil  # Set via environment variable in dev.exs/runtime.exs
+  # Set via environment variable in dev.exs/runtime.exs
+  fal_api_key: nil,
+  replicate_api_key: nil
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.

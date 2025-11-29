@@ -22,7 +22,8 @@ defmodule Lossy.Documents.Document do
   ]
   @valid_url_statuses [:not_checked, :accessible, :unreachable, :timeout]
   @status_transitions %{
-    queued_detection: [:detecting, :error],
+    # Allow direct transition to awaiting_edits when client sends pre-detected regions
+    queued_detection: [:detecting, :awaiting_edits, :error],
     detecting: [:awaiting_edits, :error],
     awaiting_edits: [:rendering, :error],
     rendering: [:export_ready, :awaiting_edits, :error],

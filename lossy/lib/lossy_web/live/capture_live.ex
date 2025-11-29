@@ -23,6 +23,7 @@ defmodule LossyWeb.CaptureLive do
           socket
           |> assign(document: document, page_title: "Edit Capture")
           |> assign(selected_region_id: nil, editing_region_id: nil)
+          |> assign(export_path: nil, exporting: false)
 
         {:ok, socket}
     end
@@ -49,7 +50,11 @@ defmodule LossyWeb.CaptureLive do
 
     if region do
       case Documents.update_text_region(region, %{current_text: new_text}) do
-        {:ok, _updated_region} ->
+        {:ok, updated_region} ->
+          # Enqueue inpainting job for this region
+          # The job will inpaint the background and update region status
+          Documents.enqueue_inpainting(updated_region)
+
           # Reload document to get updated regions
           document = Documents.get_document(socket.assigns.document.id)
           {:noreply, assign(socket, document: document, editing_region_id: nil)}
@@ -68,20 +73,85 @@ defmodule LossyWeb.CaptureLive do
   end
 
   @impl true
+  def handle_event("export", _params, socket) do
+    socket = assign(socket, exporting: true)
+
+    case Documents.generate_export(socket.assigns.document) do
+      {:ok, export_path} ->
+        # Convert file path to public URL
+        public_path = export_path_to_url(export_path)
+
+        {:noreply,
+         socket
+         |> assign(export_path: public_path, exporting: false)
+         |> put_flash(:info, "Export generated! Click Download to save.")}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(exporting: false)
+         |> put_flash(:error, "Export failed: #{inspect(reason)}")}
+    end
+  end
+
+  defp export_path_to_url(path) do
+    # Convert file path to web-accessible URL
+    # e.g., "priv/static/uploads/abc/export.png" -> "/uploads/abc/export.png"
+    case String.split(path, "/uploads/", parts: 2) do
+      [_prefix, rest] -> "/uploads/#{rest}"
+      _ -> path
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="min-h-screen bg-gray-100 py-8">
       <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="mb-6 flex justify-between items-center">
           <h1 class="text-3xl font-bold text-gray-900">Edit Capture</h1>
-          <div class="text-sm text-gray-600">
-            Status:
-            <span class={[
-              "ml-2 px-2.5 py-0.5 rounded-full text-xs font-medium",
-              status_color(@document.status)
-            ]}>
-              {format_status(@document.status)}
-            </span>
+          <div class="flex items-center gap-4">
+            <div class="text-sm text-gray-600">
+              Status:
+              <span class={[
+                "ml-2 px-2.5 py-0.5 rounded-full text-xs font-medium",
+                status_color(@document.status)
+              ]}>
+                {format_status(@document.status)}
+              </span>
+            </div>
+
+            <!-- Export/Download buttons -->
+            <div class="flex gap-2">
+              <%= if @export_path do %>
+                <a
+                  href={@export_path}
+                  download="lossy-export.png"
+                  class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
+                >
+                  Download
+                </a>
+              <% end %>
+
+              <button
+                phx-click="export"
+                disabled={@exporting}
+                class={[
+                  "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500",
+                  if(@exporting, do: "bg-gray-400 cursor-not-allowed", else: "bg-blue-600 hover:bg-blue-700")
+                ]}
+              >
+                <%= if @exporting do %>
+                  <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                  Generating...
+                <% else %>
+                  Export Image
+                <% end %>
+              </button>
+            </div>
           </div>
         </div>
 

@@ -9,13 +9,17 @@ defmodule LossyWeb.CaptureController do
     Logger.info("Capture request received",
       capture_mode: params["capture_mode"],
       has_image_url: Map.has_key?(params, "image_url"),
-      has_image_data: Map.has_key?(params, "image_data")
+      has_image_data: Map.has_key?(params, "image_data"),
+      has_text_regions: Map.has_key?(params, "text_regions"),
+      text_regions_count: length(params["text_regions"] || []),
+      detection_backend: params["detection_backend"],
+      detection_time_ms: params["detection_time_ms"]
     )
 
     # Create document and save image if provided
     with {:ok, document} <- Documents.create_capture(params),
          {:ok, document} <- maybe_save_image(document, params),
-         :ok <- Documents.enqueue_text_detection(document) do
+         :ok <- handle_text_detection(document, params) do
       Logger.info("Capture created successfully",
         document_id: document.id,
         status: document.status
@@ -67,6 +71,31 @@ defmodule LossyWeb.CaptureController do
 
   # No image provided - this is ok for now (will be updated to require one later)
   defp maybe_save_image(document, _params), do: {:ok, document}
+
+  # Handle text detection: use local results if provided, otherwise enqueue cloud detection
+  defp handle_text_detection(document, %{"text_regions" => text_regions})
+       when is_list(text_regions) and length(text_regions) > 0 do
+    Logger.info("Using local text detection results",
+      document_id: document.id,
+      region_count: length(text_regions)
+    )
+
+    # Create text regions from local detection and update document status
+    with {:ok, _count} <-
+           Documents.create_text_regions_from_local_detection(document, text_regions),
+         {:ok, _document} <- Documents.update_document(document, %{status: :awaiting_edits}) do
+      :ok
+    end
+  end
+
+  defp handle_text_detection(document, _params) do
+    # No local detection results - enqueue cloud detection
+    Logger.info("No local detection results, enqueuing cloud detection",
+      document_id: document.id
+    )
+
+    Documents.enqueue_text_detection(document)
+  end
 
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)

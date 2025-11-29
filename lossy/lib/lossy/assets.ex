@@ -124,6 +124,56 @@ defmodule Lossy.Assets do
   end
 
   @doc """
+  Saves an image from a local file path and creates an Asset record.
+  Returns {:ok, asset} on success, {:error, reason} on failure.
+  """
+  def save_image_from_path(document_id, source_path, kind) do
+    Logger.info("Saving image from path",
+      document_id: document_id,
+      kind: kind,
+      source_path: source_path
+    )
+
+    with {:ok, binary_data} <- File.read(source_path),
+         {:ok, dimensions} <- get_image_dimensions(binary_data),
+         {:ok, file_path} <- write_image_file(document_id, kind, binary_data),
+         sha256 <- compute_sha256(binary_data) do
+      Logger.info("Image saved successfully from path",
+        document_id: document_id,
+        kind: kind,
+        width: dimensions.width,
+        height: dimensions.height
+      )
+
+      create_asset(%{
+        document_id: document_id,
+        kind: kind,
+        storage_uri: file_path,
+        width: dimensions.width,
+        height: dimensions.height,
+        sha256: sha256,
+        metadata: %{content_type: "image/png"}
+      })
+    else
+      {:error, reason} = error ->
+        Logger.error("Failed to save image from path",
+          document_id: document_id,
+          kind: kind,
+          source_path: source_path,
+          reason: inspect(reason)
+        )
+
+        error
+    end
+  end
+
+  @doc """
+  Returns the absolute file system path for an asset.
+  Alias for local_path/1 for clarity.
+  """
+  def asset_path(%Asset{} = asset), do: local_path(asset)
+
+  @doc """
   Returns the local file system path for an asset.
   For MVP, assumes storage_uri is a local path.
   """
