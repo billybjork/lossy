@@ -178,7 +178,7 @@ defmodule LossyWeb.CaptureLive do
                           else: "border-red-500 bg-red-500/5 hover:bg-red-500/10"
                         )
                       ]}
-                      style={"left: #{region.bbox["x"]}px; top: #{region.bbox["y"]}px; width: #{region.bbox["w"]}px; height: #{region.bbox["h"]}px;"}
+                      style={region_style(region.bbox, @document.width, @document.height)}
                       phx-click="select_region"
                       phx-value-region-id={region.id}
                       title={region.current_text || region.original_text}
@@ -300,4 +300,16 @@ defmodule LossyWeb.CaptureLive do
     |> String.replace("_", " ")
     |> String.capitalize()
   end
+
+  defp region_style(bbox, img_width, img_height)
+       when is_number(img_width) and img_width > 0 and is_number(img_height) and img_height > 0 do
+    left = bbox["x"] / img_width * 100
+    top = bbox["y"] / img_height * 100
+    width = bbox["w"] / img_width * 100
+    height = bbox["h"] / img_height * 100
+
+    "left: #{left}%; top: #{top}%; width: #{width}%; height: #{height}%;"
+  end
+
+  defp region_style(_bbox, _width, _height), do: "display: none;"
 end

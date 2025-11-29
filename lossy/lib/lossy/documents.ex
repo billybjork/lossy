@@ -155,12 +155,15 @@ defmodule Lossy.Documents do
       text_regions
       |> Enum.with_index(1)
       |> Enum.map(fn {region_data, index} ->
+        # Extract recognized text from local OCR (if provided)
+        original_text = region_data["original_text"] || region_data[:original_text]
+
         attrs = %{
           document_id: document.id,
           bbox: normalize_bbox(region_data["bbox"] || region_data[:bbox]),
           polygon: normalize_polygon(region_data["polygon"] || region_data[:polygon] || []),
-          original_text: nil,
-          current_text: nil,
+          original_text: original_text,
+          current_text: original_text,
           font_family: nil,
           font_weight: nil,
           font_size_px: nil,

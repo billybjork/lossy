@@ -105,7 +105,7 @@ async function captureScreenshot(tab: chrome.tabs.Tab) {
 
 async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab) {
   try {
-    // Run local text detection in the service worker
+    // Run local text detection in the offscreen document
     let textRegions: TextRegionPayload[] | undefined;
     let detectionBackend: 'webgpu' | 'wasm' | null = null;
     let detectionTimeMs: number | undefined;
