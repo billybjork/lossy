@@ -8,7 +8,8 @@
  *
  * Filters by:
  * - Minimum size (100x100px)
- * - Visibility (in viewport or scrollable into view)
+ * - Visibility (CSS display/visibility/opacity)
+ * - Overflow clipping (handles carousels with overflow:hidden)
  */
 
 export interface CandidateImage {
@@ -19,6 +20,46 @@ export interface CandidateImage {
 }
 
 const MIN_SIZE = 100; // Minimum width and height in pixels
+const MIN_VISIBLE_RATIO = 0.5; // Require at least 50% visible within overflow container
+
+/**
+ * Check if element is clipped by an overflow container (carousel, etc.)
+ * Returns true if the element is sufficiently visible within its overflow ancestors
+ */
+function isWithinOverflowBounds(element: HTMLElement): boolean {
+  let parent = element.parentElement;
+
+  while (parent && parent !== document.body) {
+    const style = window.getComputedStyle(parent);
+    const overflow = style.overflow + style.overflowX + style.overflowY;
+
+    // Check for any overflow clipping
+    if (overflow.includes('hidden') || overflow.includes('scroll') || overflow.includes('auto')) {
+      const elementRect = element.getBoundingClientRect();
+      const parentRect = parent.getBoundingClientRect();
+
+      // Calculate visible area within the overflow container
+      const visibleWidth = Math.max(0,
+        Math.min(elementRect.right, parentRect.right) - Math.max(elementRect.left, parentRect.left)
+      );
+      const visibleHeight = Math.max(0,
+        Math.min(elementRect.bottom, parentRect.bottom) - Math.max(elementRect.top, parentRect.top)
+      );
+
+      const visibleArea = visibleWidth * visibleHeight;
+      const totalArea = elementRect.width * elementRect.height;
+
+      // Element is clipped if less than threshold is visible
+      if (totalArea > 0 && visibleArea / totalArea < MIN_VISIBLE_RATIO) {
+        return false;
+      }
+    }
+
+    parent = parent.parentElement;
+  }
+
+  return true;
+}
 
 export function findCandidateImages(): CandidateImage[] {
   const candidates: CandidateImage[] = [];
@@ -103,7 +144,11 @@ function isVisible(element: HTMLElement): boolean {
     return false;
   }
 
-  // Element is visible if it has any dimensions
+  // Check if element is clipped by overflow container (carousel case)
+  if (!isWithinOverflowBounds(element)) {
+    return false;
+  }
+
   return true;
 }
 
