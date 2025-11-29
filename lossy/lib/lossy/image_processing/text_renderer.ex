@@ -39,11 +39,17 @@ defmodule Lossy.ImageProcessing.TextRenderer do
     # Build ImageMagick command
     args = [
       image_path,
-      "-font", font_spec,
-      "-pointsize", "#{font_size}",
-      "-fill", im_color,
-      "-gravity", alignment_to_gravity(alignment),
-      "-annotate", "+#{trunc(x)}+#{trunc(y)}", text,
+      "-font",
+      font_spec,
+      "-pointsize",
+      "#{font_size}",
+      "-fill",
+      im_color,
+      "-gravity",
+      alignment_to_gravity(alignment),
+      "-annotate",
+      "+#{trunc(x)}+#{trunc(y)}",
+      text,
       image_path
     ]
 
@@ -82,7 +88,8 @@ defmodule Lossy.ImageProcessing.TextRenderer do
 
     # For region-based rendering, we use -draw with text positioning
     x = trunc(bbox.x)
-    y = trunc(bbox.y + font_size)  # Baseline is at bottom of first line
+    # Baseline is at bottom of first line
+    y = trunc(bbox.y + font_size)
     w = trunc(bbox.w)
 
     # Escape text for ImageMagick
@@ -93,10 +100,14 @@ defmodule Lossy.ImageProcessing.TextRenderer do
 
     args = [
       image_path,
-      "-font", font_spec,
-      "-pointsize", "#{font_size}",
-      "-fill", im_color,
-      "-draw", draw_cmd,
+      "-font",
+      font_spec,
+      "-pointsize",
+      "#{font_size}",
+      "-fill",
+      im_color,
+      "-draw",
+      draw_cmd,
       image_path
     ]
 
@@ -115,6 +126,7 @@ defmodule Lossy.ImageProcessing.TextRenderer do
           output: output,
           exit_code: code
         )
+
         {:error, :render_failed}
     end
   end
@@ -135,15 +147,17 @@ defmodule Lossy.ImageProcessing.TextRenderer do
         rgba
     end
   end
+
   defp rgba_to_imagemagick(nil), do: "black"
 
   defp calculate_text_position(bbox, alignment, font_size) do
-    x = case alignment do
-      :left -> bbox.x
-      :center -> bbox.x + bbox.w / 2
-      :right -> bbox.x + bbox.w
-      _ -> bbox.x
-    end
+    x =
+      case alignment do
+        :left -> bbox.x
+        :center -> bbox.x + bbox.w / 2
+        :right -> bbox.x + bbox.w
+        _ -> bbox.x
+      end
 
     # Y position is at baseline (roughly font_size from top)
     y = bbox.y + font_size
@@ -159,11 +173,12 @@ defmodule Lossy.ImageProcessing.TextRenderer do
   defp build_font_spec(font_family, weight) do
     # For MVP, we'll use system fonts
     # ImageMagick expects font names or paths
-    weight_suffix = case weight do
-      w when w >= 700 -> "-Bold"
-      w when w >= 500 -> "-Medium"
-      _ -> ""
-    end
+    weight_suffix =
+      case weight do
+        w when w >= 700 -> "-Bold"
+        w when w >= 500 -> "-Medium"
+        _ -> ""
+      end
 
     "#{font_family}#{weight_suffix}"
   end
