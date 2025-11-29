@@ -89,12 +89,14 @@ defmodule LossyWeb.CaptureController do
   end
 
   defp handle_text_detection(document, _params) do
-    # No local detection results - enqueue cloud detection
-    Logger.info("No local detection results, enqueuing cloud detection",
+    # No local detection results - update status to awaiting_edits with no regions
+    # The user can still use the image but won't have text regions to edit
+    Logger.info("No local detection results provided",
       document_id: document.id
     )
 
-    Documents.enqueue_text_detection(document)
+    {:ok, _document} = Documents.update_document(document, %{status: :awaiting_edits})
+    :ok
   end
 
   defp format_errors(changeset) do

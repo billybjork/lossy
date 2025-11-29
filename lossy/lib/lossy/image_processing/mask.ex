@@ -59,8 +59,7 @@ defmodule Lossy.ImageProcessing.Mask do
 
       # Build draw commands for all regions
       draw_commands =
-        bboxes
-        |> Enum.map(fn bbox ->
+        Enum.map_join(bboxes, " ", fn bbox ->
           x = max(0, trunc(bbox.x - padding))
           y = max(0, trunc(bbox.y - padding))
           w = min(width - x, trunc(bbox.w + 2 * padding))
@@ -68,7 +67,6 @@ defmodule Lossy.ImageProcessing.Mask do
 
           "rectangle #{x},#{y} #{x + w},#{y + h}"
         end)
-        |> Enum.join(" ")
 
       # Create mask with all regions
       args = [

@@ -66,20 +66,56 @@ config :logger, :default_formatter,
   format: "$time $metadata[$level] $message\n",
   metadata: [
     :request_id,
+    # Document/asset identifiers
     :document_id,
-    :kind,
-    :url,
-    :reason,
+    :region_id,
+    :prediction_id,
+    # File/path info
+    :path,
+    :file_path,
+    :source_path,
+    :output_path,
+    :image_path,
+    :mask_path,
+    :working_image,
+    :patch,
+    # Image dimensions
     :width,
     :height,
-    :errors,
+    :kind,
+    # Processing state
     :status,
     :capture_mode,
+    :output,
+    :exit_code,
+    :attempts,
+    # Detection/ML info
+    :detection_backend,
+    :detection_time_ms,
+    :has_text_regions,
+    :text_regions_count,
+    :region_count,
+    :failed_count,
+    :model,
+    # Text rendering
+    :text,
+    :bbox,
+    :position,
+    :padding,
+    :font,
+    :font_size,
+    :size,
+    :color,
+    # Request/input info
+    :url,
     :has_image_url,
     :has_image_data,
+    :file,
     :attrs,
-    :file_path,
+    # Error handling
+    :reason,
     :error,
+    :errors,
     :stacktrace
   ]
 
@@ -125,7 +161,6 @@ config :lossy, :image_processing,
 # ML services configuration (API keys loaded from environment)
 config :lossy, :ml_services,
   # Set via environment variable in dev.exs/runtime.exs
-  fal_api_key: nil,
   replicate_api_key: nil
 
 # Import environment specific config. This must remain at the bottom

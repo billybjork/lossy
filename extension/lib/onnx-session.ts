@@ -5,7 +5,7 @@
  * Uses locally bundled ONNX Runtime (MV3 doesn't allow CDN loading).
  */
 
-import * as ort from 'onnxruntime-web';
+import * as ort from 'onnxruntime-web/webgpu';
 
 type InferenceSession = ort.InferenceSession;
 

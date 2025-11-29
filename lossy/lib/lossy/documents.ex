@@ -142,33 +142,7 @@ defmodule Lossy.Documents do
   end
 
   @doc """
-  Enqueue text detection for a document (stubbed for MVP).
-  Creates fake text regions for testing the editor UI.
-  """
-  def enqueue_text_detection(%Document{} = document) do
-    Logger.info("Enqueuing text detection job", document_id: document.id)
-
-    # Enqueue Oban job for text detection
-    case %{document_id: document.id}
-         |> Lossy.Workers.TextDetection.new()
-         |> Oban.insert() do
-      {:ok, _job} ->
-        Logger.info("Text detection job enqueued successfully", document_id: document.id)
-        :ok
-
-      {:error, reason} ->
-        Logger.error("Failed to enqueue text detection job",
-          document_id: document.id,
-          reason: inspect(reason)
-        )
-
-        {:error, reason}
-    end
-  end
-
-  @doc """
   Creates text regions from extension-provided local detection results.
-  This bypasses cloud detection entirely.
   """
   def create_text_regions_from_local_detection(%Document{} = document, text_regions)
       when is_list(text_regions) do
@@ -237,70 +211,6 @@ defmodule Lossy.Documents do
     end)
   end
 
-  @doc """
-  Creates stubbed text regions for testing.
-  These are fake regions with realistic bounding boxes and sample text.
-  """
-  def create_stubbed_text_regions(%Document{} = document) do
-    # Get image dimensions, or use defaults if not available
-    width = document.width || 1200
-    height = document.height || 800
-
-    # Create a few sample text regions
-    regions = [
-      %{
-        document_id: document.id,
-        bbox: %{x: width * 0.1, y: height * 0.1, w: width * 0.3, h: 40},
-        polygon: [],
-        original_text: "Sample Headline",
-        current_text: "Sample Headline",
-        font_family: "Arial",
-        font_weight: 700,
-        font_size_px: 32,
-        color_rgba: "rgba(0,0,0,1)",
-        alignment: :left,
-        status: :detected,
-        z_index: 1,
-        padding_px: 10
-      },
-      %{
-        document_id: document.id,
-        bbox: %{x: width * 0.1, y: height * 0.25, w: width * 0.5, h: 24},
-        polygon: [],
-        original_text: "This is some body text that was detected in the image.",
-        current_text: "This is some body text that was detected in the image.",
-        font_family: "Arial",
-        font_weight: 400,
-        font_size_px: 16,
-        color_rgba: "rgba(0,0,0,1)",
-        alignment: :left,
-        status: :detected,
-        z_index: 2,
-        padding_px: 8
-      },
-      %{
-        document_id: document.id,
-        bbox: %{x: width * 0.6, y: height * 0.5, w: width * 0.25, h: 28},
-        polygon: [],
-        original_text: "Button Text",
-        current_text: "Button Text",
-        font_family: "Arial",
-        font_weight: 600,
-        font_size_px: 18,
-        color_rgba: "rgba(255,255,255,1)",
-        alignment: :center,
-        status: :detected,
-        z_index: 3,
-        padding_px: 10
-      }
-    ]
-
-    # Insert all regions
-    Enum.each(regions, fn region_attrs ->
-      create_text_region(region_attrs)
-    end)
-  end
-
   ## Export
 
   @doc """
@@ -344,20 +254,27 @@ defmodule Lossy.Documents do
       |> Enum.sort_by(& &1.z_index)
 
     Enum.reduce_while(sorted_regions, :ok, fn region, :ok ->
-      case Repo.preload(region, :inpainted_asset).inpainted_asset do
-        nil ->
-          {:cont, :ok}
-
-        asset ->
-          patch_path = Assets.asset_path(asset)
-          bbox = normalize_bbox(region.bbox)
-
-          case Compositor.composite_patch(working_path, patch_path, bbox) do
-            {:ok, _} -> {:cont, :ok}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
+      case composite_region(working_path, region) do
+        :ok -> {:cont, :ok}
+        {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
+  end
+
+  defp composite_region(working_path, region) do
+    case Repo.preload(region, :inpainted_asset).inpainted_asset do
+      nil ->
+        :ok
+
+      asset ->
+        patch_path = Assets.asset_path(asset)
+        bbox = normalize_bbox(region.bbox)
+
+        case Compositor.composite_patch(working_path, patch_path, bbox) do
+          {:ok, _} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+    end
   end
 
   defp generate_export_path(document_id) do

@@ -59,20 +59,32 @@ defmodule Lossy.DocumentsTest do
     end
   end
 
-  describe "enqueue_text_detection/1" do
-    test "enqueues an Oban job for text detection" do
+  describe "create_text_regions_from_local_detection/2" do
+    test "creates text regions from local detection results" do
       {:ok, document} =
         Documents.create_capture(%{
           source_url: "https://example.com",
           capture_mode: :screenshot
         })
 
-      assert :ok = Documents.enqueue_text_detection(document)
+      text_regions = [
+        %{
+          "bbox" => %{"x" => 10, "y" => 20, "w" => 100, "h" => 30},
+          "polygon" => [%{"x" => 10, "y" => 20}, %{"x" => 110, "y" => 50}],
+          "confidence" => 0.95
+        },
+        %{
+          "bbox" => %{"x" => 50, "y" => 100, "w" => 200, "h" => 40},
+          "polygon" => [],
+          "confidence" => 0.87
+        }
+      ]
 
-      # In test mode with testing: :inline, the job executes immediately
-      # So we can verify the document status changed
+      assert {:ok, 2} = Documents.create_text_regions_from_local_detection(document, text_regions)
+
+      # Verify regions were created
       updated_document = Documents.get_document(document.id)
-      assert updated_document.status in [:detecting, :awaiting_edits]
+      assert length(updated_document.text_regions) == 2
     end
   end
 end

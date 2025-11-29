@@ -126,5 +126,4 @@ end
 # ML services configuration (all environments)
 # Load API keys from environment variables
 config :lossy, :ml_services,
-  fal_api_key: System.get_env("FAL_API_KEY"),
   replicate_api_key: System.get_env("REPLICATE_API_TOKEN")
