@@ -30,6 +30,10 @@ defmodule Lossy.Documents.TextRegion do
       values: [:detected, :inpainting, :rendered, :error],
       default: :detected
 
+    field :editing_status, Ecto.Enum,
+      values: [:idle, :inpainting_blank, :ready_to_edit, :rendering_text],
+      default: :idle
+
     belongs_to :document, Lossy.Documents.Document
     belongs_to :inpainted_asset, Lossy.Documents.Asset
 
@@ -53,11 +57,13 @@ defmodule Lossy.Documents.TextRegion do
       :alignment,
       :inpainted_asset_id,
       :z_index,
-      :status
+      :status,
+      :editing_status
     ])
     |> validate_required([:document_id, :bbox])
     |> validate_number(:font_size_px, greater_than: 0)
     |> validate_inclusion(:alignment, [:left, :center, :right])
     |> validate_inclusion(:status, [:detected, :inpainting, :rendered, :error])
+    |> validate_inclusion(:editing_status, [:idle, :inpainting_blank, :ready_to_edit, :rendering_text])
   end
 end

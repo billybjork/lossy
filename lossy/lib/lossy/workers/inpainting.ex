@@ -12,7 +12,7 @@ defmodule Lossy.Workers.Inpainting do
 
   require Logger
   alias Lossy.{Documents, Assets, Repo}
-  alias Lossy.Documents.TextRegion
+  alias Lossy.Documents.{TextRegion, Asset}
   alias Lossy.ML.Inpainting
   alias Lossy.ImageProcessing.TextRenderer
 
@@ -33,10 +33,98 @@ defmodule Lossy.Workers.Inpainting do
   end
 
   defp process_inpainting(region, document) do
-    {:ok, region} = Documents.update_text_region(region, %{status: :inpainting})
+    {:ok, updated_region} = Documents.update_text_region(region, %{status: :inpainting})
 
-    original_asset = Repo.get!(Assets.Asset, document.original_asset_id)
+    # Reload region to get fresh editing_status
+    region = Repo.get!(TextRegion, updated_region.id)
+
+    Logger.info("Processing inpainting - step 1")
+    Logger.info("Region ID: #{region.id}")
+    Logger.info("Editing status: #{inspect(region.editing_status)}")
+    Logger.info("Current text: #{inspect(region.current_text)}")
+
+    Logger.info("Processing inpainting - step 2: getting asset")
+    Logger.info("Document original_asset_id: #{inspect(document.original_asset_id)}")
+
+    if is_nil(document.original_asset_id) do
+      raise "Document has no original_asset_id - image may not have been downloaded yet"
+    end
+
+    original_asset =
+      try do
+        asset = Repo.get!(Asset, document.original_asset_id)
+        Logger.info("Asset found successfully")
+        asset
+      rescue
+        e ->
+          Logger.error("Failed to get asset: #{inspect(e)}")
+          reraise e, __STACKTRACE__
+      end
+
+    if is_nil(original_asset) do
+      raise "Asset not found for ID: #{document.original_asset_id}"
+    end
+
+    Logger.info("Processing inpainting - step 3: getting path")
+    Logger.info("Asset storage_uri: #{inspect(original_asset.storage_uri)}")
+
     image_path = Assets.asset_path(original_asset)
+
+    Logger.info("Image path resolved: #{image_path}")
+
+    # Check editing_status to determine flow
+    case region.editing_status do
+      :inpainting_blank ->
+        # Stage 1: Inpaint to remove text, don't render new text yet
+        Logger.info("Using blank inpainting flow")
+        process_blank_inpainting(image_path, region, document)
+
+      _other ->
+        # Stage 2 or normal flow: Inpaint + render text
+        Logger.info("Using normal inpainting flow", editing_status: region.editing_status)
+        process_normal_inpainting(image_path, region, document)
+    end
+  rescue
+    error ->
+      error_message = inspect(error)
+      stacktrace = Exception.format_stacktrace(__STACKTRACE__)
+
+      Logger.error("Inpainting job crashed: #{error_message}")
+      Logger.error("Stacktrace: #{stacktrace}")
+
+      Documents.update_text_region(region, %{status: :error, editing_status: :idle})
+      reraise error, __STACKTRACE__
+  end
+
+  defp process_blank_inpainting(image_path, region, document) do
+    Logger.info("Processing blank inpainting (removing text)", region_id: region.id)
+
+    case Inpainting.inpaint_region(image_path, region.bbox, padding_px: region.padding_px || 10) do
+      {:ok, inpainted_path} ->
+        # Save the inpainted base without rendering text
+        {:ok, inpainted_asset} =
+          Assets.save_image_from_path(document.id, inpainted_path, :inpainted_patch)
+
+        # Update region to ready_to_edit status
+        {:ok, _region} =
+          Documents.update_text_region(region, %{
+            status: :rendered,
+            editing_status: :ready_to_edit,
+            inpainted_asset_id: inpainted_asset.id
+          })
+
+        File.rm(inpainted_path)
+        broadcast_update(document)
+        Logger.info("Blank inpainting completed, ready for editing", region_id: region.id)
+        :ok
+
+      {:error, reason} ->
+        handle_inpainting_error(region, reason)
+    end
+  end
+
+  defp process_normal_inpainting(image_path, region, document) do
+    Logger.info("Processing normal inpainting (inpaint + render text)", region_id: region.id)
 
     case Inpainting.inpaint_region(image_path, region.bbox, padding_px: region.padding_px || 10) do
       {:ok, inpainted_path} ->
@@ -45,15 +133,6 @@ defmodule Lossy.Workers.Inpainting do
       {:error, reason} ->
         handle_inpainting_error(region, reason)
     end
-  rescue
-    error ->
-      Logger.error("Inpainting job crashed",
-        region_id: region.id,
-        error: Exception.message(error)
-      )
-
-      Documents.update_text_region(region, %{status: :error})
-      reraise error, __STACKTRACE__
   end
 
   defp handle_inpainting_success(inpainted_path, region, document) do
@@ -82,6 +161,7 @@ defmodule Lossy.Workers.Inpainting do
     {:ok, _region} =
       Documents.update_text_region(region, %{
         status: :rendered,
+        editing_status: :idle,
         inpainted_asset_id: rendered_asset.id
       })
 
@@ -113,7 +193,7 @@ defmodule Lossy.Workers.Inpainting do
 
   defp handle_inpainting_error(region, reason) do
     Logger.error("Inpainting failed", region_id: region.id, reason: inspect(reason))
-    Documents.update_text_region(region, %{status: :error})
+    Documents.update_text_region(region, %{status: :error, editing_status: :idle})
     {:error, reason}
   end
 

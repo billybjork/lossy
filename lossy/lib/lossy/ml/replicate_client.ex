@@ -19,13 +19,12 @@ defmodule Lossy.ML.ReplicateClient do
   Returns the prediction object with status, id, and URLs for polling.
   """
   def create_prediction(model_version, input) do
-    Logger.info("Creating Replicate prediction", model: model_version)
-
     case Config.fetch_replicate_api_key() do
       {:ok, api_key} ->
         do_create_prediction(api_key, model_version, input)
 
       {:error, :not_configured} ->
+        Logger.error("Replicate API key not configured")
         {:error, :api_key_not_configured}
     end
   end
@@ -42,19 +41,11 @@ defmodule Lossy.ML.ReplicateClient do
            receive_timeout: 30_000
          ) do
       {:ok, %{status: status, body: body}} when status in 200..299 ->
-        Logger.info("Prediction created",
-          prediction_id: body["id"],
-          status: body["status"]
-        )
-
         {:ok, body}
 
       {:ok, %{status: status, body: body}} ->
-        Logger.error("Replicate API error",
-          status: status,
-          error: body["error"] || body["detail"]
-        )
-
+        error_detail = body["error"] || body["detail"] || inspect(body)
+        Logger.error("Replicate API error: #{error_detail} (HTTP #{status})")
         {:error, {:api_error, status, body}}
 
       {:error, reason} ->
@@ -105,24 +96,22 @@ defmodule Lossy.ML.ReplicateClient do
     do_await_completion(prediction_id, 0, max_attempts, poll_interval)
   end
 
-  defp do_await_completion(prediction_id, attempt, max_attempts, _poll_interval)
+  defp do_await_completion(_prediction_id, attempt, max_attempts, _poll_interval)
        when attempt >= max_attempts do
-    Logger.error("Prediction timed out", prediction_id: prediction_id, attempts: attempt)
+    Logger.error("Replicate prediction timed out after #{attempt} attempts")
     {:error, :timeout}
   end
 
   defp do_await_completion(prediction_id, attempt, max_attempts, poll_interval) do
     case get_prediction(prediction_id) do
       {:ok, %{"status" => "succeeded", "output" => output}} ->
-        Logger.info("Prediction succeeded", prediction_id: prediction_id)
         {:ok, output}
 
       {:ok, %{"status" => "failed", "error" => error}} ->
-        Logger.error("Prediction failed", prediction_id: prediction_id, error: error)
+        Logger.error("Replicate prediction failed: #{error}")
         {:error, {:prediction_failed, error}}
 
       {:ok, %{"status" => "canceled"}} ->
-        Logger.warning("Prediction canceled", prediction_id: prediction_id)
         {:error, :canceled}
 
       {:ok, %{"status" => status}} when status in ["starting", "processing"] ->

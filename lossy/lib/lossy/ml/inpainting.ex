@@ -27,12 +27,6 @@ defmodule Lossy.ML.Inpainting do
     padding = Keyword.get(opts, :padding_px, 10)
     output_path = Keyword.get(opts, :output_path, generate_output_path(image_path))
 
-    Logger.info("Starting inpainting",
-      image_path: image_path,
-      bbox: inspect(bbox),
-      padding: padding
-    )
-
     with {:ok, mask_path} <- Mask.generate_mask(image_path, bbox, padding_px: padding),
          {:ok, image_url} <- upload_for_replicate(image_path),
          {:ok, mask_url} <- upload_for_replicate(mask_path),
@@ -40,12 +34,10 @@ defmodule Lossy.ML.Inpainting do
          {:ok, _} <- download_result(result_url, output_path) do
       # Cleanup temporary mask
       File.rm(mask_path)
-
-      Logger.info("Inpainting completed", output_path: output_path)
       {:ok, output_path}
     else
       {:error, reason} = error ->
-        Logger.error("Inpainting failed", reason: inspect(reason))
+        Logger.error("Inpainting failed: #{inspect(reason)}")
         error
     end
   end
@@ -60,23 +52,16 @@ defmodule Lossy.ML.Inpainting do
     padding = Keyword.get(opts, :padding_px, 10)
     output_path = Keyword.get(opts, :output_path, generate_output_path(image_path))
 
-    Logger.info("Starting batch inpainting",
-      image_path: image_path,
-      region_count: length(bboxes)
-    )
-
     with {:ok, mask_path} <- Mask.generate_combined_mask(image_path, bboxes, padding_px: padding),
          {:ok, image_url} <- upload_for_replicate(image_path),
          {:ok, mask_url} <- upload_for_replicate(mask_path),
          {:ok, result_url} <- run_lama_inpainting(image_url, mask_url),
          {:ok, _} <- download_result(result_url, output_path) do
       File.rm(mask_path)
-
-      Logger.info("Batch inpainting completed", output_path: output_path)
       {:ok, output_path}
     else
       {:error, reason} = error ->
-        Logger.error("Batch inpainting failed", reason: inspect(reason))
+        Logger.error("Batch inpainting failed: #{inspect(reason)}")
         error
     end
   end
@@ -92,18 +77,23 @@ defmodule Lossy.ML.Inpainting do
   defp upload_for_replicate(file_path) do
     case File.read(file_path) do
       {:ok, data} ->
-        mime_type = mime_type_for(file_path)
-        data_url = "data:#{mime_type};base64,#{Base.encode64(data)}"
+        # Check size BEFORE encoding - Replicate recommends URLs for files > 256KB
+        size_kb = div(byte_size(data), 1024)
+        max_size_kb = 256
 
-        # Check size - Replicate recommends URLs for files > 256KB
-        if byte_size(data) > 256 * 1024 do
-          Logger.warning("File exceeds 256KB, consider using hosted URL",
-            file: file_path,
-            size: byte_size(data)
+        if size_kb > max_size_kb do
+          Logger.error(
+            "File too large for data URL: #{size_kb}KB exceeds #{max_size_kb}KB limit"
           )
-        end
 
-        {:ok, data_url}
+          {:error,
+           {:file_too_large,
+            "File size #{size_kb}KB exceeds Replicate's #{max_size_kb}KB limit for data URLs"}}
+        else
+          mime_type = mime_type_for(file_path)
+          data_url = "data:#{mime_type};base64,#{Base.encode64(data)}"
+          {:ok, data_url}
+        end
 
       {:error, reason} ->
         {:error, {:file_read_failed, reason}}
@@ -133,12 +123,15 @@ defmodule Lossy.ML.Inpainting do
         {:ok, output_url}
 
       {:ok, [output_url | _]} when is_binary(output_url) ->
-        # Some models return a list
         {:ok, output_url}
 
       {:ok, other} ->
-        Logger.error("Unexpected LaMa output format", output: inspect(other))
+        Logger.error("Unexpected LaMa output format: #{inspect(other)}")
         {:error, :unexpected_output_format}
+
+      {:error, :api_key_not_configured} = error ->
+        Logger.error("Replicate API key not configured")
+        error
 
       {:error, reason} ->
         {:error, reason}
@@ -146,11 +139,12 @@ defmodule Lossy.ML.Inpainting do
   end
 
   defp download_result(url, output_path) do
-    Logger.info("Downloading inpainted result", url: url)
-
     case Req.get(url, receive_timeout: 60_000) do
       {:ok, %{status: 200, body: body}} ->
-        File.write(output_path, body)
+        case File.write(output_path, body) do
+          :ok -> {:ok, output_path}
+          {:error, reason} -> {:error, {:file_write_failed, reason}}
+        end
 
       {:ok, %{status: status}} ->
         {:error, {:download_failed, status}}

@@ -20,6 +20,9 @@ defmodule Lossy.ImageProcessing.Mask do
   - :blur_radius - Gaussian blur radius for feathering (default: 10)
   """
   def generate_mask(image_path, bbox, opts \\ []) do
+    # Normalize bbox to use atom keys (handles both string and atom keys)
+    bbox = normalize_bbox(bbox)
+
     # Use adaptive padding if not explicitly provided
     padding = case Keyword.get(opts, :padding_px) do
       nil -> calculate_adaptive_padding(bbox)
@@ -59,6 +62,9 @@ defmodule Lossy.ImageProcessing.Mask do
   Generate a mask for multiple regions combined.
   """
   def generate_combined_mask(image_path, bboxes, opts \\ []) when is_list(bboxes) do
+    # Normalize all bboxes to use atom keys
+    bboxes = Enum.map(bboxes, &normalize_bbox/1)
+
     # Use adaptive padding if not explicitly provided (use average bbox height)
     padding = case Keyword.get(opts, :padding_px) do
       nil -> calculate_adaptive_padding_for_multiple(bboxes)
@@ -176,5 +182,18 @@ defmodule Lossy.ImageProcessing.Mask do
     basename = Path.basename(image_path, Path.extname(image_path))
     timestamp = System.system_time(:millisecond)
     Path.join(dir, "#{basename}_mask_#{timestamp}.png")
+  end
+
+  defp normalize_bbox(bbox) when is_map(bbox) do
+    %{
+      x: get_bbox_value(bbox, :x),
+      y: get_bbox_value(bbox, :y),
+      w: get_bbox_value(bbox, :w),
+      h: get_bbox_value(bbox, :h)
+    }
+  end
+
+  defp get_bbox_value(bbox, key) do
+    Map.get(bbox, key) || Map.get(bbox, to_string(key)) || 0
   end
 end

@@ -45,6 +45,62 @@ defmodule LossyWeb.CaptureLive do
   end
 
   @impl true
+  def handle_event("start_edit_region", %{"region-id" => region_id}, socket) do
+    region = find_region(socket, region_id)
+
+    if region do
+      # Update region status to inpainting_blank (will trigger blank inpainting)
+      case Documents.update_text_region(region, %{
+             editing_status: :inpainting_blank,
+             current_text: ""
+           }) do
+        {:ok, updated_region} ->
+          # Enqueue inpainting job with UPDATED region (will create clean background)
+          Documents.enqueue_inpainting(updated_region)
+
+          # Reload document to get updated state
+          document = Documents.get_document(socket.assigns.document.id)
+          {:noreply, assign(socket, document: document, editing_region_id: region_id)}
+
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to start editing")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
+  def handle_event(
+        "commit_text_change",
+        %{"region-id" => region_id, "text" => new_text},
+        socket
+      ) do
+    region = find_region(socket, region_id)
+
+    if region do
+      # Update text and trigger re-rendering
+      case Documents.update_text_region(region, %{
+             current_text: new_text,
+             editing_status: :rendering_text
+           }) do
+        {:ok, updated_region} ->
+          # Enqueue inpainting job with UPDATED region to render new text
+          Documents.enqueue_inpainting(updated_region)
+
+          # Reload document
+          document = Documents.get_document(socket.assigns.document.id)
+          {:noreply, assign(socket, document: document, editing_region_id: nil)}
+
+        {:error, _changeset} ->
+          {:noreply, put_flash(socket, :error, "Failed to update text")}
+      end
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_event("update_region_text", %{"region-id" => region_id, "text" => new_text}, socket) do
     region = Enum.find(socket.assigns.document.text_regions, &(&1.id == region_id))
 
@@ -103,248 +159,6 @@ defmodule LossyWeb.CaptureLive do
     end
   end
 
-  @impl true
-  def render(assigns) do
-    ~H"""
-    <div class="min-h-screen bg-gray-100 py-8">
-      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div class="mb-6 flex justify-between items-center">
-          <h1 class="text-3xl font-bold text-gray-900">Edit Capture</h1>
-          <div class="flex items-center gap-4">
-            <div class="text-sm text-gray-600">
-              Status:
-              <span class={[
-                "ml-2 px-2.5 py-0.5 rounded-full text-xs font-medium",
-                status_color(@document.status)
-              ]}>
-                {format_status(@document.status)}
-              </span>
-            </div>
-            
-    <!-- Export/Download buttons -->
-            <div class="flex gap-2">
-              <%= if @export_path do %>
-                <a
-                  href={@export_path}
-                  download="lossy-export.png"
-                  class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
-                >
-                  Download
-                </a>
-              <% end %>
-
-              <button
-                phx-click="export"
-                disabled={@exporting}
-                class={[
-                  "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500",
-                  if(@exporting,
-                    do: "bg-gray-400 cursor-not-allowed",
-                    else: "bg-blue-600 hover:bg-blue-700"
-                  )
-                ]}
-              >
-                <%= if @exporting do %>
-                  <svg
-                    class="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
-                    xmlns="http://www.w3.org/2000/svg"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                  >
-                    <circle
-                      class="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      stroke-width="4"
-                    >
-                    </circle>
-                    <path
-                      class="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                    >
-                    </path>
-                  </svg>
-                  Generating...
-                <% else %>
-                  Export Image
-                <% end %>
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <!-- Main editor area -->
-          <div class="lg:col-span-2">
-            <div class="bg-white rounded-lg shadow-lg overflow-hidden">
-              <%= if @document.original_asset do %>
-                <div class="relative inline-block">
-                  <!-- Display the captured image -->
-                  <img
-                    src={Assets.public_url(@document.original_asset)}
-                    alt="Captured image"
-                    class="max-w-full h-auto"
-                    id="capture-image"
-                  />
-                  <!-- Overlay text regions as bounding boxes -->
-                  <%= for region <- @document.text_regions do %>
-                    <div
-                      class={[
-                        "absolute border-2 cursor-pointer transition-all",
-                        if(@selected_region_id == region.id,
-                          do: "border-blue-500 bg-blue-500/10",
-                          else: "border-red-500 bg-red-500/5 hover:bg-red-500/10"
-                        )
-                      ]}
-                      style={region_style(region.bbox, @document.width, @document.height)}
-                      phx-click="select_region"
-                      phx-value-region-id={region.id}
-                      title={region.current_text || region.original_text}
-                    >
-                      <%= if @editing_region_id == region.id do %>
-                        <form
-                          phx-submit="update_region_text"
-                          phx-value-region-id={region.id}
-                          class="w-full h-full"
-                        >
-                          <input
-                            type="text"
-                            name="text"
-                            class="w-full h-full px-2 text-sm border-0 focus:ring-2 focus:ring-blue-500"
-                            value={region.current_text}
-                            id={"region-input-#{region.id}"}
-                            style={"font-size: #{max(region.font_size_px, 12)}px; font-weight: #{region.font_weight};"}
-                            autofocus
-                          />
-                        </form>
-                      <% end %>
-                    </div>
-                  <% end %>
-                </div>
-              <% else %>
-                <div class="p-12 text-center text-gray-500">
-                  <%= if @document.status == :processing do %>
-                    <div class="animate-pulse">
-                      <div class="w-full bg-gray-200 rounded-lg" style="aspect-ratio: 4/3;">
-                        <div class="flex items-center justify-center h-full">
-                          <div class="text-center">
-                            <svg
-                              class="animate-spin h-8 w-8 text-blue-500 mx-auto mb-3"
-                              xmlns="http://www.w3.org/2000/svg"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                            >
-                              <circle
-                                class="opacity-25"
-                                cx="12"
-                                cy="12"
-                                r="10"
-                                stroke="currentColor"
-                                stroke-width="4"
-                              >
-                              </circle>
-                              <path
-                                class="opacity-75"
-                                fill="currentColor"
-                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                              >
-                              </path>
-                            </svg>
-                            <div class="text-lg font-medium mb-1">Loading capture...</div>
-                            <div class="text-sm text-gray-400">Downloading image</div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  <% else %>
-                    <%= if @document.status == :detecting do %>
-                      <div class="animate-pulse">
-                        <div class="text-lg font-medium mb-2">Detecting text regions...</div>
-                        <div class="text-sm">This may take a few seconds</div>
-                      </div>
-                    <% else %>
-                      <div>No image available for this capture.</div>
-                    <% end %>
-                  <% end %>
-                </div>
-              <% end %>
-            </div>
-          </div>
-          
-    <!-- Sidebar with region list -->
-          <div class="lg:col-span-1">
-            <div class="bg-white rounded-lg shadow-lg p-6">
-              <h2 class="text-lg font-bold mb-4">Text Regions</h2>
-
-              <%= if @document.text_regions == [] do %>
-                <%= if @document.status == :processing do %>
-                  <p class="text-gray-500 text-sm italic">Processing capture...</p>
-                <% else %>
-                  <%= if @document.status == :detecting do %>
-                    <p class="text-gray-500 text-sm italic">Detecting text regions...</p>
-                  <% else %>
-                    <p class="text-gray-500 text-sm italic">No text regions detected.</p>
-                  <% end %>
-                <% end %>
-              <% else %>
-                <div class="space-y-3">
-                  <%= for region <- @document.text_regions do %>
-                    <div
-                      class={[
-                        "border rounded-lg p-3 cursor-pointer transition-all",
-                        if(@selected_region_id == region.id,
-                          do: "border-blue-500 bg-blue-50",
-                          else: "border-gray-200 hover:border-gray-300"
-                        )
-                      ]}
-                      phx-click="select_region"
-                      phx-value-region-id={region.id}
-                    >
-                      <div class="flex justify-between items-start mb-2">
-                        <span class="text-xs font-medium text-gray-500">
-                          Region #{region.z_index}
-                        </span>
-                        <button
-                          class="text-xs text-blue-600 hover:text-blue-800"
-                          phx-click="edit_region"
-                          phx-value-region-id={region.id}
-                        >
-                          Edit
-                        </button>
-                      </div>
-                      <p class="text-sm text-gray-900 font-medium break-words">
-                        {region.current_text || region.original_text || "(no text)"}
-                      </p>
-                      <div class="mt-2 text-xs text-gray-500">
-                        {region.font_family}, {region.font_size_px}px
-                      </div>
-                    </div>
-                  <% end %>
-                </div>
-              <% end %>
-
-              <%= if @document.source_url do %>
-                <div class="mt-6 pt-6 border-t border-gray-200">
-                  <h3 class="text-xs font-medium text-gray-500 mb-2">Source</h3>
-                  <a
-                    href={@document.source_url}
-                    target="_blank"
-                    class="text-xs text-blue-600 hover:text-blue-800 break-all"
-                  >
-                    {@document.source_url}
-                  </a>
-                </div>
-              <% end %>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-    """
-  end
 
   defp status_color(:processing), do: "bg-blue-100 text-blue-800"
   defp status_color(:queued_detection), do: "bg-yellow-100 text-yellow-800"
@@ -373,4 +187,8 @@ defmodule LossyWeb.CaptureLive do
   end
 
   defp region_style(_bbox, _width, _height), do: "display: none;"
+
+  defp find_region(socket, region_id) do
+    Enum.find(socket.assigns.document.text_regions, &(&1.id == region_id))
+  end
 end

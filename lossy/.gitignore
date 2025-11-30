@@ -46,3 +46,7 @@ lossy-*.tar
 *.swp
 *.swo
 *~
+
+# Ignore environment files with secrets.
+.env
+.env.local

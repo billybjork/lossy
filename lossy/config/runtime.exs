@@ -7,9 +7,9 @@ import Config
 # any compile-time configuration in here, as it won't be applied.
 # The block below contains prod specific runtime configuration.
 
-# Load .env file in dev/test (dotenvy is only available in those envs)
-if config_env() in [:dev, :test] do
-  Dotenvy.source!([".env", System.get_env()])
+# Load .env file for development
+if config_env() == :dev and File.exists?(".env") and Code.ensure_loaded?(Dotenvy) do
+  Dotenvy.source!([".env"], side_effect: &System.put_env/1)
 end
 
 # ## Using releases

@@ -88,4 +88,4 @@ config :phoenix_live_view,
 config :swoosh, :api_client, false
 
 # ML services configuration for development
-config :lossy, :ml_services, replicate_api_key: System.get_env("REPLICATE_API_TOKEN")
+# Note: API keys are loaded in runtime.exs to ensure .env is loaded first via dotenvy
