@@ -13,7 +13,7 @@ import {
 } from '../lib/text-detection';
 
 // Listen for messages from the service worker
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: any, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
   if (message.type === 'DETECT_TEXT') {
     handleDetection(message.payload)
       .then(result => sendResponse({ success: true, result }))

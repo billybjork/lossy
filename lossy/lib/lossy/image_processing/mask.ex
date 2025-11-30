@@ -16,10 +16,17 @@ defmodule Lossy.ImageProcessing.Mask do
   - White (255,255,255) for areas to inpaint
 
   Options:
-  - :padding_px - Extra padding around the bbox (default: 10)
+  - :padding_px - Extra padding around the bbox (default: adaptive based on bbox height)
+  - :blur_radius - Gaussian blur radius for feathering (default: 10)
   """
   def generate_mask(image_path, bbox, opts \\ []) do
-    padding = Keyword.get(opts, :padding_px, 10)
+    # Use adaptive padding if not explicitly provided
+    padding = case Keyword.get(opts, :padding_px) do
+      nil -> calculate_adaptive_padding(bbox)
+      explicit_padding -> explicit_padding
+    end
+
+    blur_radius = Keyword.get(opts, :blur_radius, 10)
 
     # Get image dimensions
     with {:ok, {width, height}} <- get_image_dimensions(image_path) do
@@ -33,7 +40,7 @@ defmodule Lossy.ImageProcessing.Mask do
       mask_path = generate_mask_path(image_path)
 
       # Create mask using ImageMagick
-      case create_mask_file(width, height, x, y, w, h, mask_path) do
+      case create_mask_file(width, height, x, y, w, h, mask_path, blur_radius) do
         :ok ->
           Logger.info("Mask generated",
             mask_path: mask_path,
@@ -52,7 +59,13 @@ defmodule Lossy.ImageProcessing.Mask do
   Generate a mask for multiple regions combined.
   """
   def generate_combined_mask(image_path, bboxes, opts \\ []) when is_list(bboxes) do
-    padding = Keyword.get(opts, :padding_px, 10)
+    # Use adaptive padding if not explicitly provided (use average bbox height)
+    padding = case Keyword.get(opts, :padding_px) do
+      nil -> calculate_adaptive_padding_for_multiple(bboxes)
+      explicit_padding -> explicit_padding
+    end
+
+    blur_radius = Keyword.get(opts, :blur_radius, 10)
 
     with {:ok, {width, height}} <- get_image_dimensions(image_path) do
       mask_path = generate_mask_path(image_path)
@@ -68,7 +81,7 @@ defmodule Lossy.ImageProcessing.Mask do
           "rectangle #{x},#{y} #{x + w},#{y + h}"
         end)
 
-      # Create mask with all regions
+      # Create mask with all regions and feathering
       args = [
         "-size",
         "#{width}x#{height}",
@@ -77,6 +90,8 @@ defmodule Lossy.ImageProcessing.Mask do
         "white",
         "-draw",
         draw_commands,
+        "-blur",
+        "0x#{blur_radius}",
         mask_path
       ]
 
@@ -103,8 +118,9 @@ defmodule Lossy.ImageProcessing.Mask do
     end
   end
 
-  defp create_mask_file(width, height, x, y, w, h, mask_path) do
+  defp create_mask_file(width, height, x, y, w, h, mask_path, blur_radius) do
     # Use ImageMagick convert to create a black image with a white rectangle
+    # Apply Gaussian blur for feathered edges (better blending)
     args = [
       "-size",
       "#{width}x#{height}",
@@ -113,6 +129,8 @@ defmodule Lossy.ImageProcessing.Mask do
       "white",
       "-draw",
       "rectangle #{x},#{y} #{x + w},#{y + h}",
+      "-blur",
+      "0x#{blur_radius}",
       mask_path
     ]
 
@@ -124,6 +142,33 @@ defmodule Lossy.ImageProcessing.Mask do
         Logger.error("Failed to create mask", output: output)
         {:error, :mask_creation_failed}
     end
+  end
+
+  defp calculate_adaptive_padding(bbox) do
+    # Calculate padding as 20% of bbox height, clamped between 10-50px
+    # This ensures larger text gets more padding (captures shadows/antialiasing)
+    # while smaller text doesn't waste processing time
+    bbox.h
+    |> Kernel.*(0.2)
+    |> trunc()
+    |> max(10)
+    |> min(50)
+  end
+
+  defp calculate_adaptive_padding_for_multiple(bboxes) do
+    # For multiple regions, use the average height
+    avg_height =
+      bboxes
+      |> Enum.map(& &1.h)
+      |> Enum.sum()
+      |> Kernel./(length(bboxes))
+
+    # Calculate padding based on average height
+    avg_height
+    |> Kernel.*(0.2)
+    |> trunc()
+    |> max(10)
+    |> min(50)
   end
 
   defp generate_mask_path(image_path) do

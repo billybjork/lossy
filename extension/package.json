@@ -14,6 +14,7 @@
   "devDependencies": {
     "@types/chrome": "^0.0.268",
     "@vitejs/plugin-basic-ssl": "^1.1.0",
+    "@webgpu/types": "^0.1.51",
     "typescript": "^5.5.3",
     "vite": "^5.3.3",
     "vite-plugin-web-extension": "^4.1.6"
