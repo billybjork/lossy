@@ -24,10 +24,11 @@ defmodule Lossy.ImageProcessing.Mask do
     bbox = normalize_bbox(bbox)
 
     # Use adaptive padding if not explicitly provided
-    padding = case Keyword.get(opts, :padding_px) do
-      nil -> calculate_adaptive_padding(bbox)
-      explicit_padding -> explicit_padding
-    end
+    padding =
+      case Keyword.get(opts, :padding_px) do
+        nil -> calculate_adaptive_padding(bbox)
+        explicit_padding -> explicit_padding
+      end
 
     blur_radius = Keyword.get(opts, :blur_radius, 10)
 
@@ -66,10 +67,11 @@ defmodule Lossy.ImageProcessing.Mask do
     bboxes = Enum.map(bboxes, &normalize_bbox/1)
 
     # Use adaptive padding if not explicitly provided (use average bbox height)
-    padding = case Keyword.get(opts, :padding_px) do
-      nil -> calculate_adaptive_padding_for_multiple(bboxes)
-      explicit_padding -> explicit_padding
-    end
+    padding =
+      case Keyword.get(opts, :padding_px) do
+        nil -> calculate_adaptive_padding_for_multiple(bboxes)
+        explicit_padding -> explicit_padding
+      end
 
     blur_radius = Keyword.get(opts, :blur_radius, 10)
 

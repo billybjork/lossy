@@ -81,7 +81,7 @@ defmodule Lossy.Workers.Inpainting do
 
       _other ->
         # Stage 2 or normal flow: Inpaint + render text
-        Logger.info("Using normal inpainting flow", editing_status: region.editing_status)
+        Logger.info("Using normal inpainting flow (editing_status: #{inspect(region.editing_status)})")
         process_normal_inpainting(image_path, region, document)
     end
   rescue
@@ -101,22 +101,33 @@ defmodule Lossy.Workers.Inpainting do
 
     case Inpainting.inpaint_region(image_path, region.bbox, padding_px: region.padding_px || 10) do
       {:ok, inpainted_path} ->
-        # Save the inpainted base without rendering text
-        {:ok, inpainted_asset} =
-          Assets.save_image_from_path(document.id, inpainted_path, :inpainted_patch)
+        # Crop the inpainted result to just the bbox region
+        case crop_to_bbox(inpainted_path, region.bbox, region.padding_px || 10) do
+          {:ok, cropped_path} ->
+            # Save the cropped inpainted patch
+            {:ok, inpainted_asset} =
+              Assets.save_image_from_path(document.id, cropped_path, :inpainted_patch)
 
-        # Update region to ready_to_edit status
-        {:ok, _region} =
-          Documents.update_text_region(region, %{
-            status: :rendered,
-            editing_status: :ready_to_edit,
-            inpainted_asset_id: inpainted_asset.id
-          })
+            # Clean up temporary files
+            File.rm(inpainted_path)
+            File.rm(cropped_path)
 
-        File.rm(inpainted_path)
-        broadcast_update(document)
-        Logger.info("Blank inpainting completed, ready for editing", region_id: region.id)
-        :ok
+            # Update region to ready_to_edit status
+            {:ok, _region} =
+              Documents.update_text_region(region, %{
+                status: :rendered,
+                editing_status: :ready_to_edit,
+                inpainted_asset_id: inpainted_asset.id
+              })
+
+            broadcast_update(document)
+            Logger.info("Blank inpainting completed, ready for editing", region_id: region.id)
+            :ok
+
+          {:error, reason} ->
+            File.rm(inpainted_path)
+            handle_inpainting_error(region, reason)
+        end
 
       {:error, reason} ->
         handle_inpainting_error(region, reason)
@@ -128,7 +139,17 @@ defmodule Lossy.Workers.Inpainting do
 
     case Inpainting.inpaint_region(image_path, region.bbox, padding_px: region.padding_px || 10) do
       {:ok, inpainted_path} ->
-        handle_inpainting_success(inpainted_path, region, document)
+        # Crop the inpainted result to just the bbox region
+        case crop_to_bbox(inpainted_path, region.bbox, region.padding_px || 10) do
+          {:ok, cropped_path} ->
+            # Clean up the full inpainted image
+            File.rm(inpainted_path)
+            handle_inpainting_success(cropped_path, region, document)
+
+          {:error, reason} ->
+            File.rm(inpainted_path)
+            handle_inpainting_error(region, reason)
+        end
 
       {:error, reason} ->
         handle_inpainting_error(region, reason)
@@ -156,7 +177,7 @@ defmodule Lossy.Workers.Inpainting do
   end
 
   defp save_rendered_result(final_path, inpainted_path, region, document) do
-    {:ok, rendered_asset} = Assets.save_image_from_path(document.id, final_path, :rendered_patch)
+    {:ok, rendered_asset} = Assets.save_image_from_path(document.id, final_path, :inpainted_patch)
 
     {:ok, _region} =
       Documents.update_text_region(region, %{
@@ -241,5 +262,44 @@ defmodule Lossy.Workers.Inpainting do
 
   defp get_bbox_value(bbox, key) do
     Map.get(bbox, key) || Map.get(bbox, to_string(key)) || 0
+  end
+
+  defp crop_to_bbox(image_path, bbox, padding_px) do
+    bbox = normalize_bbox(bbox)
+
+    # Calculate crop region with padding
+    x = max(0, trunc(bbox.x - padding_px))
+    y = max(0, trunc(bbox.y - padding_px))
+    w = trunc(bbox.w + 2 * padding_px)
+    h = trunc(bbox.h + 2 * padding_px)
+
+    # Generate output path
+    dir = Path.dirname(image_path)
+    basename = Path.basename(image_path, Path.extname(image_path))
+    timestamp = System.system_time(:millisecond)
+    output_path = Path.join(dir, "#{basename}_cropped_#{timestamp}.png")
+
+    # Use ImageMagick to crop: convert input.png -crop WxH+X+Y output.png
+    args = [
+      image_path,
+      "-crop",
+      "#{w}x#{h}+#{x}+#{y}",
+      "+repage",
+      output_path
+    ]
+
+    case System.cmd("convert", args, stderr_to_stdout: true) do
+      {_, 0} ->
+        Logger.info("Cropped inpainted image to bbox",
+          bbox: %{x: x, y: y, w: w, h: h},
+          output: output_path
+        )
+
+        {:ok, output_path}
+
+      {output, _} ->
+        Logger.error("Failed to crop image", output: output)
+        {:error, :crop_failed}
+    end
   end
 end

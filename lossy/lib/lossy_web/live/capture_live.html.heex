@@ -12,8 +12,8 @@
             {format_status(@document.status)}
           </span>
         </div>
-
-        <!-- Export/Download buttons -->
+        
+<!-- Export/Download buttons -->
         <div class="flex gap-2">
           <%= if @export_path do %>
             <a
@@ -87,97 +87,101 @@
                   class="absolute"
                   style={region_style(region.bbox, @document.width, @document.height)}
                 >
-                  <%= cond do %>
-                    <% region.editing_status == :inpainting_blank -> %>
-                      <!-- State: Inpainting (removing text) -->
-                      <div class="flex items-center justify-center w-full h-full bg-blue-100/70 border-2 border-blue-500 rounded">
-                        <div class="text-center">
-                          <svg
-                            class="animate-spin h-8 w-8 text-blue-600 mx-auto mb-1"
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle
-                              class="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              stroke-width="4"
-                            >
-                            </circle>
-                            <path
-                              class="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                            >
-                            </path>
-                          </svg>
-                          <div class="text-xs text-blue-700 font-medium">Removing text...</div>
-                        </div>
-                      </div>
-
-                    <% region.editing_status == :ready_to_edit and @editing_region_id == region.id -> %>
-                      <!-- State: Ready to edit (show contenteditable) -->
-                      <div
-                        contenteditable="true"
-                        class="w-full h-full p-2 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 rounded cursor-text"
-                        style={"font-size: #{max(region.font_size_px, 12)}px; color: #{region.color_rgba || "rgb(0,0,0)"}; line-height: 1.2; font-family: #{region.font_family || "Inter, system-ui, sans-serif"};"}
-                        data-region-id={region.id}
-                        phx-hook="EditableText"
-                        id={"editable-region-#{region.id}"}
-                      >{region.current_text || "Type here..."}</div>
-
-                    <% region.editing_status == :rendering_text -> %>
-                      <!-- State: Rendering (applying new text) -->
-                      <div class="flex items-center justify-center w-full h-full bg-purple-100/70 border-2 border-purple-500 rounded">
-                        <div class="text-center">
-                          <svg
-                            class="animate-spin h-6 w-6 text-purple-600 mx-auto mb-1"
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle
-                              class="opacity-25"
-                              cx="12"
-                              cy="12"
-                              r="10"
-                              stroke="currentColor"
-                              stroke-width="4"
-                            >
-                            </circle>
-                            <path
-                              class="opacity-75"
-                              fill="currentColor"
-                              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                            >
-                            </path>
-                          </svg>
-                          <div class="text-xs text-purple-700 font-medium">Rendering...</div>
-                        </div>
-                      </div>
-
-                    <% true -> %>
-                      <!-- State: Idle (show clickable region) -->
-                      <div
-                        class={[
-                          "w-full h-full border-2 cursor-pointer transition-all rounded",
-                          if(@selected_region_id == region.id,
-                            do: "border-blue-500 bg-blue-500/10",
-                            else: "border-red-500 bg-red-500/5 hover:bg-red-500/10 hover:border-red-600"
-                          )
-                        ]}
-                        phx-click="start_edit_region"
-                        phx-value-region-id={region.id}
-                        title={"Click to edit: #{region.current_text || region.original_text || "(no text)"}"}
-                      >
-                        <div class="text-xs text-gray-700 p-1 opacity-70">
-                          Click to edit
-                        </div>
-                      </div>
+                  <%= if region.inpainted_asset_id do %>
+                    <!-- Display the inpainted patch image -->
+                    <img
+                      src={"/uploads/#{@document.id}/inpainted_patch.png"}
+                      alt="Inpainted region"
+                      class="absolute inset-0 w-full h-full object-cover z-0"
+                    />
                   <% end %>
+                  <div class="relative z-10 w-full h-full">
+                    <%= cond do %>
+                      <% region.editing_status == :inpainting_blank -> %>
+                        <!-- State: Inpainting (removing text) -->
+                        <div class="flex items-center justify-center w-full h-full bg-blue-100/70 border-2 border-blue-500 rounded">
+                          <div class="text-center">
+                            <svg
+                              class="animate-spin h-8 w-8 text-blue-600 mx-auto mb-1"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                class="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                stroke-width="4"
+                              >
+                              </circle>
+                              <path
+                                class="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              >
+                              </path>
+                            </svg>
+                            <div class="text-xs text-blue-700 font-medium">Removing text...</div>
+                          </div>
+                        </div>
+                      <% region.editing_status == :ready_to_edit and @editing_region_id == region.id -> %>
+                        <!-- State: Ready to edit (show contenteditable) -->
+                        <div
+                          contenteditable="true"
+                          class="w-full h-full p-2 bg-transparent focus:outline-none focus:ring-2 focus:ring-blue-500 rounded cursor-text"
+                          style={"font-size: #{max(region.font_size_px, 12)}px; color: #{region.color_rgba || "rgb(0,0,0)"}; line-height: 1.2; font-family: #{region.font_family || "Inter, system-ui, sans-serif"};"}
+                          data-region-id={region.id}
+                          phx-hook="EditableText"
+                          id={"editable-region-#{region.id}"}
+                        >{region.current_text || "Type here..."}</div>
+                      <% region.editing_status == :rendering_text -> %>
+                        <!-- State: Rendering (applying new text) -->
+                        <div class="flex items-center justify-center w-full h-full bg-purple-100/70 border-2 border-purple-500 rounded">
+                          <div class="text-center">
+                            <svg
+                              class="animate-spin h-6 w-6 text-purple-600 mx-auto mb-1"
+                              xmlns="http://www.w3.org/2000/svg"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                            >
+                              <circle
+                                class="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                stroke-width="4"
+                              >
+                              </circle>
+                              <path
+                                class="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                              >
+                              </path>
+                            </svg>
+                            <div class="text-xs text-purple-700 font-medium">Rendering...</div>
+                          </div>
+                        </div>
+                      <% true -> %>
+                        <!-- State: Idle (show clickable region) -->
+                        <div
+                          class={[
+                            "w-full h-full border-2 cursor-pointer transition-all rounded",
+                            if(@selected_region_id == region.id,
+                              do: "border-blue-500 bg-blue-500/10",
+                              else: "border-transparent hover:bg-red-500/10 hover:border-red-500"
+                            )
+                          ]}
+                          phx-click="start_edit_region"
+                          phx-value-region-id={region.id}
+                          title={"Click to edit: #{region.current_text || region.original_text || "(no text)"}"}
+                        >
+                        </div>
+                    <% end %>
+                  </div>
                 </div>
               <% end %>
             </div>
@@ -230,8 +234,8 @@
           <% end %>
         </div>
       </div>
-
-      <!-- Sidebar with region list -->
+      
+<!-- Sidebar with region list -->
       <div class="lg:col-span-1">
         <div class="bg-white rounded-lg shadow-lg p-6">
           <h2 class="text-lg font-bold mb-4">Text Regions</h2>

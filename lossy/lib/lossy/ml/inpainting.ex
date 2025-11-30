@@ -82,9 +82,7 @@ defmodule Lossy.ML.Inpainting do
         max_size_kb = 256
 
         if size_kb > max_size_kb do
-          Logger.error(
-            "File too large for data URL: #{size_kb}KB exceeds #{max_size_kb}KB limit"
-          )
+          Logger.error("File too large for data URL: #{size_kb}KB exceeds #{max_size_kb}KB limit")
 
           {:error,
            {:file_too_large,

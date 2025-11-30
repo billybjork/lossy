@@ -77,28 +77,29 @@ defmodule Lossy.Documents.Document do
   end
 
   defp validate_status_transition(changeset) do
-    case get_change(changeset, :status) do
-      nil ->
+    new_status = get_change(changeset, :status)
+    old_status = changeset.data.status
+
+    cond do
+      # No status change
+      is_nil(new_status) ->
         changeset
 
-      new_status ->
-        # Only validate transitions for existing documents (updates, not creates)
-        # For new documents (id is nil), allow any valid status
-        if changeset.data.id == nil do
-          changeset
-        else
-          old_status = changeset.data.status
+      # New documents (creates) - allow any valid status
+      is_nil(changeset.data.id) ->
+        changeset
 
-          if old_status && !valid_transition?(old_status, new_status) do
-            add_error(
-              changeset,
-              :status,
-              "invalid status transition from #{old_status} to #{new_status}"
-            )
-          else
-            changeset
-          end
-        end
+      # No previous status to transition from
+      is_nil(old_status) ->
+        changeset
+
+      # Valid transition
+      valid_transition?(old_status, new_status) ->
+        changeset
+
+      # Invalid transition
+      true ->
+        add_error(changeset, :status, "invalid status transition from #{old_status} to #{new_status}")
     end
   end
 

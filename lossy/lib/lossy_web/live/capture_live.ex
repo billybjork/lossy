@@ -159,7 +159,6 @@ defmodule LossyWeb.CaptureLive do
     end
   end
 
-
   defp status_color(:processing), do: "bg-blue-100 text-blue-800"
   defp status_color(:queued_detection), do: "bg-yellow-100 text-yellow-800"
   defp status_color(:detecting), do: "bg-blue-100 text-blue-800"
