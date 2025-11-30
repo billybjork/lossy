@@ -135,7 +135,7 @@ defmodule Lossy.ImageProcessing.TextRenderer do
   defp rgba_to_imagemagick(rgba) when is_binary(rgba) do
     case Regex.run(~r/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/, rgba) do
       [_, r, g, b, a] ->
-        alpha = String.to_float(a)
+        {alpha, _} = Float.parse(a)
         # ImageMagick uses rgba(r,g,b,a) but alpha is 0-1
         "rgba(#{r},#{g},#{b},#{alpha})"
 
