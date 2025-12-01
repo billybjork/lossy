@@ -2,220 +2,129 @@ defmodule Lossy.Workers.Inpainting do
   @moduledoc """
   Oban worker for processing inpainting jobs.
 
-  When a user edits text in a region, this worker:
-  1. Inpaints the original background (removes text)
-  2. Updates the region status
-  3. Broadcasts update to LiveView
+  Pipeline:
+  1. Combine masks if multiple regions selected
+  2. Call LaMa inpainting via Replicate
+  3. Save result as working_asset
+  4. Update history and broadcast
   """
 
   use Oban.Worker, queue: :ml, max_attempts: 3
 
   require Logger
+  import Ecto.Query
   alias Lossy.{Documents, Assets, Repo}
-  alias Lossy.Documents.{TextRegion, Asset}
+  alias Lossy.Documents.{Asset, Document, HistoryEntry}
   alias Lossy.ML.Inpainting
-  alias Lossy.ImageProcessing.TextRenderer
+  alias Lossy.ImageProcessing.Mask
 
   @impl Oban.Worker
-  def perform(%Oban.Job{args: %{"region_id" => region_id}}) do
-    Logger.info("Starting inpainting job", region_id: region_id)
+  def perform(%Oban.Job{args: %{"document_id" => doc_id, "mask_paths" => mask_paths} = args}) do
+    region_ids = Map.get(args, "region_ids", [])
+    Logger.info("Starting batch inpainting job", document_id: doc_id, mask_count: length(mask_paths))
 
-    region = Repo.get!(TextRegion, region_id) |> Repo.preload(:document)
+    document = Documents.get_document(doc_id)
 
-    case region.document do
-      nil ->
-        Logger.error("Document not found for region", region_id: region_id)
-        {:error, :document_not_found}
-
-      document ->
-        process_inpainting(region, document)
+    if document do
+      process_batch_inpainting(document, mask_paths, region_ids)
+    else
+      {:error, :document_not_found}
     end
   end
 
-  defp process_inpainting(region, document) do
-    {:ok, updated_region} = Documents.update_text_region(region, %{status: :inpainting})
-
-    # Reload region to get fresh editing_status
-    region = Repo.get!(TextRegion, updated_region.id)
-
-    Logger.info("Processing inpainting - step 1")
-    Logger.info("Region ID: #{region.id}")
-    Logger.info("Editing status: #{inspect(region.editing_status)}")
-    Logger.info("Current text: #{inspect(region.current_text)}")
-
-    Logger.info("Processing inpainting - step 2: getting asset")
-    Logger.info("Document original_asset_id: #{inspect(document.original_asset_id)}")
-
+  defp process_batch_inpainting(document, mask_paths, region_ids) do
     if is_nil(document.original_asset_id) do
-      raise "Document has no original_asset_id - image may not have been downloaded yet"
-    end
+      {:error, :no_image}
+    else
+      # Get current working image (or original if no working image yet)
+      image_path = get_current_image_path(document)
 
-    original_asset =
-      try do
-        asset = Repo.get!(Asset, document.original_asset_id)
-        Logger.info("Asset found successfully")
-        asset
-      rescue
-        e ->
-          Logger.error("Failed to get asset: #{inspect(e)}")
-          reraise e, __STACKTRACE__
+      # Combine multiple masks into one for a single API call
+      with {:ok, combined_mask_path} <- combine_masks_if_needed(mask_paths, document.id),
+           {:ok, inpainted_path} <- Inpainting.inpaint_with_mask(image_path, combined_mask_path),
+           {:ok, document} <- save_inpaint_result_with_history(document, inpainted_path, region_ids) do
+        # Clean up temporary combined mask if we created one
+        if length(mask_paths) > 1 do
+          File.rm(combined_mask_path)
+        end
+
+        broadcast_update(document)
+        broadcast_inpainting_complete(document)
+        :ok
+      else
+        {:error, reason} ->
+          Logger.error("Batch inpainting failed", reason: inspect(reason))
+          {:error, reason}
       end
-
-    if is_nil(original_asset) do
-      raise "Asset not found for ID: #{document.original_asset_id}"
-    end
-
-    Logger.info("Processing inpainting - step 3: getting path")
-    Logger.info("Asset storage_uri: #{inspect(original_asset.storage_uri)}")
-
-    image_path = Assets.asset_path(original_asset)
-
-    Logger.info("Image path resolved: #{image_path}")
-
-    # Check editing_status to determine flow
-    case region.editing_status do
-      :inpainting_blank ->
-        # Stage 1: Inpaint to remove text, don't render new text yet
-        Logger.info("Using blank inpainting flow")
-        process_blank_inpainting(image_path, region, document)
-
-      _other ->
-        # Stage 2 or normal flow: Inpaint + render text
-        Logger.info("Using normal inpainting flow (editing_status: #{inspect(region.editing_status)})")
-        process_normal_inpainting(image_path, region, document)
     end
   rescue
     error ->
-      error_message = inspect(error)
-      stacktrace = Exception.format_stacktrace(__STACKTRACE__)
-
-      Logger.error("Inpainting job crashed: #{error_message}")
-      Logger.error("Stacktrace: #{stacktrace}")
-
-      Documents.update_text_region(region, %{status: :error, editing_status: :idle})
-      reraise error, __STACKTRACE__
+      Logger.error("Batch inpainting crashed: #{inspect(error)}")
+      {:error, inspect(error)}
   end
 
-  defp process_blank_inpainting(image_path, region, document) do
-    Logger.info("Processing blank inpainting (removing text)", region_id: region.id)
+  defp get_current_image_path(document) do
+    # Use working asset if available, otherwise original
+    asset =
+      if document.working_asset_id do
+        Repo.get!(Asset, document.working_asset_id)
+      else
+        Repo.get!(Asset, document.original_asset_id)
+      end
 
-    case Inpainting.inpaint_region(image_path, region.bbox, padding_px: region.padding_px || 10) do
-      {:ok, inpainted_path} ->
-        # Crop the inpainted result to just the bbox region
-        case crop_to_bbox(inpainted_path, region.bbox, region.padding_px || 10) do
-          {:ok, cropped_path} ->
-            # Save the cropped inpainted patch
-            {:ok, inpainted_asset} =
-              Assets.save_image_from_path(document.id, cropped_path, :inpainted_patch)
+    Assets.asset_path(asset)
+  end
 
-            # Clean up temporary files
-            File.rm(inpainted_path)
-            File.rm(cropped_path)
+  defp combine_masks_if_needed([single_mask], _doc_id), do: {:ok, single_mask}
 
-            # Update region to ready_to_edit status
-            {:ok, _region} =
-              Documents.update_text_region(region, %{
-                status: :rendered,
-                editing_status: :ready_to_edit,
-                inpainted_asset_id: inpainted_asset.id
-              })
+  defp combine_masks_if_needed(mask_paths, doc_id) when length(mask_paths) > 1 do
+    # Generate output path for combined mask
+    dir = Path.join(["priv/static/uploads", doc_id])
+    File.mkdir_p!(dir)
+    output_path = Path.join(dir, "combined_mask_#{System.system_time(:millisecond)}.png")
 
-            broadcast_update(document)
-            Logger.info("Blank inpainting completed, ready for editing", region_id: region.id)
-            :ok
+    Mask.combine_masks(mask_paths, output_path)
+  end
 
-          {:error, reason} ->
-            File.rm(inpainted_path)
-            handle_inpainting_error(region, reason)
-        end
+  defp save_inpaint_result_with_history(document, inpainted_path, region_ids) do
+    # 1. Save current image to history BEFORE we overwrite it
+    current_image_path = get_current_image_path(document)
+    history_entry = HistoryEntry.new_inpaint(current_image_path, region_ids)
 
-      {:error, reason} ->
-        handle_inpainting_error(region, reason)
+    # 2. Save the new inpainted image as working asset
+    {:ok, new_working_asset} =
+      Assets.save_image_from_path(document.id, inpainted_path, :working)
+
+    # 3. Update document with new working asset and history entry
+    changeset =
+      document
+      |> Document.add_history_entry(history_entry)
+      |> Ecto.Changeset.put_change(:working_asset_id, new_working_asset.id)
+      |> Ecto.Changeset.put_change(:status, :ready)
+
+    case Repo.update(changeset) do
+      {:ok, updated_doc} ->
+        # 4. Mark the inpainted regions as complete
+        mark_regions_inpainted(region_ids)
+
+        # Clean up temp inpainted file (we saved it as asset)
+        File.rm(inpainted_path)
+        {:ok, updated_doc}
+
+      {:error, changeset} ->
+        Logger.error("Failed to save inpaint result", errors: inspect(changeset.errors))
+        {:error, :save_failed}
     end
   end
 
-  defp process_normal_inpainting(image_path, region, document) do
-    Logger.info("Processing normal inpainting (inpaint + render text)", region_id: region.id)
+  defp mark_regions_inpainted(region_ids) when is_list(region_ids) do
+    alias Lossy.Documents.DetectedRegion
 
-    case Inpainting.inpaint_region(image_path, region.bbox, padding_px: region.padding_px || 10) do
-      {:ok, inpainted_path} ->
-        # Crop the inpainted result to just the bbox region
-        case crop_to_bbox(inpainted_path, region.bbox, region.padding_px || 10) do
-          {:ok, cropped_path} ->
-            # Clean up the full inpainted image
-            File.rm(inpainted_path)
-            handle_inpainting_success(cropped_path, region, document)
+    # Update all regions to inpainted status
+    from(r in DetectedRegion, where: r.id in ^region_ids)
+    |> Repo.update_all(set: [status: :inpainted, updated_at: NaiveDateTime.utc_now()])
 
-          {:error, reason} ->
-            File.rm(inpainted_path)
-            handle_inpainting_error(region, reason)
-        end
-
-      {:error, reason} ->
-        handle_inpainting_error(region, reason)
-    end
-  end
-
-  defp handle_inpainting_success(inpainted_path, region, document) do
-    render_result = maybe_render_text(inpainted_path, region)
-
-    case render_result do
-      {:ok, final_path} ->
-        save_rendered_result(final_path, inpainted_path, region, document)
-
-      {:error, render_reason} ->
-        save_fallback_result(inpainted_path, region, document, render_reason)
-    end
-  end
-
-  defp maybe_render_text(inpainted_path, region) do
-    if region.current_text && region.current_text != "" do
-      render_text_on_image(inpainted_path, region)
-    else
-      {:ok, inpainted_path}
-    end
-  end
-
-  defp save_rendered_result(final_path, inpainted_path, region, document) do
-    {:ok, rendered_asset} = Assets.save_image_from_path(document.id, final_path, :inpainted_patch)
-
-    {:ok, _region} =
-      Documents.update_text_region(region, %{
-        status: :rendered,
-        editing_status: :idle,
-        inpainted_asset_id: rendered_asset.id
-      })
-
-    File.rm(inpainted_path)
-    if final_path != inpainted_path, do: File.rm(final_path)
-
-    broadcast_update(document)
-    Logger.info("Inpainting and text rendering completed", region_id: region.id)
-    :ok
-  end
-
-  defp save_fallback_result(inpainted_path, region, document, render_reason) do
-    Logger.error("Text rendering failed", region_id: region.id, reason: inspect(render_reason))
-
-    {:ok, inpainted_asset} =
-      Assets.save_image_from_path(document.id, inpainted_path, :inpainted_patch)
-
-    Documents.update_text_region(region, %{
-      status: :rendered,
-      inpainted_asset_id: inpainted_asset.id
-    })
-
-    File.rm(inpainted_path)
-    broadcast_update(document)
-
-    Logger.warning("Saved inpainted image without text rendering", region_id: region.id)
-    :ok
-  end
-
-  defp handle_inpainting_error(region, reason) do
-    Logger.error("Inpainting failed", region_id: region.id, reason: inspect(reason))
-    Documents.update_text_region(region, %{status: :error, editing_status: :idle})
-    {:error, reason}
+    Logger.info("Marked regions as inpainted", count: length(region_ids))
   end
 
   defp broadcast_update(document) do
@@ -228,78 +137,11 @@ defmodule Lossy.Workers.Inpainting do
     )
   end
 
-  defp render_text_on_image(image_path, region) do
-    opts = build_render_opts(region)
-    bbox = normalize_bbox(region.bbox)
-
-    Logger.info("Rendering text on inpainted image",
-      text: region.current_text,
-      bbox: inspect(bbox),
-      font_size: opts[:font_size_px]
+  defp broadcast_inpainting_complete(document) do
+    Phoenix.PubSub.broadcast(
+      Lossy.PubSub,
+      "document:#{document.id}",
+      {:inpainting_complete, %{document_id: document.id}}
     )
-
-    TextRenderer.render_text_in_region(image_path, region.current_text, bbox, opts)
-  end
-
-  defp build_render_opts(region) do
-    [
-      font_family: region.font_family,
-      font_size_px: region.font_size_px || 16,
-      font_weight: region.font_weight || 400,
-      color_rgba: region.color_rgba || "rgba(0,0,0,1)",
-      alignment: region.alignment || :left
-    ]
-  end
-
-  defp normalize_bbox(bbox) when is_map(bbox) do
-    %{
-      x: get_bbox_value(bbox, :x),
-      y: get_bbox_value(bbox, :y),
-      w: get_bbox_value(bbox, :w),
-      h: get_bbox_value(bbox, :h)
-    }
-  end
-
-  defp get_bbox_value(bbox, key) do
-    Map.get(bbox, key) || Map.get(bbox, to_string(key)) || 0
-  end
-
-  defp crop_to_bbox(image_path, bbox, padding_px) do
-    bbox = normalize_bbox(bbox)
-
-    # Calculate crop region with padding
-    x = max(0, trunc(bbox.x - padding_px))
-    y = max(0, trunc(bbox.y - padding_px))
-    w = trunc(bbox.w + 2 * padding_px)
-    h = trunc(bbox.h + 2 * padding_px)
-
-    # Generate output path
-    dir = Path.dirname(image_path)
-    basename = Path.basename(image_path, Path.extname(image_path))
-    timestamp = System.system_time(:millisecond)
-    output_path = Path.join(dir, "#{basename}_cropped_#{timestamp}.png")
-
-    # Use ImageMagick to crop: convert input.png -crop WxH+X+Y output.png
-    args = [
-      image_path,
-      "-crop",
-      "#{w}x#{h}+#{x}+#{y}",
-      "+repage",
-      output_path
-    ]
-
-    case System.cmd("convert", args, stderr_to_stdout: true) do
-      {_, 0} ->
-        Logger.info("Cropped inpainted image to bbox",
-          bbox: %{x: x, y: y, w: w, h: h},
-          output: output_path
-        )
-
-        {:ok, output_path}
-
-      {output, _} ->
-        Logger.error("Failed to crop image", output: output)
-        {:error, :crop_failed}
-    end
   end
 end

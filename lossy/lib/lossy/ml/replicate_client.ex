@@ -142,6 +142,80 @@ defmodule Lossy.ML.ReplicateClient do
     end
   end
 
+  @doc """
+  Upload a file to Replicate's file hosting.
+
+  Returns {:ok, url} where url is a signed URL that Replicate can access.
+  Use this for files larger than 256KB that can't use data URLs.
+  """
+  def upload_file(file_path) do
+    case Config.fetch_replicate_api_key() do
+      {:ok, api_key} ->
+        do_upload_file(api_key, file_path)
+
+      {:error, :not_configured} ->
+        {:error, :api_key_not_configured}
+    end
+  end
+
+  defp do_upload_file(api_key, file_path) do
+    filename = Path.basename(file_path)
+    content_type = mime_type_for(file_path)
+
+    case File.read(file_path) do
+      {:ok, file_data} ->
+        # Replicate's files API uses multipart upload
+        multipart =
+          {:multipart,
+           [
+             {:file, file_data,
+              {"form-data", [name: "file", filename: filename]},
+              [{"content-type", content_type}]}
+           ]}
+
+        Req.post("#{@base_url}/files",
+          body: multipart,
+          headers: [{"authorization", "Bearer #{api_key}"}],
+          receive_timeout: 60_000
+        )
+        |> handle_upload_response()
+
+      {:error, reason} ->
+        {:error, {:file_read_failed, reason}}
+    end
+  end
+
+  defp handle_upload_response({:ok, %{status: status, body: %{"urls" => %{"get" => url}}}})
+       when status in 200..299 do
+    Logger.info("File uploaded to Replicate", url: url)
+    {:ok, url}
+  end
+
+  defp handle_upload_response({:ok, %{status: status, body: body}}) when status in 200..299 do
+    Logger.error("Unexpected file upload response: #{inspect(body)}")
+    {:error, :unexpected_response}
+  end
+
+  defp handle_upload_response({:ok, %{status: status, body: body}}) do
+    Logger.error("File upload failed: #{inspect(body)} (HTTP #{status})")
+    {:error, {:upload_failed, status, body}}
+  end
+
+  defp handle_upload_response({:error, reason}) do
+    Logger.error("File upload request failed", reason: inspect(reason))
+    {:error, {:request_failed, reason}}
+  end
+
+  defp mime_type_for(path) do
+    case Path.extname(path) |> String.downcase() do
+      ".png" -> "image/png"
+      ".jpg" -> "image/jpeg"
+      ".jpeg" -> "image/jpeg"
+      ".webp" -> "image/webp"
+      _ -> "application/octet-stream"
+    end
+  end
+
   defp auth_headers(api_key) do
     [
       {"authorization", "Bearer #{api_key}"},

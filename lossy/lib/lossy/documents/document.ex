@@ -1,38 +1,30 @@
 defmodule Lossy.Documents.Document do
   @moduledoc """
-  Schema for documents with text detection and editing workflow.
+  Schema for documents with detection and inpainting workflow.
 
-  Manages the document lifecycle from capture through text detection,
-  editing, and rendering with a state machine for status transitions.
+  Simplified lifecycle:
+    :loading → :ready → :inpainting → :ready
+
+  Includes edit history for undo/redo functionality.
   """
 
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias Lossy.Documents.HistoryEntry
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
   @valid_statuses [
-    :processing,
-    :queued_detection,
-    :detecting,
-    :awaiting_edits,
-    :rendering,
-    :export_ready,
-    :error
+    :loading,           # Initial state, image being fetched
+    :ready,             # Image loaded, ready for editing
+    :detecting,         # Running detection (text + SAM)
+    :inpainting,        # Running inpainting operation
+    :error              # Something went wrong
   ]
+
   @valid_url_statuses [:not_checked, :accessible, :unreachable, :timeout]
-  @status_transitions %{
-    # processing: initial state when document is created, async processing pending
-    processing: [:queued_detection, :awaiting_edits, :error],
-    # Allow direct transition to awaiting_edits when client sends pre-detected regions
-    queued_detection: [:detecting, :awaiting_edits, :error],
-    detecting: [:awaiting_edits, :error],
-    awaiting_edits: [:rendering, :error],
-    rendering: [:export_ready, :awaiting_edits, :error],
-    export_ready: [:awaiting_edits, :error],
-    error: [:queued_detection, :processing]
-  }
 
   schema "documents" do
     field :source_url, :string
@@ -42,13 +34,19 @@ defmodule Lossy.Documents.Document do
     field :width, :integer
     field :height, :integer
     field :metrics, :map, default: %{}
-    field :status, Ecto.Enum, values: @valid_statuses, default: :queued_detection
+    field :status, Ecto.Enum, values: @valid_statuses, default: :loading
+
+    # History for undo/redo
+    embeds_many :history, HistoryEntry, on_replace: :delete
+    field :history_index, :integer, default: 0
 
     belongs_to :user, Lossy.Accounts.User
     belongs_to :original_asset, Lossy.Documents.Asset
     belongs_to :working_asset, Lossy.Documents.Asset
 
-    has_many :text_regions, Lossy.Documents.TextRegion
+    # Detected regions (text, objects, manual brush)
+    has_many :detected_regions, Lossy.Documents.DetectedRegion
+
     has_many :processing_jobs, Lossy.Documents.ProcessingJob
 
     timestamps()
@@ -67,44 +65,60 @@ defmodule Lossy.Documents.Document do
       :original_asset_id,
       :working_asset_id,
       :status,
-      :metrics
+      :metrics,
+      :history_index
     ])
+    |> cast_embed(:history, with: &HistoryEntry.changeset/2)
     |> validate_required([:source_url, :capture_mode])
     |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot])
     |> validate_inclusion(:status, @valid_statuses)
     |> validate_inclusion(:source_url_status, @valid_url_statuses)
-    |> validate_status_transition()
   end
 
-  defp validate_status_transition(changeset) do
-    new_status = get_change(changeset, :status)
-    old_status = changeset.data.status
+  @doc """
+  Adds a history entry and updates the history index.
+  Truncates any "future" history if we've undone and are making a new change.
+  """
+  def add_history_entry(document, entry) do
+    # Truncate history at current index (discard redo stack)
+    current_history = Enum.take(document.history || [], document.history_index)
+    new_history = current_history ++ [entry]
 
-    cond do
-      # No status change
-      is_nil(new_status) ->
-        changeset
+    document
+    |> changeset(%{
+      history: Enum.map(new_history, &Map.from_struct/1),
+      history_index: length(new_history)
+    })
+  end
 
-      # New documents (creates) - allow any valid status
-      is_nil(changeset.data.id) ->
-        changeset
+  @doc """
+  Gets the image path at the current history index.
+  Returns nil if history is empty.
+  """
+  def current_image_path(document) do
+    history = document.history || []
+    index = document.history_index || 0
 
-      # No previous status to transition from
-      is_nil(old_status) ->
-        changeset
-
-      # Valid transition
-      valid_transition?(old_status, new_status) ->
-        changeset
-
-      # Invalid transition
-      true ->
-        add_error(changeset, :status, "invalid status transition from #{old_status} to #{new_status}")
+    if index > 0 and index <= length(history) do
+      Enum.at(history, index - 1).image_path
+    else
+      nil
     end
   end
 
-  defp valid_transition?(from_status, to_status) do
-    allowed = Map.get(@status_transitions, from_status, [])
-    to_status in allowed
+  @doc """
+  Checks if undo is available.
+  Returns true if we have at least one history entry and index > 0.
+  """
+  def can_undo?(document) do
+    (document.history_index || 0) > 0
+  end
+
+  @doc """
+  Checks if redo is available.
+  """
+  def can_redo?(document) do
+    history = document.history || []
+    (document.history_index || 0) < length(history)
   end
 end

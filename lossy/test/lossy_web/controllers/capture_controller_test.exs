@@ -15,13 +15,12 @@ defmodule LossyWeb.CaptureControllerTest do
       conn = post(conn, ~p"/api/captures", params)
       assert %{"id" => id, "status" => status} = json_response(conn, 201)
       assert is_binary(id)
-      assert status in ["queued_detection", "detecting"]
+      assert status == "loading"
 
       # Verify document was created
       document = Documents.get_document(id)
       assert document.source_url == "https://example.com"
       assert document.capture_mode == :screenshot
-      assert document.original_asset_id != nil
     end
 
     test "creates a capture with direct_asset mode", %{conn: conn} do

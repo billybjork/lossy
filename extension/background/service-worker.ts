@@ -166,8 +166,18 @@ async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab)
     const data: CaptureResponse = await response.json();
     console.log('[Lossy] Capture created with ID:', data.id);
 
-    // Open editor in new tab
-    chrome.tabs.create({ url: `http://localhost:4000/capture/${data.id}` });
+    // Open editor in new tab with fresh param for arrival animation
+    chrome.tabs.create({ url: `http://localhost:4000/capture/${data.id}?fresh=1` });
+
+    // Notify source tab that editor opened - triggers overlay dismiss
+    if (tab.id) {
+      try {
+        await chrome.tabs.sendMessage(tab.id, { type: 'EDITOR_OPENED' });
+      } catch (error) {
+        // Content script may have been unloaded - that's OK
+        console.log('[Lossy] Could not notify source tab (may have navigated away)');
+      }
+    }
 
     return { success: true, captureId: data.id };
   } catch (error) {

@@ -9,15 +9,11 @@ defmodule LossyWeb.CaptureController do
     Logger.info("Capture request received",
       capture_mode: params["capture_mode"],
       has_image_url: Map.has_key?(params, "image_url"),
-      has_image_data: Map.has_key?(params, "image_data"),
-      has_text_regions: Map.has_key?(params, "text_regions"),
-      text_regions_count: length(params["text_regions"] || []),
-      detection_backend: params["detection_backend"],
-      detection_time_ms: params["detection_time_ms"]
+      has_image_data: Map.has_key?(params, "image_data")
     )
 
-    # Create document with :processing status (async processing will happen in background)
-    case Documents.create_capture(Map.put(params, "status", "processing")) do
+    # Create document with :loading status (async processing will happen in background)
+    case Documents.create_capture(Map.put(params, "status", "loading")) do
       {:ok, document} ->
         # Spawn async task for image download and text region creation
         # This allows us to return immediately and open the editor tab faster
@@ -27,12 +23,12 @@ defmodule LossyWeb.CaptureController do
 
         Logger.info("Capture created, processing async",
           document_id: document.id,
-          status: :processing
+          status: :loading
         )
 
         conn
         |> put_status(:created)
-        |> json(%{id: document.id, status: :processing})
+        |> json(%{id: document.id, status: :loading})
 
       {:error, %Ecto.Changeset{} = changeset} ->
         Logger.error("Capture creation failed with validation errors",
@@ -52,33 +48,20 @@ defmodule LossyWeb.CaptureController do
     end
   end
 
-  # Async processing of capture - downloads image and creates text regions
+  # Async processing of capture - downloads image and saves text regions
   defp process_capture_async(document_id, params) do
     Logger.info("Starting async capture processing", document_id: document_id)
 
     document = Documents.get_document(document_id)
 
-    # Step 1: Download and save image
-    case maybe_save_image(document, params) do
-      {:ok, document} ->
-        Logger.info("Image saved, processing text detection", document_id: document_id)
-
-        # Step 2: Create text regions
-        case handle_text_detection(document, params) do
-          :ok ->
-            Logger.info("Capture processing completed", document_id: document_id)
-
-          {:error, reason} ->
-            Logger.error("Text detection failed",
-              document_id: document_id,
-              reason: inspect(reason)
-            )
-
-            Documents.update_document(document, %{status: :error})
-        end
-
+    with {:ok, document} <- maybe_save_image(document, params),
+         :ok <- maybe_save_text_regions(document, params) do
+      # Image and regions saved, mark document as ready
+      Documents.update_document(document, %{status: :ready})
+      Logger.info("Capture processing completed", document_id: document_id)
+    else
       {:error, reason} ->
-        Logger.error("Image save failed in async processing",
+        Logger.error("Capture processing failed",
           document_id: document_id,
           reason: inspect(reason)
         )
@@ -124,32 +107,20 @@ defmodule LossyWeb.CaptureController do
   # No image provided - this is ok for now (will be updated to require one later)
   defp maybe_save_image(document, _params), do: {:ok, document}
 
-  # Handle text detection: use local results if provided, otherwise enqueue cloud detection
-  defp handle_text_detection(document, %{"text_regions" => text_regions})
+  # Save text regions as DetectedRegion records if provided
+  defp maybe_save_text_regions(document, %{"text_regions" => text_regions})
        when is_list(text_regions) and length(text_regions) > 0 do
-    Logger.info("Using local text detection results",
+    Logger.info("Saving text regions",
       document_id: document.id,
       region_count: length(text_regions)
     )
 
-    # Create text regions from local detection and update document status
-    with {:ok, _count} <-
-           Documents.create_text_regions_from_local_detection(document, text_regions),
-         {:ok, _document} <- Documents.update_document(document, %{status: :awaiting_edits}) do
-      :ok
-    end
-  end
-
-  defp handle_text_detection(document, _params) do
-    # No local detection results - update status to awaiting_edits with no regions
-    # The user can still use the image but won't have text regions to edit
-    Logger.info("No local detection results provided",
-      document_id: document.id
-    )
-
-    {:ok, _document} = Documents.update_document(document, %{status: :awaiting_edits})
+    {:ok, _regions} = Documents.create_detected_regions_from_text_detection(document, text_regions)
     :ok
   end
+
+  # No text regions provided - this is fine
+  defp maybe_save_text_regions(_document, _params), do: :ok
 
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)

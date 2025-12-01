@@ -18,6 +18,9 @@ export class CaptureOverlay {
   private handleResize: () => void;
   private fadeOutTimeout?: number;
   private hoveredIndex: number | null = null;
+  private selectedIndex: number | null = null;
+  private cancelCallback?: () => void;
+  private dismissCallback?: () => void;
 
   // Continuous scanning fields
   private trackedElements = new WeakSet<HTMLElement>();
@@ -39,6 +42,9 @@ export class CaptureOverlay {
   private readonly Z_INDEX_CLONE = 2147483641; // Clone layer z-index (above overlay)
   private readonly STAGGER_DELAY_MS = 60; // Delay between clone animations
   private readonly FADE_OUT_DURATION_MS = 300; // Fade out animation duration
+  private readonly HERO_SCALE = 1.08; // Scale for selected image hero effect
+  private readonly HERO_TRANSITION_MS = 350; // Hero animation duration
+  private readonly DISMISS_DURATION_MS = 400; // Dismiss animation duration
 
   // Spotlight filter styles
   private readonly FILTER_HOVER_ACTIVE = `
@@ -57,6 +63,11 @@ export class CaptureOverlay {
   private readonly FILTER_KEYBOARD_INACTIVE = `
     drop-shadow(0 0 10px rgba(255, 255, 255, 0.25))
     drop-shadow(0 0 20px rgba(255, 255, 255, 0.12))
+  `;
+  private readonly FILTER_HERO = `
+    drop-shadow(0 0 30px rgba(255, 255, 255, 0.7))
+    drop-shadow(0 0 60px rgba(255, 255, 255, 0.5))
+    drop-shadow(0 0 100px rgba(255, 255, 255, 0.3))
   `;
 
   constructor(candidates: CandidateImage[], onSelect: (candidate: CandidateImage) => void) {
@@ -426,17 +437,27 @@ export class CaptureOverlay {
 
   private selectCandidate(index: number) {
     const candidate = this.candidates[index];
-    this.cleanup();
+    this.transitionToSelected(index);
     this.onSelect(candidate);
+    // Note: cleanup is NOT called here - overlay stays visible until dismiss() is called
   }
 
   private cancel() {
+    // If we're in selected state (processing), notify caller to abort
+    if (this.selectedIndex !== null) {
+      this.cancelCallback?.();
+    }
     this.cleanup();
   }
 
   private fadeOutAndExit() {
     // Prevent multiple fade-outs
     if (this.fadeOutTimeout) return;
+
+    // If we're in selected state (processing), notify caller to abort
+    if (this.selectedIndex !== null) {
+      this.cancelCallback?.();
+    }
 
     // Fade out overlay
     this.overlay.style.opacity = '0';
@@ -487,5 +508,99 @@ export class CaptureOverlay {
     // Clear arrays for good measure
     this.clones = [];
     this.candidates = [];
+  }
+
+  /**
+   * Set callback for when user cancels during processing (ESC pressed after selection)
+   */
+  public onCancel(callback: () => void): void {
+    this.cancelCallback = callback;
+  }
+
+  /**
+   * Set callback for when overlay is fully dismissed
+   */
+  public onDismiss(callback: () => void): void {
+    this.dismissCallback = callback;
+  }
+
+  /**
+   * Transition to "selected" state - hero animation in place
+   * Selected image glows and scales slightly while others fade out.
+   */
+  private transitionToSelected(index: number): void {
+    // Guard against multiple selections
+    if (this.selectedIndex !== null) return;
+
+    this.selectedIndex = index;
+
+    // Stop scanning - no need to find more images
+    this.stopContinuousScanning();
+
+    // Animate each clone
+    this.clones.forEach((clone, i) => {
+      // Set transition for hero effect
+      clone.style.transition = `
+        opacity ${this.HERO_TRANSITION_MS}ms ease-out,
+        transform ${this.HERO_TRANSITION_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1),
+        filter ${this.HERO_TRANSITION_MS}ms ease-out
+      `;
+
+      if (i === index) {
+        // Selected image: in-place hero effect with enhanced glow
+        clone.style.transform = `scale(${this.HERO_SCALE})`;
+        clone.style.filter = this.FILTER_HERO;
+        clone.style.opacity = '1';
+      } else {
+        // Other images: fade out with blur
+        clone.style.transform = 'scale(0.95)';
+        clone.style.filter = 'blur(8px)';
+        clone.style.opacity = '0';
+      }
+    });
+
+    // Slightly lighten overlay background
+    this.overlay.style.background = 'rgba(0, 0, 0, 0.85)';
+  }
+
+  /**
+   * Gracefully dismiss the overlay after processing is complete.
+   * Called when editor tab opens or on error.
+   */
+  public dismiss(): void {
+    // Prevent multiple dismissals
+    if (this.fadeOutTimeout) return;
+
+    // Fade out overlay
+    this.overlay.style.transition = `opacity ${this.DISMISS_DURATION_MS}ms ease-out`;
+    this.overlay.style.opacity = '0';
+
+    // Animate selected clone (if any) or all clones
+    this.clones.forEach((clone, i) => {
+      clone.style.transition = `
+        opacity ${this.DISMISS_DURATION_MS}ms ease-out,
+        transform ${this.DISMISS_DURATION_MS}ms ease-out,
+        filter ${this.DISMISS_DURATION_MS}ms ease-out
+      `;
+
+      if (this.selectedIndex !== null && i === this.selectedIndex) {
+        // Selected image: scale down, blur, fade
+        clone.style.transform = 'scale(0.9)';
+        clone.style.filter = 'blur(12px)';
+        clone.style.opacity = '0';
+      } else if (this.selectedIndex === null) {
+        // No selection (e.g., error case): fade all
+        clone.style.opacity = '0';
+        clone.style.transform = 'scale(0.9)';
+        clone.style.filter = 'blur(12px)';
+      }
+      // Already-faded clones stay faded
+    });
+
+    // Wait for animation, then cleanup
+    this.fadeOutTimeout = window.setTimeout(() => {
+      this.cleanup();
+      this.dismissCallback?.();
+    }, this.DISMISS_DURATION_MS);
   }
 }

@@ -198,4 +198,40 @@ defmodule Lossy.ImageProcessing.Mask do
   defp get_bbox_value(bbox, key) do
     Map.get(bbox, key) || Map.get(bbox, to_string(key)) || 0
   end
+
+  @doc """
+  Combine multiple mask PNGs into a single mask using OR operation.
+
+  All white pixels from any input mask will be white in the output.
+  Useful for batch inpainting multiple selected regions.
+
+  Returns {:ok, output_path} or {:error, reason}.
+  """
+  def combine_masks(mask_paths, output_path) when is_list(mask_paths) and length(mask_paths) > 0 do
+    if length(mask_paths) == 1 do
+      # Single mask, just copy it
+      case File.cp(hd(mask_paths), output_path) do
+        :ok -> {:ok, output_path}
+        {:error, reason} -> {:error, {:file_copy_failed, reason}}
+      end
+    else
+      # Use ImageMagick to combine masks with max (OR) operation
+      # -evaluate-sequence Max takes the maximum pixel value at each position
+      args = mask_paths ++ ["-evaluate-sequence", "Max", output_path]
+
+      case System.cmd("convert", args, stderr_to_stdout: true) do
+        {_, 0} ->
+          Logger.info("Combined #{length(mask_paths)} masks", output: output_path)
+          {:ok, output_path}
+
+        {output, _} ->
+          Logger.error("Failed to combine masks", output: output)
+          {:error, :mask_combine_failed}
+      end
+    end
+  end
+
+  def combine_masks([], _output_path) do
+    {:error, :no_masks_provided}
+  end
 end

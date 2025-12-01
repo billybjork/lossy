@@ -3,6 +3,10 @@ import { findCandidateImages } from '../lib/dom-scanner';
 import { CaptureOverlay } from './overlay';
 import { captureImage, setScreenshotHandler } from '../lib/capture';
 
+// Track active overlay and abort controller for cancellation
+let activeOverlay: CaptureOverlay | null = null;
+let captureAbortController: AbortController | null = null;
+
 // Prevent duplicate initialization if script loads multiple times
 if ((window as any).lossyInitialized) {
   console.log('[Lossy] Content script already initialized, skipping duplicate load');
@@ -18,6 +22,14 @@ if ((window as any).lossyInitialized) {
     } else if (message.type === 'SCREENSHOT_CAPTURED') {
       // Forward to capture.ts handler
       setScreenshotHandler(message.imageData);
+      sendResponse({ received: true });
+    } else if (message.type === 'EDITOR_OPENED') {
+      // Editor tab opened - dismiss overlay gracefully
+      if (activeOverlay) {
+        activeOverlay.dismiss();
+        activeOverlay = null;
+        captureAbortController = null;
+      }
       sendResponse({ received: true });
     }
     return true; // Keep message channel open for async responses
@@ -42,26 +54,44 @@ if ((window as any).lossyInitialized) {
 
     console.log(`[Lossy] Found ${candidates.length} candidate images`);
 
+    // Create abort controller for cancellation
+    captureAbortController = new AbortController();
+    const signal = captureAbortController.signal;
+
     // Show selection overlay
-    new CaptureOverlay(candidates, async (selected) => {
+    activeOverlay = new CaptureOverlay(candidates, async (selected) => {
       console.log('[Lossy] Image selected:', selected.type);
 
-      // Show processing message
-      showToast('Processing capture...');
+      // No toasts during hero state - the visual selection IS the indicator
 
       try {
+        // Check if cancelled before capturing
+        if (signal.aborted) return;
+
         // Capture the selected image (smart: URL or screenshot)
         const payload = await captureImage(selected);
 
-        // Send to background script
-        sendCapture(payload);
+        // Check if cancelled after capturing
+        if (signal.aborted) return;
 
-        // Show success message briefly
-        showToast('Opening editor...', 1000);
+        // Send to background script
+        // Overlay stays visible - dismissed when EDITOR_OPENED received
+        sendCapture(payload);
       } catch (error) {
+        // Don't show error if cancelled
+        if (signal.aborted) return;
+
         console.error('[Lossy] Capture failed:', error);
+        activeOverlay?.dismiss();
         showToast('Capture failed. Please try again.', 3000);
       }
+    });
+
+    // Set up cancellation callback (ESC pressed during processing)
+    activeOverlay.onCancel(() => {
+      captureAbortController?.abort();
+      activeOverlay = null;
+      captureAbortController = null;
     });
   }
 

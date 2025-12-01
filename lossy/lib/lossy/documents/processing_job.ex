@@ -2,8 +2,8 @@ defmodule Lossy.Documents.ProcessingJob do
   @moduledoc """
   Schema for background processing jobs.
 
-  Tracks asynchronous tasks like text detection, inpainting, upscaling,
-  and font detection with retry logic and error handling.
+  Tracks asynchronous tasks like detection, inpainting, and upscaling
+  with retry logic and error handling.
   """
 
   use Ecto.Schema
@@ -12,20 +12,19 @@ defmodule Lossy.Documents.ProcessingJob do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  schema "processing_jobs" do
-    field :type, Ecto.Enum,
-      values: [:text_detection, :inpaint_region, :upscale_document, :font_guess]
+  @job_types [:detection, :inpainting, :upscale]
+  @statuses [:queued, :running, :done, :error]
 
-    field :subject_type, Ecto.Enum, values: [:document, :text_region]
+  schema "processing_jobs" do
+    field :type, Ecto.Enum, values: @job_types
     field :payload, :map, default: %{}
-    field :status, Ecto.Enum, values: [:queued, :running, :done, :error], default: :queued
+    field :status, Ecto.Enum, values: @statuses, default: :queued
     field :attempts, :integer, default: 0
     field :max_attempts, :integer, default: 3
     field :locked_at, :utc_datetime
     field :error_message, :string
 
     belongs_to :document, Lossy.Documents.Document
-    belongs_to :text_region, Lossy.Documents.TextRegion
 
     timestamps()
   end
@@ -34,8 +33,6 @@ defmodule Lossy.Documents.ProcessingJob do
     job
     |> cast(attrs, [
       :document_id,
-      :text_region_id,
-      :subject_type,
       :type,
       :payload,
       :status,
@@ -44,14 +41,8 @@ defmodule Lossy.Documents.ProcessingJob do
       :locked_at,
       :error_message
     ])
-    |> validate_required([:document_id, :subject_type, :type, :status])
-    |> validate_inclusion(:type, [
-      :text_detection,
-      :inpaint_region,
-      :upscale_document,
-      :font_guess
-    ])
-    |> validate_inclusion(:subject_type, [:document, :text_region])
-    |> validate_inclusion(:status, [:queued, :running, :done, :error])
+    |> validate_required([:document_id, :type, :status])
+    |> validate_inclusion(:type, @job_types)
+    |> validate_inclusion(:status, @statuses)
   end
 end

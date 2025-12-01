@@ -8,8 +8,7 @@ defmodule Lossy.Documents do
   alias Lossy.Repo
   alias Lossy.Assets
 
-  alias Lossy.Documents.{Document, ProcessingJob, TextRegion}
-  alias Lossy.ImageProcessing.Compositor
+  alias Lossy.Documents.{Document, ProcessingJob, DetectedRegion}
 
   ## Documents
 
@@ -43,7 +42,7 @@ defmodule Lossy.Documents do
   def get_document(id) do
     Document
     |> Repo.get(id)
-    |> Repo.preload([:text_regions, :processing_jobs, :original_asset, :working_asset])
+    |> Repo.preload([:detected_regions, :processing_jobs, :original_asset, :working_asset])
   end
 
   @doc """
@@ -86,26 +85,6 @@ defmodule Lossy.Documents do
     )
   end
 
-  ## Text Regions
-
-  @doc """
-  Creates a text region.
-  """
-  def create_text_region(attrs \\ %{}) do
-    %TextRegion{}
-    |> TextRegion.changeset(attrs)
-    |> Repo.insert()
-  end
-
-  @doc """
-  Updates a text region.
-  """
-  def update_text_region(%TextRegion{} = region, attrs) do
-    region
-    |> TextRegion.changeset(attrs)
-    |> Repo.update()
-  end
-
   ## Processing Jobs
 
   @doc """
@@ -118,22 +97,22 @@ defmodule Lossy.Documents do
   end
 
   @doc """
-  Enqueue inpainting for a text region.
-  Called when user edits text in a region.
+  Enqueue detection job for a document.
+  Runs SAM 2 and text detection in parallel.
   """
-  def enqueue_inpainting(%TextRegion{} = region) do
-    Logger.info("Enqueuing inpainting job", region_id: region.id)
+  def enqueue_detection(%Document{} = document) do
+    Logger.info("Enqueuing detection job", document_id: document.id)
 
-    case %{region_id: region.id}
-         |> Lossy.Workers.Inpainting.new()
+    case %{document_id: document.id}
+         |> Lossy.Workers.Detection.new()
          |> Oban.insert() do
       {:ok, _job} ->
-        Logger.info("Inpainting job enqueued", region_id: region.id)
+        Logger.info("Detection job enqueued", document_id: document.id)
         :ok
 
       {:error, reason} ->
-        Logger.error("Failed to enqueue inpainting",
-          region_id: region.id,
+        Logger.error("Failed to enqueue detection",
+          document_id: document.id,
           reason: inspect(reason)
         )
 
@@ -142,53 +121,179 @@ defmodule Lossy.Documents do
   end
 
   @doc """
-  Creates text regions from extension-provided local detection results.
+  Enqueue inpainting job for selected regions.
+
+  Fetches the mask paths from the given region IDs and enqueues
+  a batch inpainting job. For regions without mask_path (e.g., text regions),
+  generates masks from their bboxes.
   """
-  def create_text_regions_from_local_detection(%Document{} = document, text_regions)
+  def enqueue_mask_inpainting(%Document{} = document, region_ids) when is_list(region_ids) do
+    Logger.info("Enqueuing mask inpainting job",
+      document_id: document.id,
+      region_count: length(region_ids)
+    )
+
+    # Reload document with assets
+    document = get_document(document.id)
+
+    with {:ok, image_path} <- get_source_image_path(document),
+         {:ok, mask_paths} <- get_mask_paths_for_regions(region_ids, image_path) do
+      enqueue_inpainting_job(document, mask_paths, region_ids)
+    end
+  end
+
+  defp get_source_image_path(document) do
+    case document.working_asset || document.original_asset do
+      nil ->
+        Logger.error("No source image for inpainting", document_id: document.id)
+        {:error, :no_source_image}
+
+      asset ->
+        {:ok, Assets.asset_path(asset)}
+    end
+  end
+
+  defp get_mask_paths_for_regions(region_ids, image_path) do
+    regions =
+      DetectedRegion
+      |> where([r], r.id in ^region_ids)
+      |> Repo.all()
+
+    mask_paths = ensure_region_masks(regions, image_path)
+
+    if Enum.empty?(mask_paths) do
+      Logger.error("Failed to get/generate masks for regions", region_ids: region_ids)
+      {:error, :no_masks}
+    else
+      {:ok, mask_paths}
+    end
+  end
+
+  defp enqueue_inpainting_job(document, mask_paths, region_ids) do
+    case %{document_id: document.id, mask_paths: mask_paths, region_ids: region_ids}
+         |> Lossy.Workers.Inpainting.new()
+         |> Oban.insert() do
+      {:ok, _job} ->
+        update_document(document, %{status: :inpainting})
+        Logger.info("Mask inpainting job enqueued", document_id: document.id)
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to enqueue mask inpainting",
+          document_id: document.id,
+          reason: inspect(reason)
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # Ensure all regions have mask paths, generating from bbox if needed
+  defp ensure_region_masks(regions, image_path) do
+    regions
+    |> Enum.map(&get_or_generate_mask(&1, image_path))
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp get_or_generate_mask(%{mask_path: existing_path} = _region, _image_path)
+       when not is_nil(existing_path) do
+    existing_path
+  end
+
+  defp get_or_generate_mask(region, image_path) do
+    alias Lossy.ImageProcessing.Mask
+
+    Logger.info("Generating mask from bbox", region_id: region.id)
+
+    case Mask.generate_mask(image_path, region.bbox) do
+      {:ok, path} ->
+        update_detected_region(region, %{mask_path: path})
+        path
+
+      {:error, reason} ->
+        Logger.error("Failed to generate mask",
+          region_id: region.id,
+          reason: inspect(reason)
+        )
+
+        nil
+    end
+  end
+
+  ## Detected Regions
+
+  @doc """
+  Gets all detected regions for a document.
+  """
+  def list_detected_regions(%Document{} = document) do
+    DetectedRegion
+    |> where([r], r.document_id == ^document.id)
+    |> order_by([r], asc: r.z_index)
+    |> Repo.all()
+  end
+
+  @doc """
+  Gets a single detected region by ID.
+  """
+  def get_detected_region(id) do
+    Repo.get(DetectedRegion, id)
+  end
+
+  @doc """
+  Updates a detected region.
+  """
+  def update_detected_region(%DetectedRegion{} = region, attrs) do
+    region
+    |> DetectedRegion.changeset(attrs)
+    |> Repo.update()
+  end
+
+  @doc """
+  Creates detected regions from extension-provided text detection results.
+  Converts text_regions format to DetectedRegion records.
+  """
+  def create_detected_regions_from_text_detection(%Document{} = document, text_regions)
       when is_list(text_regions) do
-    Logger.info("Creating text regions from local detection",
+    Logger.info("Creating detected regions from text detection",
       document_id: document.id,
       region_count: length(text_regions)
     )
 
-    results =
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    regions_data =
       text_regions
       |> Enum.with_index(1)
       |> Enum.map(fn {region_data, index} ->
-        # Extract recognized text from local OCR (if provided)
-        original_text = region_data["original_text"] || region_data[:original_text]
-
-        attrs = %{
+        %{
+          id: Ecto.UUID.generate(),
           document_id: document.id,
+          type: :text,
           bbox: normalize_bbox(region_data["bbox"] || region_data[:bbox]),
           polygon: normalize_polygon(region_data["polygon"] || region_data[:polygon] || []),
-          original_text: original_text,
-          current_text: original_text,
-          font_family: nil,
-          font_weight: nil,
-          font_size_px: nil,
-          color_rgba: nil,
-          alignment: :left,
-          status: :detected,
+          confidence: region_data["confidence"] || region_data[:confidence] || 1.0,
+          metadata: %{
+            original_text: region_data["original_text"] || region_data[:original_text]
+          },
           z_index: index,
-          padding_px: 10
+          status: :detected,
+          inserted_at: now,
+          updated_at: now
         }
-
-        create_text_region(attrs)
       end)
 
-    # Check if all succeeded
-    failed =
-      Enum.filter(results, fn
-        {:error, _} -> true
-        _ -> false
-      end)
+    case Repo.insert_all(DetectedRegion, regions_data, returning: true) do
+      {count, regions} when count == length(text_regions) ->
+        Logger.info("Created #{count} detected regions", document_id: document.id)
+        broadcast_document_update(document)
+        {:ok, regions}
 
-    if Enum.empty?(failed) do
-      {:ok, length(results)}
-    else
-      Logger.error("Some text regions failed to create", failed_count: length(failed))
-      {:error, :partial_failure}
+      {count, regions} ->
+        Logger.warning("Partial insert: expected #{length(text_regions)}, got #{count}",
+          document_id: document.id
+        )
+        broadcast_document_update(document)
+        {:ok, regions}
     end
   end
 
@@ -214,10 +319,88 @@ defmodule Lossy.Documents do
     end)
   end
 
+  ## Undo/Redo
+
+  @doc """
+  Undo the last inpainting action.
+
+  Decrements history_index and restores the working_asset to the previous state.
+  Also restores the inpainted regions' status back to :detected so they can be
+  selected again.
+
+  History model: history[i].image_path = state BEFORE action i was applied.
+  So to undo to index N, we restore from history[N].image_path.
+  """
+  def undo(%Document{} = document) do
+    document = get_document(document.id)
+
+    if Document.can_undo?(document) do
+      current_index = document.history_index
+      new_index = current_index - 1
+      history = document.history || []
+
+      # Get the action we're undoing (current history entry)
+      # Its metadata contains the region_ids that were inpainted
+      undoing_entry = Enum.at(history, current_index - 1)
+      region_ids_to_restore = get_in(undoing_entry.metadata, ["region_ids"]) || []
+
+      # history[new_index] contains the state we want to restore to
+      target_image_path = Enum.at(history, new_index).image_path
+
+      Logger.info("Undoing to history index #{new_index}",
+        document_id: document.id,
+        target_path: target_image_path,
+        restoring_regions: length(region_ids_to_restore)
+      )
+
+      # Restore regions' status back to :detected
+      if length(region_ids_to_restore) > 0 do
+        restore_regions_status(region_ids_to_restore)
+      end
+
+      # Create new working asset from the target image
+      with {:ok, new_asset} <- Assets.save_image_from_path(document.id, target_image_path, :working),
+           {:ok, updated_doc} <- update_document(document, %{
+             working_asset_id: new_asset.id,
+             history_index: new_index,
+             status: :ready
+           }) do
+        {:ok, updated_doc}
+      else
+        {:error, reason} ->
+          Logger.error("Failed to restore image for undo", reason: inspect(reason))
+          {:error, :restore_failed}
+      end
+    else
+      {:error, :cannot_undo}
+    end
+  end
+
+  defp restore_regions_status(region_ids) when is_list(region_ids) do
+    from(r in DetectedRegion, where: r.id in ^region_ids)
+    |> Repo.update_all(set: [status: :detected, updated_at: NaiveDateTime.utc_now()])
+
+    Logger.info("Restored regions to detected status", count: length(region_ids))
+  end
+
+  @doc """
+  Redo is not currently supported.
+
+  The history model stores "before" states, not "after" states.
+  When you undo, the current state is overwritten and cannot be recovered.
+  Future enhancement: store after_image_path in history entries to enable redo.
+  """
+  def redo(%Document{} = _document) do
+    {:error, :redo_not_supported}
+  end
+
   ## Export
 
   @doc """
-  Generate the final exportable image by compositing all rendered regions.
+  Generate the final exportable image.
+
+  Uses working_asset if available (contains all inpainting results),
+  otherwise falls back to original_asset.
 
   Returns {:ok, export_path} where the final image is saved.
   """
@@ -227,55 +410,26 @@ defmodule Lossy.Documents do
     # Reload document with all associations
     document = get_document(document.id)
 
-    # Get the original image path
-    case document.original_asset do
+    # Use working asset (with inpainting applied) or original
+    source_asset = document.working_asset || document.original_asset
+
+    case source_asset do
       nil ->
-        {:error, :no_original_image}
-
-      original_asset ->
-        original_path = Assets.asset_path(original_asset)
-        export_path = generate_export_path(document.id)
-
-        # Create a working copy
-        with {:ok, working_path} <- Compositor.create_working_copy(original_path, export_path),
-             :ok <- composite_all_regions(working_path, document.text_regions) do
-          Logger.info("Export generated", document_id: document.id, path: export_path)
-
-          # Update document status
-          update_document(document, %{status: :export_ready})
-
-          {:ok, export_path}
-        end
-    end
-  end
-
-  defp composite_all_regions(working_path, regions) do
-    # Sort regions by z_index to composite in correct order
-    sorted_regions =
-      regions
-      |> Enum.filter(fn r -> r.status == :rendered && r.inpainted_asset_id != nil end)
-      |> Enum.sort_by(& &1.z_index)
-
-    Enum.reduce_while(sorted_regions, :ok, fn region, :ok ->
-      case composite_region(working_path, region) do
-        :ok -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-  end
-
-  defp composite_region(working_path, region) do
-    case Repo.preload(region, :inpainted_asset).inpainted_asset do
-      nil ->
-        :ok
+        {:error, :no_image}
 
       asset ->
-        patch_path = Assets.asset_path(asset)
-        bbox = normalize_bbox(region.bbox)
+        source_path = Assets.asset_path(asset)
+        export_path = generate_export_path(document.id)
 
-        case Compositor.composite_patch(working_path, patch_path, bbox) do
-          {:ok, _} -> :ok
-          {:error, reason} -> {:error, reason}
+        # Copy the current state to export path
+        case File.cp(source_path, export_path) do
+          :ok ->
+            Logger.info("Export generated", document_id: document.id, path: export_path)
+            {:ok, export_path}
+
+          {:error, reason} ->
+            Logger.error("Failed to generate export", reason: inspect(reason))
+            {:error, reason}
         end
     end
   end
@@ -289,19 +443,9 @@ defmodule Lossy.Documents do
   @doc """
   Check if a document is ready for export.
 
-  Returns true if all text regions have been rendered.
+  Returns true if document has an image (original or working).
   """
   def export_ready?(%Document{} = document) do
-    document = get_document(document.id)
-
-    case document.text_regions do
-      [] ->
-        # No regions means original image can be exported as-is
-        document.original_asset != nil
-
-      regions ->
-        # All regions must be in rendered status
-        Enum.all?(regions, fn r -> r.status == :rendered end)
-    end
+    document.original_asset_id != nil || document.working_asset_id != nil
   end
 end

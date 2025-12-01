@@ -25,11 +25,15 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/lossy"
 import topbar from "../vendor/topbar"
 import {EditableText} from "./hooks/editable_text"
+import {MaskOverlay} from "./hooks/mask_overlay"
+import {CaptureArrival} from "./hooks/capture_arrival"
 
 // Merge our custom hooks with colocated hooks
 const Hooks = {
   ...colocatedHooks,
-  EditableText: EditableText
+  EditableText: EditableText,
+  MaskOverlay: MaskOverlay,
+  CaptureArrival: CaptureArrival
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

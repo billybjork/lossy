@@ -126,8 +126,11 @@ defmodule Lossy.Assets do
   @doc """
   Saves an image from a local file path and creates an Asset record.
   Returns {:ok, asset} on success, {:error, reason} on failure.
+
+  Options:
+    - :region_id - Required for :inpainted_patch kind to create unique filename
   """
-  def save_image_from_path(document_id, source_path, kind) do
+  def save_image_from_path(document_id, source_path, kind, opts \\ []) do
     Logger.info("Saving image from path",
       document_id: document_id,
       kind: kind,
@@ -136,7 +139,7 @@ defmodule Lossy.Assets do
 
     with {:ok, binary_data} <- File.read(source_path),
          {:ok, dimensions} <- get_image_dimensions(binary_data),
-         {:ok, file_path} <- write_image_file(document_id, kind, binary_data),
+         {:ok, file_path} <- write_image_file(document_id, kind, binary_data, opts),
          sha256 <- compute_sha256(binary_data) do
       Logger.info("Image saved successfully from path",
         document_id: document_id,
@@ -266,17 +269,27 @@ defmodule Lossy.Assets do
     end
   end
 
-  defp write_image_file(document_id, kind, binary_data) do
+  defp write_image_file(document_id, kind, binary_data, opts \\ []) do
     # Create directory: priv/static/uploads/{document_id}/
     dir = Path.join([@upload_dir, document_id])
     File.mkdir_p!(dir)
 
-    # Save as: priv/static/uploads/{document_id}/{kind}.png
-    file_path = Path.join(dir, "#{kind}.png")
+    # For inpainted_patch, include region_id to create unique filenames
+    filename = build_filename(kind, opts)
+    file_path = Path.join(dir, filename)
     File.write!(file_path, binary_data)
 
     {:ok, file_path}
   end
+
+  defp build_filename(:inpainted_patch, opts) do
+    case Keyword.get(opts, :region_id) do
+      nil -> "inpainted_patch.png"
+      region_id -> "inpainted_patch_#{region_id}.png"
+    end
+  end
+
+  defp build_filename(kind, _opts), do: "#{kind}.png"
 
   defp compute_sha256(binary_data) do
     :crypto.hash(:sha256, binary_data)

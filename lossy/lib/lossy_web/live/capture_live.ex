@@ -1,11 +1,19 @@
 defmodule LossyWeb.CaptureLive do
+  @moduledoc """
+  LiveView for the image editor.
+
+  Simplified state machine:
+    :loading → :ready → :inpainting → :ready
+
+  No more text-specific states. Focus on mask selection and inpainting.
+  """
   use LossyWeb, :live_view
 
   alias Lossy.Assets
   alias Lossy.Documents
 
   @impl true
-  def mount(%{"id" => id}, _session, socket) do
+  def mount(%{"id" => id} = params, _session, socket) do
     case Documents.get_document(id) do
       nil ->
         {:ok,
@@ -14,16 +22,25 @@ defmodule LossyWeb.CaptureLive do
          |> redirect(to: "/")}
 
       document ->
-        # Subscribe to document updates for real-time status changes
+        # Subscribe to document updates for real-time changes
         if connected?(socket) do
           Phoenix.PubSub.subscribe(Lossy.PubSub, "document:#{document.id}")
         end
 
+        # Check for fresh arrival (from capture flow)
+        fresh_arrival = Map.has_key?(params, "fresh")
+
+        masks = regions_to_masks(document)
+
         socket =
           socket
           |> assign(document: document, page_title: "Edit Capture")
-          |> assign(selected_region_id: nil, editing_region_id: nil)
+          |> assign(selected_region_ids: MapSet.new())
+          |> assign(inpainting: false)
           |> assign(export_path: nil, exporting: false)
+          |> assign(masks: masks)
+          |> assign(fresh_arrival: fresh_arrival)
+          |> maybe_push_masks(masks, connected?(socket))
 
         {:ok, socket}
     end
@@ -31,39 +48,77 @@ defmodule LossyWeb.CaptureLive do
 
   @impl true
   def handle_info({:document_updated, document}, socket) do
-    {:noreply, assign(socket, document: document)}
+    masks = regions_to_masks(document)
+
+    {:noreply,
+     socket
+     |> assign(document: document, masks: masks)
+     |> push_event("masks_updated", %{masks: masks})}
   end
 
   @impl true
-  def handle_event("select_region", %{"region-id" => region_id}, socket) do
-    {:noreply, assign(socket, selected_region_id: region_id)}
+  def handle_info({:masks_detected, masks}, socket) do
+    # Push masks to client for rendering
+    {:noreply,
+     socket
+     |> assign(masks: masks)
+     |> push_event("masks_updated", %{masks: masks})}
   end
 
   @impl true
-  def handle_event("edit_region", %{"region-id" => region_id}, socket) do
-    {:noreply, assign(socket, editing_region_id: region_id)}
+  def handle_info({:inpainting_complete, _result}, socket) do
+    {:noreply,
+     socket
+     |> assign(inpainting: false, selected_region_ids: MapSet.new())
+     |> push_event("clear_selection", %{})}
   end
 
   @impl true
-  def handle_event("start_edit_region", %{"region-id" => region_id}, socket) do
-    region = find_region(socket, region_id)
+  def handle_event("clear_fresh_arrival", _params, socket) do
+    {:noreply, assign(socket, fresh_arrival: false)}
+  end
 
-    if region do
-      # Update region status to inpainting_blank (will trigger blank inpainting)
-      case Documents.update_text_region(region, %{
-             editing_status: :inpainting_blank,
-             current_text: ""
-           }) do
-        {:ok, updated_region} ->
-          # Enqueue inpainting job with UPDATED region (will create clean background)
-          Documents.enqueue_inpainting(updated_region)
+  @impl true
+  def handle_event("select_region", %{"id" => region_id, "shift" => shift}, socket) do
+    selected = socket.assigns.selected_region_ids
 
-          # Reload document to get updated state
-          document = Documents.get_document(socket.assigns.document.id)
-          {:noreply, assign(socket, document: document, editing_region_id: region_id)}
+    new_selected =
+      if shift do
+        # Multi-select: toggle region
+        if MapSet.member?(selected, region_id) do
+          MapSet.delete(selected, region_id)
+        else
+          MapSet.put(selected, region_id)
+        end
+      else
+        # Single select: replace selection
+        MapSet.new([region_id])
+      end
 
-        {:error, _changeset} ->
-          {:noreply, put_flash(socket, :error, "Failed to start editing")}
+    {:noreply, assign(socket, selected_region_ids: new_selected)}
+  end
+
+  @impl true
+  def handle_event("deselect_all", _params, socket) do
+    {:noreply, assign(socket, selected_region_ids: MapSet.new())}
+  end
+
+  @impl true
+  def handle_event("inpaint_selected", _params, socket) do
+    selected = socket.assigns.selected_region_ids
+
+    if MapSet.size(selected) > 0 do
+      region_ids = MapSet.to_list(selected)
+
+      case Documents.enqueue_mask_inpainting(socket.assigns.document, region_ids) do
+        :ok ->
+          {:noreply, assign(socket, inpainting: true)}
+
+        {:error, :no_masks} ->
+          {:noreply, put_flash(socket, :error, "Selected regions have no masks")}
+
+        {:error, _reason} ->
+          {:noreply, put_flash(socket, :error, "Failed to start inpainting")}
       end
     else
       {:noreply, socket}
@@ -71,61 +126,26 @@ defmodule LossyWeb.CaptureLive do
   end
 
   @impl true
-  def handle_event(
-        "commit_text_change",
-        %{"region-id" => region_id, "text" => new_text},
-        socket
-      ) do
-    region = find_region(socket, region_id)
+  def handle_event("undo", _params, socket) do
+    case Documents.undo(socket.assigns.document) do
+      {:ok, _document} ->
+        # Document update will be broadcast via PubSub
+        {:noreply, socket}
 
-    if region do
-      # Update text and trigger re-rendering
-      case Documents.update_text_region(region, %{
-             current_text: new_text,
-             editing_status: :rendering_text
-           }) do
-        {:ok, updated_region} ->
-          # Enqueue inpainting job with UPDATED region to render new text
-          Documents.enqueue_inpainting(updated_region)
+      {:error, :cannot_undo} ->
+        {:noreply, socket}
 
-          # Reload document
-          document = Documents.get_document(socket.assigns.document.id)
-          {:noreply, assign(socket, document: document, editing_region_id: nil)}
-
-        {:error, _changeset} ->
-          {:noreply, put_flash(socket, :error, "Failed to update text")}
-      end
-    else
-      {:noreply, socket}
+      {:error, reason} ->
+        {:noreply, put_flash(socket, :error, "Undo failed: #{inspect(reason)}")}
     end
   end
 
   @impl true
-  def handle_event("update_region_text", %{"region-id" => region_id, "text" => new_text}, socket) do
-    region = Enum.find(socket.assigns.document.text_regions, &(&1.id == region_id))
-
-    if region do
-      case Documents.update_text_region(region, %{current_text: new_text}) do
-        {:ok, updated_region} ->
-          # Enqueue inpainting job for this region
-          # The job will inpaint the background and update region status
-          Documents.enqueue_inpainting(updated_region)
-
-          # Reload document to get updated regions
-          document = Documents.get_document(socket.assigns.document.id)
-          {:noreply, assign(socket, document: document, editing_region_id: nil)}
-
-        {:error, _changeset} ->
-          {:noreply, put_flash(socket, :error, "Failed to update text")}
-      end
-    else
-      {:noreply, socket}
-    end
-  end
-
-  @impl true
-  def handle_event("cancel_edit", _params, socket) do
-    {:noreply, assign(socket, editing_region_id: nil)}
+  def handle_event("redo", _params, socket) do
+    # Redo not yet implemented - silently ignore
+    # TODO: Implement by storing "after" states in history entries
+    _result = Documents.redo(socket.assigns.document)
+    {:noreply, socket}
   end
 
   @impl true
@@ -159,35 +179,31 @@ defmodule LossyWeb.CaptureLive do
     end
   end
 
-  defp status_color(:processing), do: "bg-blue-100 text-blue-800"
-  defp status_color(:queued_detection), do: "bg-yellow-100 text-yellow-800"
-  defp status_color(:detecting), do: "bg-blue-100 text-blue-800"
-  defp status_color(:awaiting_edits), do: "bg-green-100 text-green-800"
-  defp status_color(:rendering), do: "bg-purple-100 text-purple-800"
-  defp status_color(:export_ready), do: "bg-emerald-100 text-emerald-800"
-  defp status_color(:error), do: "bg-red-100 text-red-800"
-  defp status_color(_), do: "bg-gray-100 text-gray-800"
+  defp maybe_push_masks(socket, masks, true = _connected),
+    do: push_event(socket, "masks_updated", %{masks: masks})
 
-  defp format_status(status) do
-    status
-    |> Atom.to_string()
-    |> String.replace("_", " ")
-    |> String.capitalize()
+  defp maybe_push_masks(socket, _masks, false = _connected), do: socket
+
+  # Convert DetectedRegion records to format expected by MaskOverlay hook
+  # Filters out already-inpainted regions (they're baked into the image now)
+  defp regions_to_masks(document) do
+    (document.detected_regions || [])
+    |> Enum.reject(fn region -> region.status == :inpainted end)
+    |> Enum.map(fn region ->
+      %{
+        id: region.id,
+        bbox: region.bbox,
+        z_index: region.z_index,
+        mask_url: mask_path_to_url(region.mask_path)
+      }
+    end)
   end
 
-  defp region_style(bbox, img_width, img_height)
-       when is_number(img_width) and img_width > 0 and is_number(img_height) and img_height > 0 do
-    left = bbox["x"] / img_width * 100
-    top = bbox["y"] / img_height * 100
-    width = bbox["w"] / img_width * 100
-    height = bbox["h"] / img_height * 100
-
-    "left: #{left}%; top: #{top}%; width: #{width}%; height: #{height}%;"
-  end
-
-  defp region_style(_bbox, _width, _height), do: "display: none;"
-
-  defp find_region(socket, region_id) do
-    Enum.find(socket.assigns.document.text_regions, &(&1.id == region_id))
+  defp mask_path_to_url(nil), do: nil
+  defp mask_path_to_url(path) do
+    case String.split(path, "/uploads/", parts: 2) do
+      [_prefix, rest] -> "/uploads/#{rest}"
+      _ -> nil
+    end
   end
 end

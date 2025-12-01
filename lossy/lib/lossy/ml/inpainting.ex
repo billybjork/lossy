@@ -43,6 +43,30 @@ defmodule Lossy.ML.Inpainting do
   end
 
   @doc """
+  Inpaint using a pre-existing mask PNG.
+
+  Takes the original image path and a mask path directly (e.g., from SAM detection).
+  The mask should be a PNG where white indicates regions to inpaint.
+
+  Options:
+  - :output_path - Where to save the result (default: auto-generated)
+  """
+  def inpaint_with_mask(image_path, mask_path, opts \\ []) do
+    output_path = Keyword.get(opts, :output_path, generate_output_path(image_path))
+
+    with {:ok, image_url} <- upload_for_replicate(image_path),
+         {:ok, mask_url} <- upload_for_replicate(mask_path),
+         {:ok, result_url} <- run_lama_inpainting(image_url, mask_url),
+         {:ok, _} <- download_result(result_url, output_path) do
+      {:ok, output_path}
+    else
+      {:error, reason} = error ->
+        Logger.error("Mask-based inpainting failed: #{inspect(reason)}")
+        error
+    end
+  end
+
+  @doc """
   Inpaint multiple regions in a single pass.
 
   More efficient than calling inpaint_region multiple times
@@ -66,32 +90,35 @@ defmodule Lossy.ML.Inpainting do
     end
   end
 
-  # For local development, we need to make images accessible to Replicate
-  # Options:
-  # 1. Use data URLs (base64) - works but limited to ~256KB
-  # 2. Expose via local server URL (requires public access)
-  # 3. Upload to a file hosting service
-  #
-  # For MVP, we'll use data URLs for smaller files and expect
-  # production to use proper CDN/S3 URLs
+  # Make images accessible to Replicate:
+  # - Small files (<256KB): use data URLs (base64) - faster, no extra API call
+  # - Large files (>=256KB): upload to Replicate's file hosting
   defp upload_for_replicate(file_path) do
+    case File.stat(file_path) do
+      {:ok, %{size: size}} ->
+        size_kb = div(size, 1024)
+        max_data_url_kb = 256
+
+        if size_kb >= max_data_url_kb do
+          # Large file - use Replicate's file upload API
+          Logger.info("File #{size_kb}KB, using Replicate file upload")
+          ReplicateClient.upload_file(file_path)
+        else
+          # Small file - use data URL
+          create_data_url(file_path)
+        end
+
+      {:error, reason} ->
+        {:error, {:file_stat_failed, reason}}
+    end
+  end
+
+  defp create_data_url(file_path) do
     case File.read(file_path) do
       {:ok, data} ->
-        # Check size BEFORE encoding - Replicate recommends URLs for files > 256KB
-        size_kb = div(byte_size(data), 1024)
-        max_size_kb = 256
-
-        if size_kb > max_size_kb do
-          Logger.error("File too large for data URL: #{size_kb}KB exceeds #{max_size_kb}KB limit")
-
-          {:error,
-           {:file_too_large,
-            "File size #{size_kb}KB exceeds Replicate's #{max_size_kb}KB limit for data URLs"}}
-        else
-          mime_type = mime_type_for(file_path)
-          data_url = "data:#{mime_type};base64,#{Base.encode64(data)}"
-          {:ok, data_url}
-        end
+        mime_type = mime_type_for(file_path)
+        data_url = "data:#{mime_type};base64,#{Base.encode64(data)}"
+        {:ok, data_url}
 
       {:error, reason} ->
         {:error, {:file_read_failed, reason}}
