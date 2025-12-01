@@ -72,13 +72,14 @@
             alt="Captured image"
             class="max-w-full max-h-[85vh] h-auto rounded-lg shadow-2xl"
             id="capture-image"
+            draggable="false"
             style={if @fresh_arrival, do: "transform: scale(1.02); filter: drop-shadow(0 0 50px rgba(255, 255, 255, 0.5));", else: ""}
           />
 
           <!-- Mask overlay container -->
           <div
             id="mask-overlay"
-            class="absolute inset-0 w-full h-full pointer-events-none"
+            class="absolute inset-0 w-full h-full pointer-events-auto"
             phx-hook="MaskOverlay"
             data-image-width={@document.width}
             data-image-height={@document.height}
@@ -92,6 +93,7 @@
                   data-bbox-y={mask.bbox["y"] || mask.bbox[:y]}
                   data-bbox-w={mask.bbox["w"] || mask.bbox[:w]}
                   data-bbox-h={mask.bbox["h"] || mask.bbox[:h]}
+                  draggable="false"
                   class="mask-region absolute pointer-events-auto cursor-pointer opacity-0 transition-all duration-300 ease-out"
                   style="will-change: transform, filter, opacity;"
                 />

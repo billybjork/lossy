@@ -17,6 +17,12 @@ export const MaskOverlay = {
     this.hoveredMaskId = null;
     this.selectedMaskIds = new Set();
 
+    // Drag selection state
+    this.isDragging = false;
+    this.dragStart = null;
+    this.dragRect = null;
+    this.dragShift = false;  // Track if shift was held at drag start
+
     // Get image dimensions from data attributes
     this.imageWidth = parseInt(this.el.dataset.imageWidth) || 0;
     this.imageHeight = parseInt(this.el.dataset.imageHeight) || 0;
@@ -37,6 +43,13 @@ export const MaskOverlay = {
 
     // Attach event listeners to mask elements
     this.attachMaskListeners();
+
+    // Drag selection listeners
+    this.container.addEventListener('mousedown', (e) => this.startDrag(e));
+    this.mouseMoveHandler = (e) => this.updateDrag(e);
+    this.mouseUpHandler = (e) => this.endDrag(e);
+    document.addEventListener('mousemove', this.mouseMoveHandler);
+    document.addEventListener('mouseup', this.mouseUpHandler);
 
     // Keyboard events for shortcuts
     this.keydownHandler = (e) => this.handleKeydown(e);
@@ -71,6 +84,9 @@ export const MaskOverlay = {
   destroyed() {
     if (this.resizeObserver) this.resizeObserver.disconnect();
     document.removeEventListener('keydown', this.keydownHandler);
+    document.removeEventListener('mousemove', this.mouseMoveHandler);
+    document.removeEventListener('mouseup', this.mouseUpHandler);
+    if (this.dragRect) this.dragRect.remove();
   },
 
   positionMasks() {
@@ -206,5 +222,161 @@ export const MaskOverlay = {
 
     // Update cursor on container
     this.container.style.cursor = hasHover ? 'pointer' : 'crosshair';
+  },
+
+  // Drag selection methods
+  createDragRect() {
+    const rect = document.createElement('div');
+    rect.className = 'drag-selection-rect';
+    rect.style.cssText = `
+      position: absolute;
+      border: 1px dashed rgba(59, 130, 246, 0.8);
+      background: rgba(59, 130, 246, 0.1);
+      pointer-events: none;
+      display: none;
+      z-index: 1000;
+    `;
+    this.container.appendChild(rect);
+    return rect;
+  },
+
+  startDrag(e) {
+    // Only start drag on container background, not on masks
+    if (e.target.classList.contains('mask-region')) return;
+    if (e.button !== 0) return;  // Left click only
+
+    const containerRect = this.container.getBoundingClientRect();
+    this.dragStart = {
+      x: e.clientX - containerRect.left,
+      y: e.clientY - containerRect.top
+    };
+    this.dragShift = e.shiftKey;
+
+    // Create rubber band element if needed
+    if (!this.dragRect) {
+      this.dragRect = this.createDragRect();
+    }
+  },
+
+  updateDrag(e) {
+    if (!this.dragStart) return;
+
+    const containerRect = this.container.getBoundingClientRect();
+    const currentX = e.clientX - containerRect.left;
+    const currentY = e.clientY - containerRect.top;
+
+    // Calculate distance to check if we should start showing the rect
+    const dx = currentX - this.dragStart.x;
+    const dy = currentY - this.dragStart.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+
+    // Minimum drag distance threshold to avoid accidental drags
+    if (distance < 5 && !this.isDragging) return;
+
+    this.isDragging = true;
+
+    // Calculate rectangle bounds
+    const left = Math.min(this.dragStart.x, currentX);
+    const top = Math.min(this.dragStart.y, currentY);
+    const width = Math.abs(currentX - this.dragStart.x);
+    const height = Math.abs(currentY - this.dragStart.y);
+
+    // Update rubber band position
+    this.dragRect.style.left = `${left}px`;
+    this.dragRect.style.top = `${top}px`;
+    this.dragRect.style.width = `${width}px`;
+    this.dragRect.style.height = `${height}px`;
+    this.dragRect.style.display = 'block';
+
+    // Preview: highlight masks that intersect
+    const rect = { left, top, right: left + width, bottom: top + height };
+    const intersecting = this.getMasksInRect(rect);
+    this.previewDragSelection(intersecting);
+  },
+
+  endDrag(e) {
+    if (!this.dragStart) return;
+
+    if (this.isDragging) {
+      const containerRect = this.container.getBoundingClientRect();
+      const currentX = e.clientX - containerRect.left;
+      const currentY = e.clientY - containerRect.top;
+
+      const left = Math.min(this.dragStart.x, currentX);
+      const top = Math.min(this.dragStart.y, currentY);
+      const width = Math.abs(currentX - this.dragStart.x);
+      const height = Math.abs(currentY - this.dragStart.y);
+
+      const rect = { left, top, right: left + width, bottom: top + height };
+      const selected = this.getMasksInRect(rect);
+
+      if (selected.length > 0) {
+        // Update local selection
+        if (this.dragShift) {
+          selected.forEach(id => this.selectedMaskIds.add(id));
+        } else {
+          this.selectedMaskIds = new Set(selected);
+        }
+
+        // Push to server
+        this.pushEvent("select_regions", {
+          ids: selected,
+          shift: this.dragShift
+        });
+      }
+
+      this.updateHighlight();
+    }
+
+    // Reset drag state
+    this.isDragging = false;
+    this.dragStart = null;
+    this.dragShift = false;
+    if (this.dragRect) {
+      this.dragRect.style.display = 'none';
+    }
+  },
+
+  getMasksInRect(rect) {
+    const masks = this.container.querySelectorAll('.mask-region');
+    const containerRect = this.container.getBoundingClientRect();
+    const result = [];
+
+    masks.forEach(mask => {
+      const maskRect = mask.getBoundingClientRect();
+
+      // Convert to container-relative coordinates
+      const maskLeft = maskRect.left - containerRect.left;
+      const maskTop = maskRect.top - containerRect.top;
+      const maskRight = maskLeft + maskRect.width;
+      const maskBottom = maskTop + maskRect.height;
+
+      // Check intersection (any overlap counts)
+      if (!(rect.right < maskLeft || rect.left > maskRight ||
+            rect.bottom < maskTop || rect.top > maskBottom)) {
+        result.push(mask.dataset.maskId);
+      }
+    });
+
+    return result;
+  },
+
+  previewDragSelection(intersectingIds) {
+    const masks = this.container.querySelectorAll('.mask-region');
+    const previewSet = new Set(intersectingIds);
+
+    masks.forEach(mask => {
+      const maskId = mask.dataset.maskId;
+      const isIntersecting = previewSet.has(maskId);
+      const isSelected = this.selectedMaskIds.has(maskId);
+
+      mask.classList.remove('mask-hovered', 'mask-selected', 'mask-dimmed', 'mask-idle');
+
+      if (isIntersecting || (this.dragShift && isSelected)) {
+        mask.classList.add('mask-selected');
+      } else {
+        mask.classList.add('mask-dimmed');
+      }
+    });
   }
 };

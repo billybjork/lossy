@@ -99,6 +99,21 @@ defmodule LossyWeb.CaptureLive do
   end
 
   @impl true
+  def handle_event("select_regions", %{"ids" => region_ids, "shift" => shift}, socket) do
+    selected = socket.assigns.selected_region_ids
+    new_ids = MapSet.new(region_ids)
+
+    new_selected =
+      if shift do
+        MapSet.union(selected, new_ids)
+      else
+        new_ids
+      end
+
+    {:noreply, assign(socket, selected_region_ids: new_selected)}
+  end
+
+  @impl true
   def handle_event("deselect_all", _params, socket) do
     {:noreply, assign(socket, selected_region_ids: MapSet.new())}
   end
