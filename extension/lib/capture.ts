@@ -30,14 +30,23 @@ export async function captureImage(candidate: CandidateImage): Promise<CapturePa
     const accessible = await testUrlAccessibility(candidate.imageUrl);
 
     if (accessible) {
+      // Use natural dimensions if available (img/picture elements),
+      // otherwise fall back to display rect (background images)
+      const imageWidth = candidate.naturalWidth || Math.round(candidate.rect.width);
+      const imageHeight = candidate.naturalHeight || Math.round(candidate.rect.height);
+      console.log('[Lossy] Direct asset dimensions:', {
+        naturalWidth: candidate.naturalWidth,
+        naturalHeight: candidate.naturalHeight,
+        displayRect: { width: candidate.rect.width, height: candidate.rect.height },
+        usingFallback: !candidate.naturalWidth
+      });
       return {
         source_url: window.location.href,
         capture_mode: 'direct_asset',
         image_url: candidate.imageUrl,
         bounding_rect: rectToJSON(candidate.rect),
-        // Natural dimensions for skeleton placeholder (may be undefined for background images)
-        image_width: candidate.naturalWidth,
-        image_height: candidate.naturalHeight
+        image_width: imageWidth,
+        image_height: imageHeight
       };
     }
   }
@@ -45,14 +54,21 @@ export async function captureImage(candidate: CandidateImage): Promise<CapturePa
   // Fall back to screenshot (transformed image, inaccessible URL, or no URL)
   const dpr = window.devicePixelRatio || 1;
   const imageDataUrl = await captureRegionScreenshot(candidate.rect);
+  const screenshotWidth = Math.round(candidate.rect.width * dpr);
+  const screenshotHeight = Math.round(candidate.rect.height * dpr);
+  console.log('[Lossy] Screenshot dimensions:', {
+    dpr,
+    displayRect: { width: candidate.rect.width, height: candidate.rect.height },
+    screenshotSize: { width: screenshotWidth, height: screenshotHeight }
+  });
   return {
     source_url: window.location.href,
     capture_mode: 'screenshot',
     image_data: imageDataUrl,
     bounding_rect: rectToJSON(candidate.rect),
     // Screenshot dimensions are rect * devicePixelRatio
-    image_width: Math.round(candidate.rect.width * dpr),
-    image_height: Math.round(candidate.rect.height * dpr)
+    image_width: screenshotWidth,
+    image_height: screenshotHeight
   };
 }
 

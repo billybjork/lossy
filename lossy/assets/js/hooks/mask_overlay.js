@@ -81,6 +81,14 @@ export const MaskOverlay = {
     this.updateHighlight();
   },
 
+  updated() {
+    // LiveView DOM patching may replace mask elements, losing event listeners.
+    // Re-attach listeners and reposition after any server-triggered re-render.
+    this.positionMasks();
+    this.attachMaskListeners();
+    this.updateHighlight();
+  },
+
   destroyed() {
     if (this.resizeObserver) this.resizeObserver.disconnect();
     document.removeEventListener('keydown', this.keydownHandler);

@@ -134,9 +134,23 @@ figure {
    Editor-specific Components
    ============================================================================= */
 
+/* Frame centers content and provides the viewport constraint */
+.editor-frame {
+  display: flex;
+  justify-content: center;
+}
+
+/* Container controls sizing via inline max-width: calc(85vh * W/H)
+ * This ensures consistent sizing: all images fill available space */
+.image-container {
+  position: relative;
+  width: 100%;
+  /* max-width set inline based on aspect ratio */
+}
+
+/* Image fills its container */
 .capture-image {
-  max-width: 100%;
-  max-height: 85vh;
+  width: 100%;
   height: auto;
   border-radius: 0.5rem;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
@@ -169,13 +183,17 @@ figure {
   to { transform: rotate(360deg); }
 }
 
-/* Skeleton loading state */
+/* Skeleton: fills container, aspect-ratio set inline to match image dimensions.
+ * Container's max-width ensures skeleton sizes exactly like the image will. */
 .skeleton {
-  background-color: rgba(39, 39, 42, 0.5);
-  border-radius: 0.5rem;
+  width: 100%;
+  /* aspect-ratio set inline */
   display: flex;
   align-items: center;
   justify-content: center;
+  background-color: rgba(39, 39, 42, 0.5);
+  border-radius: 0.5rem;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
 /* Loading indicator overlay */
@@ -270,12 +288,9 @@ figure {
     background-color 0.2s ease-out;
 }
 
+/* Idle state: masks are invisible until hovered or selected */
 .mask-region.mask-idle {
-  opacity: 1;
-  transform: scale(1);
-  filter:
-    drop-shadow(0 0 8px rgba(255, 255, 255, 0.15))
-    drop-shadow(0 0 16px rgba(255, 255, 255, 0.08));
+  opacity: 0;
 }
 
 .mask-region.mask-hovered {
@@ -303,14 +318,9 @@ figure {
   filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.05));
 }
 
-/* Bbox-only masks */
+/* Bbox-only masks - idle state invisible */
 .mask-bbox.mask-idle {
-  opacity: 1;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  box-shadow:
-    0 0 8px rgba(255, 255, 255, 0.12),
-    0 0 16px rgba(255, 255, 255, 0.06);
+  opacity: 0;
 }
 
 .mask-bbox.mask-hovered {
@@ -345,6 +355,14 @@ figure {
 
 /* =============================================================================
    Arrival Animation (fresh capture from extension)
+
+   The "hero entrance" effect creates a cinematic arrival for fresh captures:
+   1. Dark overlay dims the background (z-50)
+   2. Image/skeleton appears scaled up with dramatic glow (z-60, above overlay)
+   3. Animation settles to normal scale, fades overlay, reveals UI
+
+   Both skeleton and image use .hero-entrance during @fresh_arrival to ensure
+   seamless visual continuity when the image replaces the skeleton.
    ============================================================================= */
 
 .arrival-overlay {
@@ -355,7 +373,8 @@ figure {
   pointer-events: none;
 }
 
-.hero-glow {
+/* Shared entrance state for both skeleton and image during fresh arrival */
+.hero-entrance {
   transform: scale(1.02);
   filter: drop-shadow(0 0 50px rgba(255, 255, 255, 0.5));
 }

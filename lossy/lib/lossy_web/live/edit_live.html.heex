@@ -61,10 +61,11 @@
       </div>
     </header>
 
-<!-- Main editor area - centered -->
-    <div class="flex justify-center">
+<!-- Main editor area - centered frame that constrains content -->
+    <div class="editor-frame">
       <figure
-        class={["relative inline-block", @fresh_arrival && "z-60"]}
+        class={["image-container", @fresh_arrival && "z-60"]}
+        style={"max-width: calc(85vh * #{@document.width || 4} / #{@document.height || 3});"}
         id="editor-container"
         phx-hook="EditorArrival"
         data-fresh={@fresh_arrival}
@@ -73,18 +74,12 @@
           <img
             src={"#{Assets.public_url(display_asset)}?v=#{display_asset.id}"}
             alt="Screenshot being edited"
-            class="capture-image"
+            class={["capture-image", @fresh_arrival && "hero-entrance"]}
             id="editor-image"
             draggable="false"
-            style={
-              if @fresh_arrival,
-                do:
-                  "transform: scale(1.02); filter: drop-shadow(0 0 50px rgba(255, 255, 255, 0.5));",
-                else: ""
-            }
           />
-          
-<!-- Mask overlay container -->
+
+          <!-- Mask overlay container -->
           <div
             id="mask-overlay"
             class="absolute inset-0 w-full h-full pointer-events-auto"
@@ -119,8 +114,8 @@
               <% end %>
             <% end %>
           </div>
-          
-<!-- Loading indicator when inpainting -->
+
+          <!-- Loading indicator when inpainting -->
           <%= if @inpainting do %>
             <aside class="loading-indicator" role="status" aria-label="Processing">
               <svg
@@ -129,85 +124,30 @@
                 fill="none"
                 viewBox="0 0 24 24"
               >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                >
-                </circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                >
-                </path>
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
             </aside>
           <% end %>
         <% else %>
-          <!-- Loading state skeleton - sized to match incoming image if dimensions available -->
-          <%= if @document.width && @document.height do %>
-            <div
-              class="skeleton"
-              role="status"
-              aria-label="Loading image"
-              style={"aspect-ratio: #{@document.width}/#{@document.height}; width: min(#{@document.width}px, 100%); max-height: 85vh;"}
+          <!-- Loading skeleton: same container sizing, aspect-ratio matches dimensions -->
+          <div
+            class={["skeleton", @fresh_arrival && "hero-entrance"]}
+            style={"aspect-ratio: #{@document.width || 4} / #{@document.height || 3};"}
+            role="status"
+            aria-label="Loading image"
+          >
+            <svg
+              class="spinner h-8 w-8"
+              style="color: var(--color-zinc-500);"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
             >
-              <svg
-                class="spinner h-8 w-8"
-                style="color: var(--color-zinc-500);"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                >
-                </circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                >
-                </path>
-              </svg>
-            </div>
-          <% else %>
-            <!-- Fallback: fixed dimensions if not provided by extension -->
-            <div class="skeleton" role="status" aria-label="Loading image" style="width: 600px; aspect-ratio: 4/3;">
-              <svg
-                class="spinner h-8 w-8"
-                style="color: var(--color-zinc-500);"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                >
-                </circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                >
-                </path>
-              </svg>
-            </div>
-          <% end %>
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+          </div>
         <% end %>
       </figure>
     </div>
