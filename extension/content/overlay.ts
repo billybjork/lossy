@@ -527,6 +527,7 @@ export class CaptureOverlay {
   /**
    * Transition to "selected" state - hero animation in place
    * Selected image glows and scales slightly while others fade out.
+   * Uses distance-based staggering for a smooth "ripple" effect.
    */
   private transitionToSelected(index: number): void {
     // Guard against multiple selections
@@ -537,26 +538,66 @@ export class CaptureOverlay {
     // Stop scanning - no need to find more images
     this.stopContinuousScanning();
 
-    // Animate each clone
-    this.clones.forEach((clone, i) => {
-      // Set transition for hero effect
-      clone.style.transition = `
-        opacity ${this.HERO_TRANSITION_MS}ms ease-out,
-        transform ${this.HERO_TRANSITION_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1),
-        filter ${this.HERO_TRANSITION_MS}ms ease-out
-      `;
+    // Get selected clone's center position for distance calculations
+    const selectedClone = this.clones[index];
+    const selectedRect = selectedClone.getBoundingClientRect();
+    const selectedCenter = {
+      x: selectedRect.left + selectedRect.width / 2,
+      y: selectedRect.top + selectedRect.height / 2
+    };
 
-      if (i === index) {
-        // Selected image: in-place hero effect with enhanced glow
-        clone.style.transform = `scale(${this.HERO_SCALE})`;
-        clone.style.filter = this.FILTER_HERO;
-        clone.style.opacity = '1';
-      } else {
-        // Other images: fade out with blur
+    // Calculate distances for all non-selected clones
+    const distances: { index: number; distance: number }[] = [];
+    this.clones.forEach((clone, i) => {
+      if (i !== index) {
+        const rect = clone.getBoundingClientRect();
+        const center = {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2
+        };
+        const distance = Math.hypot(center.x - selectedCenter.x, center.y - selectedCenter.y);
+        distances.push({ index: i, distance });
+      }
+    });
+
+    // Sort by distance (farthest first for stagger calculation)
+    distances.sort((a, b) => b.distance - a.distance);
+
+    // Calculate max distance for normalization
+    const maxDistance = distances.length > 0 ? distances[0].distance : 1;
+
+    // Animate selected clone immediately with hero effect
+    selectedClone.style.transition = `
+      opacity ${this.HERO_TRANSITION_MS}ms ease-out,
+      transform ${this.HERO_TRANSITION_MS}ms cubic-bezier(0.34, 1.56, 0.64, 1),
+      filter ${this.HERO_TRANSITION_MS}ms ease-out
+    `;
+    selectedClone.style.transform = `scale(${this.HERO_SCALE})`;
+    selectedClone.style.filter = this.FILTER_HERO;
+    selectedClone.style.opacity = '1';
+
+    // Animate other clones with distance-based stagger
+    // Closer images blur first, farther ones later (ripple outward from selection)
+    const maxStaggerDelay = 200; // Max delay spread across all images
+    distances.forEach(({ index: i, distance }) => {
+      const clone = this.clones[i];
+      // Farther images get more delay (blur later), closer images blur sooner
+      const normalizedDistance = distance / maxDistance;
+      const delay = normalizedDistance * maxStaggerDelay;
+
+      setTimeout(() => {
+        // Blur leads with a long, gentle transition
+        // Opacity follows with a delay so you see the blur progress first
+        // This creates a soft "dissolve" feel rather than an abrupt snap
+        clone.style.transition = `
+          filter 500ms cubic-bezier(0.2, 0, 0.2, 1),
+          opacity 350ms cubic-bezier(0.4, 0, 0.2, 1) 120ms,
+          transform 400ms cubic-bezier(0.4, 0, 0.2, 1)
+        `;
         clone.style.transform = 'scale(0.95)';
         clone.style.filter = 'blur(8px)';
         clone.style.opacity = '0';
-      }
+      }, delay);
     });
 
     // Slightly lighten overlay background
