@@ -170,7 +170,7 @@ async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab)
     console.log('[Lossy] Capture created with ID:', data.id);
 
     // Open editor in new tab with fresh param for arrival animation
-    chrome.tabs.create({ url: `http://localhost:4000/capture/${data.id}?fresh=1` });
+    chrome.tabs.create({ url: `http://localhost:4000/edit/${data.id}?fresh=1` });
 
     // Notify source tab that editor opened - triggers overlay dismiss
     if (tab.id) {

@@ -19,7 +19,7 @@ defmodule LossyWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
-    live "/capture/:id", CaptureLive
+    live "/edit/:id", EditLive
   end
 
   # API routes

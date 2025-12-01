@@ -26,14 +26,14 @@ import {hooks as colocatedHooks} from "phoenix-colocated/lossy"
 import topbar from "../vendor/topbar"
 import {EditableText} from "./hooks/editable_text"
 import {MaskOverlay} from "./hooks/mask_overlay"
-import {CaptureArrival} from "./hooks/capture_arrival"
+import {EditorArrival} from "./hooks/editor_arrival"
 
 // Merge our custom hooks with colocated hooks
 const Hooks = {
   ...colocatedHooks,
   EditableText: EditableText,
   MaskOverlay: MaskOverlay,
-  CaptureArrival: CaptureArrival
+  EditorArrival: EditorArrival
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")

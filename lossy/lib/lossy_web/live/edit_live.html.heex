@@ -65,13 +65,13 @@
 
     <!-- Main editor area - centered -->
     <div class="flex justify-center">
-      <div class={["relative inline-block", @fresh_arrival && "z-[60]"]} id="capture-container" phx-hook="CaptureArrival" data-fresh={@fresh_arrival}>
+      <div class={["relative inline-block", @fresh_arrival && "z-[60]"]} id="editor-container" phx-hook="EditorArrival" data-fresh={@fresh_arrival}>
         <%= if display_asset = @document.working_asset || @document.original_asset do %>
           <img
             src={"#{Assets.public_url(display_asset)}?v=#{display_asset.id}"}
-            alt="Captured image"
+            alt="Image"
             class="max-w-full max-h-[85vh] h-auto rounded-lg shadow-2xl"
-            id="capture-image"
+            id="editor-image"
             draggable="false"
             style={if @fresh_arrival, do: "transform: scale(1.02); filter: drop-shadow(0 0 50px rgba(255, 255, 255, 0.5));", else: ""}
           />

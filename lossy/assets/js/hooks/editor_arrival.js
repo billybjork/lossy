@@ -1,5 +1,5 @@
 /**
- * CaptureArrival hook - Cinematic arrival animation for fresh captures.
+ * EditorArrival hook - Cinematic arrival animation for fresh captures.
  *
  * Server renders:
  * - Dark overlay at z-50
@@ -13,7 +13,7 @@
  * - Fades in UI elements
  * - Cleans up styles
  */
-export const CaptureArrival = {
+export const EditorArrival = {
   mounted() {
     this.isFresh = this.el.hasAttribute('data-fresh')
     this.hasAnimated = false

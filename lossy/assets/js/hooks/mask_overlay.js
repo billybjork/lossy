@@ -1,7 +1,7 @@
 /**
  * MaskOverlay Hook - CSS Drop-Shadow Spotlight Effect
  *
- * Positions mask images over the capture and applies CSS drop-shadow filters
+ * Positions mask images over the image and applies CSS drop-shadow filters
  * for a cinematic spotlight glow effect (matching the extension's overlay.ts).
  *
  * Features:
@@ -28,7 +28,7 @@ export const MaskOverlay = {
     this.imageHeight = parseInt(this.el.dataset.imageHeight) || 0;
 
     // Position masks once image is loaded
-    const img = document.getElementById('capture-image');
+    const img = document.getElementById('editor-image');
     if (img) {
       if (img.complete) {
         this.positionMasks();
@@ -90,7 +90,7 @@ export const MaskOverlay = {
   },
 
   positionMasks() {
-    const img = document.getElementById('capture-image');
+    const img = document.getElementById('editor-image');
     if (!img) return;
 
     const displayWidth = img.clientWidth;

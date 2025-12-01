@@ -1,4 +1,4 @@
-defmodule LossyWeb.CaptureLive do
+defmodule LossyWeb.EditLive do
   @moduledoc """
   LiveView for the image editor.
 
@@ -34,7 +34,7 @@ defmodule LossyWeb.CaptureLive do
 
         socket =
           socket
-          |> assign(document: document, page_title: "Edit Capture")
+          |> assign(document: document, page_title: "Edit")
           |> assign(selected_region_ids: MapSet.new())
           |> assign(inpainting: false)
           |> assign(export_path: nil, exporting: false)
