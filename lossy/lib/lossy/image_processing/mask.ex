@@ -207,7 +207,8 @@ defmodule Lossy.ImageProcessing.Mask do
 
   Returns {:ok, output_path} or {:error, reason}.
   """
-  def combine_masks(mask_paths, output_path) when is_list(mask_paths) and length(mask_paths) > 0 do
+  def combine_masks(mask_paths, output_path)
+      when is_list(mask_paths) and length(mask_paths) > 0 do
     if length(mask_paths) == 1 do
       # Single mask, just copy it
       case File.cp(hd(mask_paths), output_path) do

@@ -17,11 +17,16 @@ defmodule Lossy.Documents.Document do
   @foreign_key_type :binary_id
 
   @valid_statuses [
-    :loading,           # Initial state, image being fetched
-    :ready,             # Image loaded, ready for editing
-    :detecting,         # Running detection (text + SAM)
-    :inpainting,        # Running inpainting operation
-    :error              # Something went wrong
+    # Initial state, image being fetched
+    :loading,
+    # Image loaded, ready for editing
+    :ready,
+    # Running detection (text + SAM)
+    :detecting,
+    # Running inpainting operation
+    :inpainting,
+    # Something went wrong
+    :error
   ]
 
   @valid_url_statuses [:not_checked, :accessible, :unreachable, :timeout]

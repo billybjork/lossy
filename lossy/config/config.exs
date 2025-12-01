@@ -48,17 +48,10 @@ config :esbuild,
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
-  ]
-
-# Configure tailwind (the version is required)
-config :tailwind,
-  version: "4.1.7",
-  lossy: [
-    args: ~w(
-      --input=assets/css/app.css
-      --output=priv/static/assets/css/app.css
-    ),
-    cd: Path.expand("..", __DIR__)
+  ],
+  lossy_css: [
+    args: ~w(css/app.css --bundle --outdir=../priv/static/assets/css),
+    cd: Path.expand("../assets", __DIR__)
   ]
 
 # Configures Elixir's Logger
@@ -69,12 +62,14 @@ config :logger, :default_formatter,
     # Document/asset identifiers
     :document_id,
     :region_id,
+    :region_ids,
     :prediction_id,
     # File/path info
     :path,
     :file_path,
     :source_path,
     :output_path,
+    :target_path,
     :image_path,
     :mask_path,
     :working_image,
@@ -82,6 +77,8 @@ config :logger, :default_formatter,
     # Image dimensions
     :width,
     :height,
+    :image_width,
+    :image_height,
     :kind,
     # Processing state
     :status,
@@ -95,8 +92,11 @@ config :logger, :default_formatter,
     :has_text_regions,
     :text_regions_count,
     :region_count,
+    :mask_count,
+    :count,
     :failed_count,
     :model,
+    :restoring_regions,
     # Text rendering
     :text,
     :bbox,

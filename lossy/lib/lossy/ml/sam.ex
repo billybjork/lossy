@@ -33,7 +33,9 @@ defmodule Lossy.ML.SAM do
   def segment_everything(image_path, opts \\ []) do
     points_per_side = Keyword.get(opts, :points_per_side, @default_points_per_side)
     pred_iou_thresh = Keyword.get(opts, :pred_iou_thresh, @default_pred_iou_thresh)
-    stability_score_thresh = Keyword.get(opts, :stability_score_thresh, @default_stability_score_thresh)
+
+    stability_score_thresh =
+      Keyword.get(opts, :stability_score_thresh, @default_stability_score_thresh)
 
     with {:ok, image_url} <- upload_for_replicate(image_path) do
       input = %{
@@ -58,7 +60,8 @@ defmodule Lossy.ML.SAM do
       input = %{
         "image" => image_url,
         "point_coords" => [[x, y]],
-        "point_labels" => [1]  # 1 = foreground point
+        # 1 = foreground point
+        "point_labels" => [1]
       }
 
       input =
@@ -134,13 +137,15 @@ defmodule Lossy.ML.SAM do
         # Extract bbox from mask using ImageMagick
         case extract_bbox_from_mask(mask_path) do
           {:ok, bbox} ->
-            region = DetectedRegion.from_sam_mask(
-              document_id,
-              mask_path,
-              bbox,
-              confidence: 1.0,
-              z_index: index
-            )
+            region =
+              DetectedRegion.from_sam_mask(
+                document_id,
+                mask_path,
+                bbox,
+                confidence: 1.0,
+                z_index: index
+              )
+
             {:ok, region}
 
           {:error, reason} ->
@@ -176,12 +181,13 @@ defmodule Lossy.ML.SAM do
     # Format: "WxH+X+Y" e.g., "100x50+25+30"
     case Regex.run(~r/(\d+)x(\d+)\+(\d+)\+(\d+)/, trim_string) do
       [_, w, h, x, y] ->
-        {:ok, %{
-          x: String.to_integer(x),
-          y: String.to_integer(y),
-          w: String.to_integer(w),
-          h: String.to_integer(h)
-        }}
+        {:ok,
+         %{
+           x: String.to_integer(x),
+           y: String.to_integer(y),
+           w: String.to_integer(w),
+           h: String.to_integer(h)
+         }}
 
       _ ->
         :error
@@ -256,6 +262,7 @@ defmodule Lossy.ML.SAM do
     case Req.get(url, receive_timeout: 60_000) do
       {:ok, %{status: 200, body: body}} ->
         File.mkdir_p!(Path.dirname(output_path))
+
         case File.write(output_path, body) do
           :ok -> {:ok, output_path}
           {:error, reason} -> {:error, {:file_write_failed, reason}}

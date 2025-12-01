@@ -215,6 +215,7 @@ defmodule LossyWeb.EditLive do
   end
 
   defp mask_path_to_url(nil), do: nil
+
   defp mask_path_to_url(path) do
     case String.split(path, "/uploads/", parts: 2) do
       [_prefix, rest] -> "/uploads/#{rest}"

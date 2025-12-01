@@ -1,21 +1,24 @@
-<div class="min-h-screen bg-black">
+<div class="editor-container">
   <!-- Arrival overlay - rendered server-side to prevent flash -->
   <%= if @fresh_arrival do %>
-    <div id="arrival-overlay" class="fixed inset-0 bg-black/[0.92] z-50 pointer-events-none"></div>
+    <div id="arrival-overlay" class="arrival-overlay"></div>
   <% end %>
 
-  <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+  <div class="editor-content">
     <!-- Header with export - hidden during fresh arrival -->
-    <div
+    <header
       id="editor-header"
-      class={["mb-4 flex justify-end items-center transition-opacity duration-300", @fresh_arrival && "opacity-0"]}
+      class={[
+        "mb-4 flex justify-end items-center transition-opacity duration-300",
+        @fresh_arrival && "opacity-0"
+      ]}
     >
       <div class="flex gap-2">
         <%= if @export_path do %>
           <a
             href={@export_path}
             download="lossy-export.png"
-            class="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:ring-green-500"
+            class="btn btn-success"
           >
             Download
           </a>
@@ -24,17 +27,12 @@
         <button
           phx-click="export"
           disabled={@exporting}
-          class={[
-            "inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-offset-zinc-900 focus:ring-blue-500",
-            if(@exporting,
-              do: "bg-zinc-600 cursor-not-allowed",
-              else: "bg-blue-600 hover:bg-blue-700"
-            )
-          ]}
+          class={["btn", if(@exporting, do: "btn-primary", else: "btn-primary")]}
+          style={if @exporting, do: "opacity: 0.6; cursor: not-allowed;", else: ""}
         >
           <%= if @exporting do %>
             <svg
-              class="animate-spin -ml-1 mr-2 h-4 w-4 text-white"
+              class="spinner -ml-1 mr-2 h-4 w-4 text-white"
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
               viewBox="0 0 24 24"
@@ -61,22 +59,32 @@
           <% end %>
         </button>
       </div>
-    </div>
+    </header>
 
-    <!-- Main editor area - centered -->
+<!-- Main editor area - centered -->
     <div class="flex justify-center">
-      <div class={["relative inline-block", @fresh_arrival && "z-[60]"]} id="editor-container" phx-hook="EditorArrival" data-fresh={@fresh_arrival}>
+      <figure
+        class={["relative inline-block", @fresh_arrival && "z-60"]}
+        id="editor-container"
+        phx-hook="EditorArrival"
+        data-fresh={@fresh_arrival}
+      >
         <%= if display_asset = @document.working_asset || @document.original_asset do %>
           <img
             src={"#{Assets.public_url(display_asset)}?v=#{display_asset.id}"}
-            alt="Image"
-            class="max-w-full max-h-[85vh] h-auto rounded-lg shadow-2xl"
+            alt="Screenshot being edited"
+            class="capture-image"
             id="editor-image"
             draggable="false"
-            style={if @fresh_arrival, do: "transform: scale(1.02); filter: drop-shadow(0 0 50px rgba(255, 255, 255, 0.5));", else: ""}
+            style={
+              if @fresh_arrival,
+                do:
+                  "transform: scale(1.02); filter: drop-shadow(0 0 50px rgba(255, 255, 255, 0.5));",
+                else: ""
+            }
           />
-
-          <!-- Mask overlay container -->
+          
+<!-- Mask overlay container -->
           <div
             id="mask-overlay"
             class="absolute inset-0 w-full h-full pointer-events-auto"
@@ -106,72 +114,119 @@
                   data-bbox-h={mask.bbox["h"] || mask.bbox[:h]}
                   class="mask-region mask-bbox absolute pointer-events-auto cursor-pointer opacity-0 transition-all duration-300 ease-out rounded-sm"
                   style="will-change: transform, filter, opacity, box-shadow;"
-                ></div>
+                >
+                </div>
               <% end %>
             <% end %>
           </div>
-
-          <!-- Loading indicator when inpainting -->
+          
+<!-- Loading indicator when inpainting -->
           <%= if @inpainting do %>
-            <div class="absolute top-4 right-4 bg-black/60 rounded-full p-2">
+            <aside class="loading-indicator" role="status" aria-label="Processing">
               <svg
-                class="animate-spin h-5 w-5 text-white"
+                class="spinner h-5 w-5 text-white"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
               >
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                >
+                </circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                >
+                </path>
               </svg>
-            </div>
+            </aside>
           <% end %>
         <% else %>
           <!-- Loading state skeleton - sized to match incoming image if dimensions available -->
           <%= if @document.width && @document.height do %>
             <div
-              class="bg-zinc-800/50 rounded-lg flex items-center justify-center"
+              class="skeleton"
+              role="status"
+              aria-label="Loading image"
               style={"aspect-ratio: #{@document.width}/#{@document.height}; width: min(#{@document.width}px, 100%); max-height: 85vh;"}
             >
               <svg
-                class="animate-spin h-8 w-8 text-zinc-500"
+                class="spinner h-8 w-8"
+                style="color: var(--color-zinc-500);"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
               >
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                >
+                </circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                >
+                </path>
               </svg>
             </div>
           <% else %>
             <!-- Fallback: fixed dimensions if not provided by extension -->
-            <div class="w-[600px] aspect-[4/3] bg-zinc-800/50 rounded-lg flex items-center justify-center">
+            <div class="skeleton" role="status" aria-label="Loading image" style="width: 600px; aspect-ratio: 4/3;">
               <svg
-                class="animate-spin h-8 w-8 text-zinc-500"
+                class="spinner h-8 w-8"
+                style="color: var(--color-zinc-500);"
                 xmlns="http://www.w3.org/2000/svg"
                 fill="none"
                 viewBox="0 0 24 24"
               >
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                <circle
+                  class="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  stroke-width="4"
+                >
+                </circle>
+                <path
+                  class="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                >
+                </path>
               </svg>
             </div>
           <% end %>
         <% end %>
-      </div>
+      </figure>
     </div>
 
-    <!-- Bottom toolbar - hidden during fresh arrival -->
-    <div
+<!-- Bottom toolbar - hidden during fresh arrival -->
+    <footer
       id="editor-toolbar"
-      class={["mt-4 flex justify-center transition-opacity duration-300", @fresh_arrival && "opacity-0"]}
+      class={[
+        "mt-4 flex justify-center transition-opacity duration-300",
+        @fresh_arrival && "opacity-0"
+      ]}
     >
-      <div class="bg-zinc-800/80 rounded-lg px-4 py-2 flex items-center gap-4 text-zinc-400 text-sm">
+      <nav class="editor-toolbar" aria-label="Editor controls">
         <span>Hover to highlight</span>
-        <span class="text-zinc-600">·</span>
+        <span class="toolbar-separator" aria-hidden="true">&middot;</span>
         <span>Click to select</span>
-        <span class="text-zinc-600">·</span>
+        <span class="toolbar-separator" aria-hidden="true">&middot;</span>
         <span>Enter to remove</span>
-      </div>
-    </div>
+      </nav>
+    </footer>
   </div>
 </div>

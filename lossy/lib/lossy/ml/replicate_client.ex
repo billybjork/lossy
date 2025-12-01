@@ -168,8 +168,7 @@ defmodule Lossy.ML.ReplicateClient do
         multipart =
           {:multipart,
            [
-             {:file, file_data,
-              {"form-data", [name: "file", filename: filename]},
+             {:file, file_data, {"form-data", [name: "file", filename: filename]},
               [{"content-type", content_type}]}
            ]}
 

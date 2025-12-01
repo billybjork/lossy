@@ -21,7 +21,11 @@ defmodule Lossy.Workers.Inpainting do
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"document_id" => doc_id, "mask_paths" => mask_paths} = args}) do
     region_ids = Map.get(args, "region_ids", [])
-    Logger.info("Starting batch inpainting job", document_id: doc_id, mask_count: length(mask_paths))
+
+    Logger.info("Starting batch inpainting job",
+      document_id: doc_id,
+      mask_count: length(mask_paths)
+    )
 
     document = Documents.get_document(doc_id)
 
@@ -42,7 +46,8 @@ defmodule Lossy.Workers.Inpainting do
       # Combine multiple masks into one for a single API call
       with {:ok, combined_mask_path} <- combine_masks_if_needed(mask_paths, document.id),
            {:ok, inpainted_path} <- Inpainting.inpaint_with_mask(image_path, combined_mask_path),
-           {:ok, document} <- save_inpaint_result_with_history(document, inpainted_path, region_ids) do
+           {:ok, document} <-
+             save_inpaint_result_with_history(document, inpainted_path, region_ids) do
         # Clean up temporary combined mask if we created one
         if length(mask_paths) > 1 do
           File.rm(combined_mask_path)

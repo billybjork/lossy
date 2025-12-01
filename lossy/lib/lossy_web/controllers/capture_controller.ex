@@ -138,7 +138,9 @@ defmodule LossyWeb.CaptureController do
       region_count: length(text_regions)
     )
 
-    {:ok, _regions} = Documents.create_detected_regions_from_text_detection(document, text_regions)
+    {:ok, _regions} =
+      Documents.create_detected_regions_from_text_detection(document, text_regions)
+
     :ok
   end
 

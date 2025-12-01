@@ -292,6 +292,7 @@ defmodule Lossy.Documents do
         Logger.warning("Partial insert: expected #{length(text_regions)}, got #{count}",
           document_id: document.id
         )
+
         broadcast_document_update(document)
         {:ok, regions}
     end
@@ -359,12 +360,14 @@ defmodule Lossy.Documents do
       end
 
       # Create new working asset from the target image
-      with {:ok, new_asset} <- Assets.save_image_from_path(document.id, target_image_path, :working),
-           {:ok, updated_doc} <- update_document(document, %{
-             working_asset_id: new_asset.id,
-             history_index: new_index,
-             status: :ready
-           }) do
+      with {:ok, new_asset} <-
+             Assets.save_image_from_path(document.id, target_image_path, :working),
+           {:ok, updated_doc} <-
+             update_document(document, %{
+               working_asset_id: new_asset.id,
+               history_index: new_index,
+               status: :ready
+             }) do
         {:ok, updated_doc}
       else
         {:error, reason} ->

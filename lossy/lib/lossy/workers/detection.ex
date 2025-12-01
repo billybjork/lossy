@@ -116,16 +116,17 @@ defmodule Lossy.Workers.Detection do
 
   defp broadcast_masks(document, regions) do
     # Convert regions to serializable format for frontend
-    masks = Enum.map(regions, fn region ->
-      %{
-        id: region.id,
-        type: Atom.to_string(region.type),
-        bbox: region.bbox,
-        mask_url: mask_path_to_url(region.mask_path, document.id),
-        confidence: region.confidence,
-        z_index: region.z_index
-      }
-    end)
+    masks =
+      Enum.map(regions, fn region ->
+        %{
+          id: region.id,
+          type: Atom.to_string(region.type),
+          bbox: region.bbox,
+          mask_url: mask_path_to_url(region.mask_path, document.id),
+          confidence: region.confidence,
+          z_index: region.z_index
+        }
+      end)
 
     Phoenix.PubSub.broadcast(
       Lossy.PubSub,
@@ -135,6 +136,7 @@ defmodule Lossy.Workers.Detection do
   end
 
   defp mask_path_to_url(nil, _document_id), do: nil
+
   defp mask_path_to_url(mask_path, document_id) do
     # Convert file path to web URL
     # e.g., "priv/static/uploads/abc/masks/mask_0.png" -> "/uploads/abc/masks/mask_0.png"

@@ -11,7 +11,9 @@ defmodule Lossy.Repo.Migrations.AddDetectedRegionsAndHistory do
     # Create detected_regions table for generalized object detection
     create table(:detected_regions, primary_key: false) do
       add :id, :binary_id, primary_key: true
-      add :document_id, references(:documents, on_delete: :delete_all, type: :binary_id), null: false
+
+      add :document_id, references(:documents, on_delete: :delete_all, type: :binary_id),
+        null: false
 
       # Region type: text, object, or manual
       add :type, :string, null: false, default: "object"
