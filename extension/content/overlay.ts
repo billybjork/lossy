@@ -24,14 +24,17 @@ export class CaptureOverlay {
   private mutationObserver?: MutationObserver;
   private intersectionObserver?: IntersectionObserver;
   private scanIntervalId?: number;
+  private scrollDebounceId?: number;
+  private handleScroll?: () => void;
   private isScanning = false;
   private lastScanTime = 0;
   private cloneListenersController = new AbortController();
 
   // Constants
-  private readonly SCAN_THROTTLE_MS = 1000; // Max 1 scan per second
+  private readonly SCAN_THROTTLE_MS = 400; // Max scan frequency
   private readonly SCAN_INTERVAL_MS = 2500; // Periodic scan interval
-  private readonly VIEWPORT_BUFFER = '500px'; // Buffer zone around viewport
+  private readonly VIEWPORT_BUFFER = '1500px'; // Buffer zone around viewport
+  private readonly SCROLL_DEBOUNCE_MS = 150; // Debounce for scroll-end scan
   private readonly Z_INDEX_OVERLAY = 2147483640; // Overlay layer z-index
   private readonly Z_INDEX_CLONE = 2147483641; // Clone layer z-index (above overlay)
   private readonly STAGGER_DELAY_MS = 60; // Delay between clone animations
@@ -146,10 +149,12 @@ export class CaptureOverlay {
       object-fit: cover;
       z-index: ${this.Z_INDEX_CLONE};
       cursor: pointer;
-      transition: filter 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      transition: opacity 0.3s ease-out,
+                  transform 0.3s ease-out,
+                  filter 0.3s ease-out;
       pointer-events: auto;
       opacity: 0;
-      transform: scale(0.85);
+      transform: scale(1);
     `;
 
     // Add event listeners using AbortController for clean cleanup
@@ -188,15 +193,10 @@ export class CaptureOverlay {
     // Now safe to append - clone is already tracked
     document.body.appendChild(clone);
 
-    // Staggered fade-in animation with bounce
-    requestAnimationFrame(() => {
-      setTimeout(() => {
-        // Bouncy spring easing for more energy
-        clone.style.transition = 'opacity 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.6s cubic-bezier(0.34, 1.56, 0.64, 1), filter 0.4s ease-out';
-        clone.style.opacity = '1';
-        clone.style.transform = 'scale(1)';
-      }, index * this.STAGGER_DELAY_MS);
-    });
+    // Staggered fade-in animation (transition already set in cssText)
+    setTimeout(() => {
+      clone.style.opacity = '1';
+    }, index * this.STAGGER_DELAY_MS);
   }
 
   private scanForNewCandidates() {
@@ -301,6 +301,24 @@ export class CaptureOverlay {
       if (!this.isScanning) return;
       requestIdleCallback(() => this.scanForNewCandidates());
     }, this.SCAN_INTERVAL_MS);
+
+    // Setup scroll handler for responsive scanning during scroll
+    // Debounced: triggers scan when scrolling stops
+    this.handleScroll = () => {
+      if (!this.isScanning) return;
+
+      // Clear previous debounce
+      if (this.scrollDebounceId) {
+        clearTimeout(this.scrollDebounceId);
+      }
+
+      // Scan when scrolling stops
+      this.scrollDebounceId = window.setTimeout(() => {
+        this.scanForNewCandidates();
+      }, this.SCROLL_DEBOUNCE_MS);
+    };
+
+    window.addEventListener('scroll', this.handleScroll, { passive: true });
   }
 
   private stopContinuousScanning() {
@@ -323,6 +341,16 @@ export class CaptureOverlay {
     if (this.scanIntervalId) {
       clearInterval(this.scanIntervalId);
       this.scanIntervalId = undefined;
+    }
+
+    // Clear scroll debounce and remove listener
+    if (this.scrollDebounceId) {
+      clearTimeout(this.scrollDebounceId);
+      this.scrollDebounceId = undefined;
+    }
+    if (this.handleScroll) {
+      window.removeEventListener('scroll', this.handleScroll);
+      this.handleScroll = undefined;
     }
   }
 
