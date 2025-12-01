@@ -17,6 +17,9 @@ export interface CandidateImage {
   type: 'img' | 'picture' | 'background';
   rect: DOMRect;
   imageUrl?: string;
+  // Actual image dimensions (available for img/picture, not background)
+  naturalWidth?: number;
+  naturalHeight?: number;
 }
 
 const MIN_SIZE = 100; // Minimum width and height in pixels
@@ -77,7 +80,9 @@ export function findCandidateImages(): CandidateImage[] {
         element: img,
         type: 'img',
         rect,
-        imageUrl: img.currentSrc || img.src
+        imageUrl: img.currentSrc || img.src,
+        naturalWidth: img.naturalWidth || undefined,
+        naturalHeight: img.naturalHeight || undefined
       });
     }
   });
@@ -92,7 +97,9 @@ export function findCandidateImages(): CandidateImage[] {
           element: picture as HTMLElement,
           type: 'picture',
           rect,
-          imageUrl: img.currentSrc || img.src
+          imageUrl: img.currentSrc || img.src,
+          naturalWidth: img.naturalWidth || undefined,
+          naturalHeight: img.naturalHeight || undefined
         });
       }
     }

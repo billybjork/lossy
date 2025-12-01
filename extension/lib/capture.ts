@@ -34,18 +34,25 @@ export async function captureImage(candidate: CandidateImage): Promise<CapturePa
         source_url: window.location.href,
         capture_mode: 'direct_asset',
         image_url: candidate.imageUrl,
-        bounding_rect: rectToJSON(candidate.rect)
+        bounding_rect: rectToJSON(candidate.rect),
+        // Natural dimensions for skeleton placeholder (may be undefined for background images)
+        image_width: candidate.naturalWidth,
+        image_height: candidate.naturalHeight
       };
     }
   }
 
   // Fall back to screenshot (transformed image, inaccessible URL, or no URL)
+  const dpr = window.devicePixelRatio || 1;
   const imageDataUrl = await captureRegionScreenshot(candidate.rect);
   return {
     source_url: window.location.href,
     capture_mode: 'screenshot',
     image_data: imageDataUrl,
-    bounding_rect: rectToJSON(candidate.rect)
+    bounding_rect: rectToJSON(candidate.rect),
+    // Screenshot dimensions are rect * devicePixelRatio
+    image_width: Math.round(candidate.rect.width * dpr),
+    image_height: Math.round(candidate.rect.height * dpr)
   };
 }
 

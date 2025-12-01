@@ -20,6 +20,9 @@ export interface CapturePayload {
     width: number;
     height: number;
   };
+  // Actual image dimensions in pixels (for skeleton placeholder sizing)
+  image_width?: number;
+  image_height?: number;
   // Local text detection results (optional, skips cloud detection if provided)
   text_regions?: TextRegionPayload[];
   detection_backend?: 'webgpu' | 'wasm' | null;

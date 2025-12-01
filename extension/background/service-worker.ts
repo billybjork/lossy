@@ -148,6 +148,9 @@ async function handleImageCapture(payload: CapturePayload, tab: chrome.tabs.Tab)
         image_url: payload.image_url,
         image_data: payload.image_data,
         bounding_rect: payload.bounding_rect,
+        // Image dimensions for skeleton placeholder sizing
+        image_width: payload.image_width,
+        image_height: payload.image_height,
         // Include local text detection results
         text_regions: textRegions,
         detection_backend: detectionBackend,

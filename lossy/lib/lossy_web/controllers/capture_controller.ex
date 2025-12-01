@@ -9,11 +9,19 @@ defmodule LossyWeb.CaptureController do
     Logger.info("Capture request received",
       capture_mode: params["capture_mode"],
       has_image_url: Map.has_key?(params, "image_url"),
-      has_image_data: Map.has_key?(params, "image_data")
+      has_image_data: Map.has_key?(params, "image_data"),
+      image_width: params["image_width"],
+      image_height: params["image_height"]
     )
 
-    # Create document with :loading status (async processing will happen in background)
-    case Documents.create_capture(Map.put(params, "status", "loading")) do
+    # Create document with :loading status and initial dimensions from extension
+    # Map image_width/image_height to width/height for the schema
+    attrs =
+      params
+      |> Map.put("status", "loading")
+      |> maybe_add_dimensions()
+
+    case Documents.create_capture(attrs) do
       {:ok, document} ->
         # Spawn async task for image download and text region creation
         # This allows us to return immediately and open the editor tab faster
@@ -82,25 +90,40 @@ defmodule LossyWeb.CaptureController do
       end
   end
 
+  # Map image_width/image_height from extension payload to width/height for schema
+  defp maybe_add_dimensions(params) do
+    width = params["image_width"]
+    height = params["image_height"]
+
+    params
+    |> maybe_put("width", width)
+    |> maybe_put("height", height)
+  end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
+
   # Save image from URL if provided
+  # Only updates dimensions if not already set (extension may have provided them)
   defp maybe_save_image(document, %{"image_url" => image_url}) when is_binary(image_url) do
     with {:ok, asset} <- Assets.save_image_from_url(document.id, image_url, :original) do
-      Documents.update_document(document, %{
-        original_asset_id: asset.id,
-        width: asset.width,
-        height: asset.height
-      })
+      attrs = %{original_asset_id: asset.id}
+      # Only set dimensions if not already provided by extension
+      attrs = if document.width, do: attrs, else: Map.put(attrs, :width, asset.width)
+      attrs = if document.height, do: attrs, else: Map.put(attrs, :height, asset.height)
+      Documents.update_document(document, attrs)
     end
   end
 
   # Save image from base64 data if provided
+  # Only updates dimensions if not already set (extension may have provided them)
   defp maybe_save_image(document, %{"image_data" => image_data}) when is_binary(image_data) do
     with {:ok, asset} <- Assets.save_image_from_base64(document.id, image_data, :original) do
-      Documents.update_document(document, %{
-        original_asset_id: asset.id,
-        width: asset.width,
-        height: asset.height
-      })
+      attrs = %{original_asset_id: asset.id}
+      # Only set dimensions if not already provided by extension
+      attrs = if document.width, do: attrs, else: Map.put(attrs, :width, asset.width)
+      attrs = if document.height, do: attrs, else: Map.put(attrs, :height, asset.height)
+      Documents.update_document(document, attrs)
     end
   end
 
