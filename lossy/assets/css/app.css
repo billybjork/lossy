@@ -271,86 +271,46 @@ figure {
 }
 
 /* =============================================================================
-   Mask Overlay - Spotlight Effect
-   Matching the extension's cinematic drop-shadow glow
+   Mask Overlay - Simple Bounding Box Style
+   Performant border-based approach (no filters/shadows)
    ============================================================================= */
 
 .mask-region {
   opacity: 0;
-  transform: scale(1);
-  filter: none;
-  transition:
-    opacity 0.2s ease-out,
-    transform 0.25s cubic-bezier(0.34, 1.2, 0.64, 1),
-    filter 0.2s ease-out,
-    box-shadow 0.2s ease-out,
-    border-color 0.2s ease-out,
-    background-color 0.2s ease-out;
+  /* Dual-color border: visible on any background */
+  outline: 1px solid rgba(0, 0, 0, 0.6);
+  outline-offset: -1px;
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  background: transparent;
+  transition: opacity 0.15s ease-out, border-color 0.15s ease-out, background-color 0.15s ease-out;
 }
 
-/* Idle state: masks are invisible until hovered or selected */
+/* Idle state: invisible */
 .mask-region.mask-idle {
   opacity: 0;
 }
 
+/* Hover state: visible with subtle highlight */
 .mask-region.mask-hovered {
   opacity: 1;
-  transform: scale(1.03);
-  filter:
-    drop-shadow(0 0 20px rgba(255, 255, 255, 0.5))
-    drop-shadow(0 0 40px rgba(255, 255, 255, 0.35))
-    drop-shadow(0 0 80px rgba(255, 255, 255, 0.18));
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 1);
+  outline-color: rgba(0, 0, 0, 0.8);
 }
 
+/* Selected state: blue border, visible */
 .mask-region.mask-selected {
   opacity: 1;
-  transform: scale(1);
-  filter:
-    drop-shadow(0 0 12px rgba(59, 130, 246, 0.7))
-    drop-shadow(0 0 24px rgba(59, 130, 246, 0.5))
-    drop-shadow(0 0 48px rgba(59, 130, 246, 0.3))
-    drop-shadow(0 0 80px rgba(59, 130, 246, 0.15));
+  background: rgba(59, 130, 246, 0.12);
+  border: 2px solid rgba(59, 130, 246, 0.9);
+  outline: 1px solid rgba(0, 0, 0, 0.5);
 }
 
+/* Dimmed state: faded but still visible */
 .mask-region.mask-dimmed {
-  opacity: 0.25;
-  transform: scale(0.98);
-  filter: drop-shadow(0 0 4px rgba(255, 255, 255, 0.05));
-}
-
-/* Bbox-only masks - idle state invisible */
-.mask-bbox.mask-idle {
-  opacity: 0;
-}
-
-.mask-bbox.mask-hovered {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.06);
-  border: 2px solid rgba(255, 255, 255, 0.7);
-  box-shadow:
-    0 0 20px rgba(255, 255, 255, 0.5),
-    0 0 40px rgba(255, 255, 255, 0.35),
-    0 0 80px rgba(255, 255, 255, 0.18),
-    inset 0 0 15px rgba(255, 255, 255, 0.08);
-}
-
-.mask-bbox.mask-selected {
-  opacity: 1;
-  background: rgba(59, 130, 246, 0.1);
-  border: 2px solid rgba(59, 130, 246, 0.85);
-  box-shadow:
-    0 0 12px rgba(59, 130, 246, 0.7),
-    0 0 24px rgba(59, 130, 246, 0.5),
-    0 0 48px rgba(59, 130, 246, 0.3),
-    0 0 80px rgba(59, 130, 246, 0.15),
-    inset 0 0 12px rgba(59, 130, 246, 0.12);
-}
-
-.mask-bbox.mask-dimmed {
-  opacity: 0.25;
-  background: transparent;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  box-shadow: 0 0 4px rgba(255, 255, 255, 0.05);
+  opacity: 0.4;
+  border-color: rgba(255, 255, 255, 0.4);
+  outline-color: rgba(0, 0, 0, 0.3);
 }
 
 /* =============================================================================

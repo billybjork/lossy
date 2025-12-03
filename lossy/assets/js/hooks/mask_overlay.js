@@ -1,13 +1,12 @@
 /**
- * MaskOverlay Hook - CSS Drop-Shadow Spotlight Effect
+ * MaskOverlay Hook - Bounding Box Selection
  *
- * Positions mask images over the image and applies CSS drop-shadow filters
- * for a cinematic spotlight glow effect (matching the extension's overlay.ts).
+ * Positions bounding box overlays on detected regions.
  *
  * Features:
- * - CSS drop-shadow filters for smooth, GPU-accelerated glow
  * - Hover/click detection on mask elements
  * - Multi-select with Shift+click
+ * - Drag-to-select (marquee selection)
  * - Keyboard shortcuts (Enter, Escape, Cmd+Z)
  */
 
