@@ -13,24 +13,15 @@ This is a web application written using the Phoenix web framework.
   - You failed to follow the Authenticated Routes guidelines, or you failed to pass `current_scope` to `<Layouts.app>`
   - **Always** fix the `current_scope` error by moving your routes to the proper `live_session` and ensure you pass `current_scope` as needed
 - Phoenix v1.8 moved the `<.flash_group>` component to the `Layouts` module. You are **forbidden** from calling `<.flash_group>` outside of the `layouts.ex` module
-- Out of the box, `core_components.ex` imports an `<.icon name="hero-x-mark" class="w-5 h-5"/>` component for for hero icons. **Always** use the `<.icon>` component for icons, **never** use `Heroicons` modules or similar
+- Out of the box, `core_components.ex` imports an `<.icon name="hero-x-mark" />` component for hero icons. **Always** use the `<.icon>` component for icons, **never** use `Heroicons` modules or similar
 - **Always** use the imported `<.input>` component for form inputs from `core_components.ex` when available. `<.input>` is imported and using it will will save steps and prevent errors
-- If you override the default input classes (`<.input class="myclass px-2 py-1 rounded-lg">)`) class with your own values, no default classes are inherited, so your
-custom classes must fully style the input
+- If you override the default input classes (`<.input class="my-custom-input">`) with your own values, no default classes are inherited, so your custom classes must fully style the input
 
 ### JS and CSS guidelines
 
-- **Use Tailwind CSS classes and custom CSS rules** to create polished, responsive, and visually stunning interfaces.
-- Tailwindcss v4 **no longer needs a tailwind.config.js** and uses a new import syntax in `app.css`:
-
-      @import "tailwindcss" source(none);
-      @source "../css";
-      @source "../js";
-      @source "../../lib/my_app_web";
-
-- **Always use and maintain this import syntax** in the app.css file for projects generated with `phx.new`
-- **Never** use `@apply` when writing raw css
-- **Always** manually write your own tailwind-based components instead of using daisyUI for a unique, world-class design
+- **Use vanilla CSS** with custom properties and utility classes defined in `app.css`
+- This project does **not** use Tailwind CSS or any CSS framework
+- **Always** write semantic CSS with custom properties for theming (see `:root` variables in `app.css`)
 - Out of the box **only the app.js and app.css bundles are supported**
   - You cannot reference an external vendor'd script `src` or link `href` in the layouts
   - You must import the vendor deps into app.js and app.css to use them
@@ -162,9 +153,9 @@ custom classes must fully style the input
 - HEEx class attrs support lists, but you must **always** use list `[...]` syntax. You can use the class list syntax to conditionally add classes, **always do this for multiple class values**:
 
       <a class={[
-        "px-2 text-white",
-        @some_flag && "py-5",
-        if(@other_condition, do: "border-red-500", else: "border-blue-100"),
+        "link-base",
+        @some_flag && "link-active",
+        if(@other_condition, do: "link-error", else: "link-default"),
         ...
       ]}>Text</a>
 
@@ -173,8 +164,8 @@ custom classes must fully style the input
   and **never** do this, since it's invalid (note the missing `[` and `]`):
 
       <a class={
-        "px-2 text-white",
-        @some_flag && "py-5"
+        "link-base",
+        @some_flag && "link-active"
       }> ...
       => Raises compile syntax error on invalid HEEx attr syntax
 
@@ -238,16 +229,7 @@ custom classes must fully style the input
         |> stream(:messages, messages, reset: true)}
       end
 
-- LiveView streams *do not support counting or empty states*. If you need to display a count, you must track it using a separate assign. For empty states, you can use Tailwind classes:
-
-      <div id="tasks" phx-update="stream">
-        <div class="hidden only:block">No tasks yet</div>
-        <div :for={{id, task} <- @stream.tasks} id={id}>
-          {task.name}
-        </div>
-      </div>
-
-  The above only works if the empty state is the only HTML block alongside the stream for-comprehension.
+- LiveView streams *do not support counting or empty states*. If you need to display a count, you must track it using a separate assign. For empty states, track with a separate assign like `@tasks_empty?` and conditionally render.
 
 - **Never** use the deprecated `phx-update="append"` or `phx-update="prepend"` for collections
 
