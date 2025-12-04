@@ -2,9 +2,8 @@ defmodule Lossy.Documents.DetectedRegion do
   @moduledoc """
   Schema for detected regions within a document.
 
-  Generalized region schema that supports:
+  Supports:
   - Text regions (from text detection)
-  - Object regions (from SAM 2 segmentation)
   - Manual regions (from brush tool)
 
   Each region has a mask (stored as PNG) that defines the exact area
@@ -69,22 +68,6 @@ defmodule Lossy.Documents.DetectedRegion do
     |> validate_number(:confidence, greater_than_or_equal_to: 0, less_than_or_equal_to: 1)
     |> validate_inclusion(:type, @region_types)
     |> validate_inclusion(:status, @statuses)
-  end
-
-  @doc """
-  Creates a region from SAM 2 mask output.
-  """
-  def from_sam_mask(document_id, mask_path, bbox, opts \\ []) do
-    %__MODULE__{
-      document_id: document_id,
-      type: :object,
-      bbox: bbox,
-      mask_path: mask_path,
-      confidence: Keyword.get(opts, :confidence, 1.0),
-      metadata: Keyword.get(opts, :metadata, %{}),
-      z_index: Keyword.get(opts, :z_index, 0),
-      status: :detected
-    }
   end
 
   @doc """

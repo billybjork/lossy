@@ -97,30 +97,6 @@ defmodule Lossy.Documents do
   end
 
   @doc """
-  Enqueue detection job for a document.
-  Runs SAM 2 and text detection in parallel.
-  """
-  def enqueue_detection(%Document{} = document) do
-    Logger.info("Enqueuing detection job", document_id: document.id)
-
-    case %{document_id: document.id}
-         |> Lossy.Workers.Detection.new()
-         |> Oban.insert() do
-      {:ok, _job} ->
-        Logger.info("Detection job enqueued", document_id: document.id)
-        :ok
-
-      {:error, reason} ->
-        Logger.error("Failed to enqueue detection",
-          document_id: document.id,
-          reason: inspect(reason)
-        )
-
-        {:error, reason}
-    end
-  end
-
-  @doc """
   Enqueue inpainting job for selected regions.
 
   Fetches the mask paths from the given region IDs and enqueues
