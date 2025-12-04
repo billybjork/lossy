@@ -45,14 +45,11 @@ defmodule Lossy.Documents.Document do
     embeds_many :history, HistoryEntry, on_replace: :delete
     field :history_index, :integer, default: 0
 
-    belongs_to :user, Lossy.Accounts.User
     belongs_to :original_asset, Lossy.Documents.Asset
     belongs_to :working_asset, Lossy.Documents.Asset
 
-    # Detected regions (text, objects, manual brush)
+    # Detected regions (text, manual brush)
     has_many :detected_regions, Lossy.Documents.DetectedRegion
-
-    has_many :processing_jobs, Lossy.Documents.ProcessingJob
 
     timestamps()
   end
@@ -60,7 +57,6 @@ defmodule Lossy.Documents.Document do
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
-      :user_id,
       :source_url,
       :source_url_verified_at,
       :source_url_status,

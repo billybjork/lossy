@@ -20,12 +20,6 @@ config :lossy, LossyWeb.Endpoint,
   secret_key_base: "uXSFwtlKRHf3mx+D7XP6T8TU646hJKKMRucTwPr1DN2gdYafywxpCFjan/aXIANQ",
   server: false
 
-# In test we don't send emails
-config :lossy, Lossy.Mailer, adapter: Swoosh.Adapters.Test
-
-# Disable swoosh api client as it is only required for production adapters
-config :swoosh, :api_client, false
-
 # Configure Oban for tests - disable all job execution
 config :lossy, Oban, testing: :inline
 

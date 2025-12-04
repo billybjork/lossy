@@ -8,7 +8,7 @@ defmodule Lossy.Documents do
   alias Lossy.Repo
   alias Lossy.Assets
 
-  alias Lossy.Documents.{Document, ProcessingJob, DetectedRegion}
+  alias Lossy.Documents.{Document, DetectedRegion}
 
   ## Documents
 
@@ -42,7 +42,7 @@ defmodule Lossy.Documents do
   def get_document(id) do
     Document
     |> Repo.get(id)
-    |> Repo.preload([:detected_regions, :processing_jobs, :original_asset, :working_asset])
+    |> Repo.preload([:detected_regions, :original_asset, :working_asset])
   end
 
   @doc """
@@ -83,17 +83,6 @@ defmodule Lossy.Documents do
       "document:#{document.id}",
       {:document_updated, document}
     )
-  end
-
-  ## Processing Jobs
-
-  @doc """
-  Creates a processing job.
-  """
-  def create_processing_job(attrs \\ %{}) do
-    %ProcessingJob{}
-    |> ProcessingJob.changeset(attrs)
-    |> Repo.insert()
   end
 
   @doc """
