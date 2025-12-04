@@ -75,8 +75,8 @@ defmodule Lossy.Documents do
   end
 
   defp broadcast_document_update(%Document{} = document) do
-    # Reload document with all associations
-    document = get_document(document.id)
+    # Preload associations on existing document (avoids 4-query refetch)
+    document = Repo.preload(document, [:detected_regions, :original_asset, :working_asset], force: true)
 
     Phoenix.PubSub.broadcast(
       Lossy.PubSub,

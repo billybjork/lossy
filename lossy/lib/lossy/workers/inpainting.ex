@@ -14,7 +14,7 @@ defmodule Lossy.Workers.Inpainting do
   require Logger
   import Ecto.Query
   alias Lossy.{Documents, Assets, Repo}
-  alias Lossy.Documents.{Asset, Document, HistoryEntry}
+  alias Lossy.Documents.{Document, HistoryEntry}
   alias Lossy.ML.Inpainting
   alias Lossy.ImageProcessing.Mask
 
@@ -69,14 +69,8 @@ defmodule Lossy.Workers.Inpainting do
   end
 
   defp get_current_image_path(document) do
-    # Use working asset if available, otherwise original
-    asset =
-      if document.working_asset_id do
-        Repo.get!(Asset, document.working_asset_id)
-      else
-        Repo.get!(Asset, document.original_asset_id)
-      end
-
+    # Use preloaded associations (avoids extra query)
+    asset = document.working_asset || document.original_asset
     Assets.asset_path(asset)
   end
 
@@ -133,7 +127,8 @@ defmodule Lossy.Workers.Inpainting do
   end
 
   defp broadcast_update(document) do
-    document = Documents.get_document(document.id)
+    # Preload associations on existing document (avoids 4-query refetch)
+    document = Repo.preload(document, [:detected_regions, :original_asset, :working_asset], force: true)
 
     Phoenix.PubSub.broadcast(
       Lossy.PubSub,
