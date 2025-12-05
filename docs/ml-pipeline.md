@@ -52,7 +52,7 @@ This document covers all machine learning and computer vision decisions for Loss
 
 ### MVP Choice
 
-**Use PaddleOCR/DBNet-based text detection in the cloud** (via Replicate or self-hosted).
+**Use PP-OCRv3/DBNet text detection locally in the web app** (via ONNX Runtime Web).
 
 **Output Format**:
 - List of bounding boxes (quadrilaterals preferred for rotated text support)
@@ -61,12 +61,12 @@ This document covers all machine learning and computer vision decisions for Loss
 **Why**:
 - Robust to web screenshots and mixed layouts
 - Handles various text orientations
-- Can inflate bounding boxes slightly for inpainting masks
-- Accurate placement for text overlays
+- No cloud latency - runs instantly on page load
+- Privacy-preserving - images don't leave the browser for detection
 
 ### Implementation
 
-Text detection runs locally in the web app's Web Worker using ONNX Runtime with WebGPU. The PP-OCRv3 model is served from `/models/det_v3.onnx`.
+Text detection runs locally in the web app's Web Worker using ONNX Runtime with WebGPU (WASM fallback). The PP-OCRv3 model is served from `/models/det_v3.onnx`.
 
 ---
 
@@ -288,11 +288,11 @@ Capture Image
      ↓
 [Store original_image_path]
      ↓
-Detect Text (cloud) ─────────→ Create TextRegion records
+Detect Text (local, WebGPU) ──→ Create DetectedRegion records
      ↓
 User edits region
      ↓
-Inpaint region (LaMa) ────────→ Save inpainted_bg_path
+Inpaint region (LaMa, cloud) ─→ Save inpainted result
      ↓
 Composite patch into working_image_path
      ↓
@@ -322,22 +322,29 @@ Export
 
 ## Model Hosting & Integration
 
-See [Technology Stack](technology-stack.md) for platform decisions (Replicate vs self-hosted).
+See [Technology Stack](technology-stack.md) for platform decisions.
 
-### MVP: Replicate API
+### MVP Architecture
 
-**Text Detection**:
-- Use PaddleOCR model on Replicate
-- Input: Image URL or base64
+**Text Detection** (Local):
+- PP-OCRv3 model via ONNX Runtime Web
+- Runs in browser Web Worker with WebGPU (WASM fallback)
+- Input: Image data
 - Output: JSON list of bounding boxes
 
-**Inpainting**:
-- Use LaMa model on Replicate
+**Click-to-Segment** (Local):
+- EdgeSAM encoder + decoder via ONNX Runtime Web
+- Runs in browser Web Worker
+- Input: Image + click points
+- Output: Binary mask
+
+**Inpainting** (Cloud):
+- LaMa model on Replicate
 - Input: Image + mask
 - Output: Inpainted image
 
-**Upscaling**:
-- Use Real-ESRGAN model on Replicate
+**Upscaling** (Cloud):
+- Real-ESRGAN model on Replicate
 - Input: Image, scale factor
 - Output: Upscaled image
 
@@ -376,10 +383,10 @@ See [Technology Stack](technology-stack.md) for platform decisions (Replicate vs
 
 ## Why These Choices?
 
-1. **MVP Simplicity**: All cloud-based means consistent behavior, easier debugging
-2. **Cost-Effective**: Pay-per-use APIs are cheap during development
-3. **Proven Models**: PaddleOCR, LaMa, Real-ESRGAN are battle-tested
+1. **Hybrid Architecture**: Local inference for fast feedback (detection, segmentation), cloud for heavy compute (inpainting)
+2. **Privacy**: Images stay in browser for detection - only sent to cloud when user triggers inpainting
+3. **Proven Models**: PP-OCRv3, EdgeSAM, LaMa, Real-ESRGAN are battle-tested
 4. **Clear Upgrade Path**: Can swap models without changing architecture
-5. **User Experience**: Order of operations optimized for speed and quality
+5. **User Experience**: Instant detection feedback, cloud only for resource-intensive operations
 
-This pipeline balances quality, speed, and cost for the MVP while maintaining flexibility for future improvements.
+This pipeline balances quality, speed, and cost while maintaining flexibility for future improvements.

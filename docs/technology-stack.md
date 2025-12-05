@@ -100,10 +100,11 @@ This document covers key technology choices and the rationale behind them.
 - If volume scales significantly → evaluate self-hosted GPU stack
 - If privacy is critical → move models on-premise or to user's browser
 
-**Hybrid Approach** (likely end-state):
-- Text detection: Local (ONNX in browser)
-- Inpainting: Cloud (Replicate/self-hosted)
-- Upscaling: Cloud with caching
+**Current Architecture** (implemented):
+- Text detection: Local (ONNX Runtime Web in browser)
+- Click-to-segment: Local (EdgeSAM via ONNX Runtime Web)
+- Inpainting: Cloud (LaMa via Replicate)
+- Upscaling: Cloud (Real-ESRGAN via Replicate)
 
 ---
 
@@ -277,7 +278,7 @@ At that point, Ash's benefits (especially AshTypescript for full-stack types) be
 - **ESLint** + **Prettier** for TypeScript
 
 ### Monitoring (Future)
-- **Telemetry** + **Phoenix Dashboard** for observability
+- **Telemetry** for observability
 - **Sentry** or **AppSignal** for error tracking
 - **LogFlare** or **Datadog** for log aggregation
 

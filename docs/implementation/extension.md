@@ -7,11 +7,10 @@ This guide covers the implementation details for the Lossy browser extension (Ch
 The extension:
 - Captures images from web pages
 - Provides a selection UI overlay
-- Runs local text detection using ONNX Runtime (PP-OCRv3)
-- Sends captured images + detected regions to the backend
+- Sends captured images to the backend
 - Opens the editor interface
 
-**Local ML inference runs in an offscreen document for MV3 CSP compliance.**
+**Note**: ML inference (text detection, segmentation) runs in the web app, not the extension. The extension is capture-only.
 
 ## Inspiration
 
@@ -35,14 +34,7 @@ extension/
 │   └── overlay.ts            # Selection overlay UI
 ├── lib/
 │   ├── capture.ts            # Image capture logic
-│   ├── onnx-session.ts       # ONNX Runtime session management
-│   └── text-detection.ts     # PP-OCRv3 inference pipeline
-├── offscreen/
-│   ├── offscreen.html        # Offscreen document for ML inference
-│   └── offscreen.ts          # Message handler for detection requests
-├── public/
-│   ├── models/det_v3.onnx    # PP-OCRv3 DBNet model
-│   └── ort-wasm-*.wasm       # ONNX Runtime WASM/WebGPU backends
+│   └── dom-scanner.ts        # Find candidate images in DOM
 └── types/
     └── capture.ts            # Shared types
 ```
@@ -62,18 +54,13 @@ extension/
 
   "permissions": [
     "activeTab",
-    "scripting",
-    "offscreen"
+    "scripting"
   ],
 
   "host_permissions": [
     "https://*/*",
     "http://*/*"
   ],
-
-  "content_security_policy": {
-    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
-  },
 
   "background": {
     "service_worker": "background/service-worker.ts",
@@ -100,23 +87,14 @@ extension/
 
   "action": {
     "default_title": "Capture image with Lossy"
-  },
-
-  "web_accessible_resources": [
-    {
-      "resources": ["models/*", "*.wasm", "*.mjs"],
-      "matches": ["https://*/*", "http://*/*"]
-    }
-  ]
+  }
 }
 ```
 
 **Permissions Rationale**:
 - `activeTab`: Access DOM of active tab
 - `scripting`: Inject content scripts programmatically
-- `offscreen`: Create offscreen documents for ML inference (MV3 CSP compliant)
 - `host_permissions`: Needed for capturing images and making fetch requests
-- `content_security_policy`: Allow WASM execution for ONNX Runtime
 
 ---
 
@@ -496,31 +474,22 @@ function showOverlayToast(message: string) {
 
 ## Type Definitions
 
-**Shared types** (`types/capture-request.ts`):
+**Shared types** (`types/capture.ts`):
 
 ```typescript
 export interface CapturePayload {
-  imageUrl?: string;      // Direct URL if available
-  imageData?: string;     // Base64 data URL if screenshot
-  boundingRect: {
+  source_url: string;
+  capture_mode: 'screenshot' | 'direct_asset';
+  image_url?: string;      // Direct URL if available
+  image_data?: string;     // Base64 data URL if screenshot
+  bounding_rect?: {
     x: number;
     y: number;
     width: number;
     height: number;
   };
-  textRegions?: DetectedRegion[]; // Optional: local detection payload
-}
-
-export interface CaptureResponse {
-  success: boolean;
-  captureId?: string;
-  error?: string;
-}
-
-export interface DetectedRegion {
-  bbox: { x: number; y: number; width: number; height: number };
-  polygon: Array<{ x: number; y: number }>;
-  confidence?: number;
+  image_width?: number;
+  image_height?: number;
 }
 ```
 
@@ -580,19 +549,6 @@ Test on variety of sites:
 - News sites with varied layouts
 - Sites with background images
 - Sites with transformed images (rotated, scaled)
-
-### Local Text Detection (Implemented)
-
-The extension runs text detection locally using:
-- **Model**: PP-OCRv3 DBNet (~2.3MB ONNX model)
-- **Runtime**: ONNX Runtime Web with WebGPU backend (falls back to WASM)
-- **Architecture**: Offscreen document for MV3 CSP compliance
-
-Performance:
-- WebGPU: ~90ms inference (after shader compilation)
-- WASM fallback: ~400ms inference
-
-The detected `textRegions` are attached to the `CapturePayload`, allowing the backend to skip cloud detection entirely
 
 ---
 

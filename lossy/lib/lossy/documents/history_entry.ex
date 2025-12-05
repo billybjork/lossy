@@ -45,16 +45,4 @@ defmodule Lossy.Documents.HistoryEntry do
       metadata: %{region_ids: region_ids}
     }
   end
-
-  @doc """
-  Creates a new history entry for a brush inpainting operation.
-  """
-  def new_brush_inpaint(image_path, mask_path) do
-    %__MODULE__{
-      image_path: image_path,
-      timestamp: DateTime.utc_now(),
-      action: :brush_inpaint,
-      metadata: %{mask_path: mask_path}
-    }
-  end
 end

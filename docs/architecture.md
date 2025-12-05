@@ -40,10 +40,7 @@ See [Extension Implementation Guide](implementation/extension.md) for details.
 
 **APIs**:
 - `POST /api/captures` - Accept image URL or file upload
-- `GET /capture/:id` - LiveView editor page
-- `POST /api/text_regions/:id/render` - Trigger inpainting + render for a region
-
-See [Backend Implementation Guide](implementation/backend.md) for details.
+- `GET /edit/:id` - LiveView editor page
 
 ---
 
@@ -104,13 +101,15 @@ Web Page → Extension (capture) → POST /api/captures → Phoenix Backend
                                                             ↓
                                                     Save Document record
                                                             ↓
-                                                    Enqueue text detection job
+                                                    Redirect to Editor (LiveView)
                                                             ↓
-                                                    Call ML service (Replicate)
+                                                    Load image in browser
                                                             ↓
-                                                    Create TextRegion records
+                                                    Run text detection (local, WebGPU)
                                                             ↓
-                                                    Broadcast to LiveView
+                                                    Create DetectedRegion records
+                                                            ↓
+                                                    Display masks on canvas
 ```
 
 ### Text Edit Flow
@@ -159,9 +158,9 @@ User clicks "Download" → Generate final composite image
 - **Tools**: LiveView, Phoenix PubSub, JS Hooks
 
 ### ML Layer
-- **What**: Computer vision tasks (detection, inpainting, upscaling)
+- **What**: Computer vision tasks (detection, segmentation, inpainting, upscaling)
 - **Not What**: Application logic, data persistence
-- **Tools**: Replicate API, PaddleOCR, LaMa, Real-ESRGAN
+- **Tools**: ONNX Runtime Web (local), Replicate API (cloud), PP-OCRv3, EdgeSAM, LaMa, Real-ESRGAN
 
 ## Concurrency Model
 

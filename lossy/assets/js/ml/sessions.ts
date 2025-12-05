@@ -55,7 +55,7 @@ ort.env.wasm.numThreads = navigator.hardwareConcurrency || 4;
 /**
  * Check if WebGPU is available (cached)
  */
-async function isWebGPUAvailable(): Promise<boolean> {
+export async function isWebGPUAvailable(): Promise<boolean> {
   if (webgpuAvailable !== null) {
     return webgpuAvailable;
   }

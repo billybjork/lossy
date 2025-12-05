@@ -20,7 +20,6 @@ export class CaptureOverlay {
   private hoveredIndex: number | null = null;
   private selectedIndex: number | null = null;
   private cancelCallback?: () => void;
-  private dismissCallback?: () => void;
 
   // Continuous scanning fields
   private trackedElements = new WeakSet<HTMLElement>();
@@ -518,13 +517,6 @@ export class CaptureOverlay {
   }
 
   /**
-   * Set callback for when overlay is fully dismissed
-   */
-  public onDismiss(callback: () => void): void {
-    this.dismissCallback = callback;
-  }
-
-  /**
    * Transition to "selected" state - hero animation in place
    * Selected image glows and scales slightly while others fade out.
    * Uses distance-based staggering for a smooth "ripple" effect.
@@ -641,7 +633,6 @@ export class CaptureOverlay {
     // Wait for animation, then cleanup
     this.fadeOutTimeout = window.setTimeout(() => {
       this.cleanup();
-      this.dismissCallback?.();
     }, this.DISMISS_DURATION_MS);
   }
 }

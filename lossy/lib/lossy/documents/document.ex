@@ -21,24 +21,17 @@ defmodule Lossy.Documents.Document do
     :loading,
     # Image loaded, ready for editing
     :ready,
-    # Running detection (text + SAM)
-    :detecting,
     # Running inpainting operation
     :inpainting,
     # Something went wrong
     :error
   ]
 
-  @valid_url_statuses [:not_checked, :accessible, :unreachable, :timeout]
-
   schema "documents" do
     field :source_url, :string
-    field :source_url_verified_at, :utc_datetime
-    field :source_url_status, Ecto.Enum, values: @valid_url_statuses, default: :not_checked
     field :capture_mode, Ecto.Enum, values: [:direct_asset, :screenshot]
     field :width, :integer
     field :height, :integer
-    field :metrics, :map, default: %{}
     field :status, Ecto.Enum, values: @valid_statuses, default: :loading
 
     # Human-readable identifier: lossy-YYYYMMDD-NNN
@@ -63,15 +56,12 @@ defmodule Lossy.Documents.Document do
     document
     |> cast(attrs, [
       :source_url,
-      :source_url_verified_at,
-      :source_url_status,
       :capture_mode,
       :width,
       :height,
       :original_asset_id,
       :working_asset_id,
       :status,
-      :metrics,
       :history_index,
       :name,
       :source_domain
@@ -80,7 +70,6 @@ defmodule Lossy.Documents.Document do
     |> validate_required([:source_url, :capture_mode])
     |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot])
     |> validate_inclusion(:status, @valid_statuses)
-    |> validate_inclusion(:source_url_status, @valid_url_statuses)
   end
 
   @doc """

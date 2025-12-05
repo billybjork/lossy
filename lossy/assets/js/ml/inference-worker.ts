@@ -11,7 +11,7 @@
 import { detectTextRegions } from './text-detection';
 import { getImageEmbeddings, segmentAtPoints } from './object-segmentation';
 import { maskToPngAsync } from './mask-utils';
-import { getBackend } from './sessions';
+import { getBackend, isWebGPUAvailable } from './sessions';
 import type {
   WorkerMessage,
   WorkerResponse,
@@ -68,7 +68,9 @@ async function handleInit(id: string): Promise<void> {
   if (initialized) {
     console.log('[Worker] Already initialized');
     // Still send response so the promise resolves
-    const backend = getBackend('textDetection') || 'wasm';
+    // Check actual backend if model loaded, otherwise check WebGPU availability
+    const actualBackend = getBackend('textDetection') || getBackend('samEncoder');
+    const backend = actualBackend || (await isWebGPUAvailable() ? 'webgpu' : 'wasm');
     sendResponse({ type: 'INIT_COMPLETE', id, backend } as WorkerResponseInitComplete & { id: string });
     return;
   }
@@ -80,8 +82,10 @@ async function handleInit(id: string): Promise<void> {
   // This keeps initialization fast
   initialized = true;
 
-  // Determine backend (will be null until first model loads)
-  const backend = getBackend('textDetection') || 'wasm';
+  // Check WebGPU availability to report the intended backend
+  // Models will use WebGPU when available, falling back to WASM only if needed
+  const webgpuAvailable = await isWebGPUAvailable();
+  const backend = webgpuAvailable ? 'webgpu' : 'wasm';
 
   // Include id so the client can resolve the promise
   sendResponse({ type: 'INIT_COMPLETE', id, backend } as WorkerResponseInitComplete & { id: string });

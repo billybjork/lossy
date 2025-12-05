@@ -28,15 +28,4 @@ defmodule LossyWeb.Router do
 
     post "/captures", CaptureController, :create
   end
-
-  # Enable LiveDashboard in development
-  if Application.compile_env(:lossy, :dev_routes) do
-    import Phoenix.LiveDashboard.Router
-
-    scope "/dev" do
-      pipe_through :browser
-
-      live_dashboard "/dashboard", metrics: LossyWeb.Telemetry
-    end
-  end
 end

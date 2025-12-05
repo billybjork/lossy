@@ -5,7 +5,6 @@ defmodule LossyWeb.CoreComponents do
   Minimal set of components for the Lossy editor.
   """
   use Phoenix.Component
-  use Gettext, backend: LossyWeb.Gettext
 
   alias Phoenix.LiveView.JS
 
@@ -70,7 +69,7 @@ defmodule LossyWeb.CoreComponents do
           <p :if={@title} class="toast-title">{@title}</p>
           <p>{msg}</p>
         </div>
-        <button type="button" class="toast-close" aria-label={gettext("close")}>
+        <button type="button" class="toast-close" aria-label="close">
           <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               stroke-linecap="round"
@@ -104,14 +103,12 @@ defmodule LossyWeb.CoreComponents do
   end
 
   @doc """
-  Translates an error message using gettext.
+  Formats an error message with interpolations.
   """
   def translate_error({msg, opts}) do
-    if count = opts[:count] do
-      Gettext.dngettext(LossyWeb.Gettext, "errors", msg, msg, count, opts)
-    else
-      Gettext.dgettext(LossyWeb.Gettext, "errors", msg, opts)
-    end
+    Enum.reduce(opts, msg, fn {key, value}, acc ->
+      String.replace(acc, "%{#{key}}", to_string(value))
+    end)
   end
 
   @doc """

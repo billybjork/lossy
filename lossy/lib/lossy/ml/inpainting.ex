@@ -2,45 +2,14 @@ defmodule Lossy.ML.Inpainting do
   @moduledoc """
   High-level inpainting interface using LaMa model on Replicate.
 
-  Handles the full inpainting workflow:
-  1. Generate mask from bbox
-  2. Upload image and mask to accessible URLs
-  3. Call LaMa model via Replicate
-  4. Download and save inpainted result
+  Handles the inpainting workflow:
+  1. Upload image and mask to accessible URLs
+  2. Call LaMa model via Replicate
+  3. Download and save inpainted result
   """
 
   require Logger
   alias Lossy.ML.{Config, ReplicateClient}
-  alias Lossy.ImageProcessing.Mask
-
-  @doc """
-  Inpaint a region in an image.
-
-  Takes the original image path and a bbox, generates a mask,
-  and returns the path to the inpainted image.
-
-  Options:
-  - :padding_px - Padding around the bbox for the mask (default: 10)
-  - :output_path - Where to save the result (default: auto-generated)
-  """
-  def inpaint_region(image_path, bbox, opts \\ []) do
-    padding = Keyword.get(opts, :padding_px, 10)
-    output_path = Keyword.get(opts, :output_path, generate_output_path(image_path))
-
-    with {:ok, mask_path} <- Mask.generate_mask(image_path, bbox, padding_px: padding),
-         {:ok, image_url} <- upload_for_replicate(image_path),
-         {:ok, mask_url} <- upload_for_replicate(mask_path),
-         {:ok, result_url} <- run_lama_inpainting(image_url, mask_url),
-         {:ok, _} <- download_result(result_url, output_path) do
-      # Cleanup temporary mask
-      File.rm(mask_path)
-      {:ok, output_path}
-    else
-      {:error, reason} = error ->
-        Logger.error("Inpainting failed: #{inspect(reason)}")
-        error
-    end
-  end
 
   @doc """
   Inpaint using a pre-existing mask PNG.
@@ -62,30 +31,6 @@ defmodule Lossy.ML.Inpainting do
     else
       {:error, reason} = error ->
         Logger.error("Mask-based inpainting failed: #{inspect(reason)}")
-        error
-    end
-  end
-
-  @doc """
-  Inpaint multiple regions in a single pass.
-
-  More efficient than calling inpaint_region multiple times
-  as it combines all regions into a single mask.
-  """
-  def inpaint_regions(image_path, bboxes, opts \\ []) when is_list(bboxes) do
-    padding = Keyword.get(opts, :padding_px, 10)
-    output_path = Keyword.get(opts, :output_path, generate_output_path(image_path))
-
-    with {:ok, mask_path} <- Mask.generate_combined_mask(image_path, bboxes, padding_px: padding),
-         {:ok, image_url} <- upload_for_replicate(image_path),
-         {:ok, mask_url} <- upload_for_replicate(mask_path),
-         {:ok, result_url} <- run_lama_inpainting(image_url, mask_url),
-         {:ok, _} <- download_result(result_url, output_path) do
-      File.rm(mask_path)
-      {:ok, output_path}
-    else
-      {:error, reason} = error ->
-        Logger.error("Batch inpainting failed: #{inspect(reason)}")
         error
     end
   end

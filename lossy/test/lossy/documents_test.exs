@@ -42,8 +42,8 @@ defmodule Lossy.DocumentsTest do
           capture_mode: :screenshot
         })
 
-      assert {:ok, updated} = Documents.update_document(document, %{status: :detecting})
-      assert updated.status == :detecting
+      assert {:ok, updated} = Documents.update_document(document, %{status: :ready})
+      assert updated.status == :ready
     end
 
     test "validates status values" do
