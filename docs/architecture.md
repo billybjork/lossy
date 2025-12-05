@@ -12,13 +12,11 @@ Lossy follows a clean separation of concerns with distinct components handling c
 - Highlight/spotlight UI for image selection
 - Element or region capture
 - POST captured image (or URL + bounding box) to backend
-- (Future) Attach detected text polygons when available
 
-**Philosophy**: Act as a thin "imperative shell" at the edges only. All complex logic lives in the backend.
+**Philosophy**: Act as a thin "imperative shell" at the edges only. The extension handles capture only - all ML inference happens in the web app.
 
 **Key Design Principles**:
-- Keep extension code minimal and focused
-- Treat ML as cloud-only for the MVP, but keep the capture payload flexible enough to attach pre-detected regions later
+- Keep extension code minimal and focused (capture only, no ML)
 - Simple, focused modules for capture, overlay, and messaging
 - Composition over complex inheritance
 
@@ -31,7 +29,7 @@ See [Extension Implementation Guide](implementation/extension.md) for details.
 **Responsibilities**:
 - Domain model and persistence
 - Job orchestration for ML pipeline
-- Integration with external inference services (fal.ai)
+- Integration with external inference services (Replicate)
 - LiveView hosting for the editor interface
 
 **Key Design Principles**:
@@ -56,17 +54,27 @@ See [Backend Implementation Guide](implementation/backend.md) for details.
 - Subscribe to processing job updates (via PubSub)
 - Handle user interactions (click, edit, drag)
 - Persist text changes
+- **Local ML inference** (text detection, click-to-segment) via Web Worker
 
 **Architecture**:
 - **LiveView**: Holds authoritative document state, driven by events from user and pipeline
 - **JS Hooks**: Handle canvas rendering, drag/resize, and fast keystroke handling
+- **Web Worker**: ONNX Runtime with WebGPU/WASM for local ML inference
 - **Philosophy**: "FP-flavored frontend" - central state + pure transforms, effects at edges
+
+**Local ML Stack**:
+- ONNX Runtime Web 1.23+ with WebGPU (WASM fallback)
+- Text detection (DBNet/PP-OCRv3) runs automatically on page load
+- Click-to-segment (EdgeSAM) with cached embeddings for fast iteration
+- ~70MB models loaded lazily from `/models/` and `/wasm/`
 
 **State Flow**:
 ```
 User Interaction → JS Hook → LiveView (state update) → PubSub broadcast → All clients
                                                     ↓
-                                              ML Pipeline Jobs
+                                              ML Pipeline Jobs (cloud)
+       ↓
+Web Worker (local ML) → Hook callback → pushEvent to LiveView
 ```
 
 See [Editor Implementation Guide](implementation/editor.md) for details.
@@ -75,18 +83,16 @@ See [Editor Implementation Guide](implementation/editor.md) for details.
 
 ### 4. ML Inference Services
 
-**Responsibilities**:
-- Text detection (find text regions in images)
-- Inpainting (remove original text from backgrounds)
-- Upscaling (super-resolution for higher quality exports)
-- Font detection (optional, heuristic-based initially)
+**Local (Web Worker)**:
+- Text detection (DBNet/PP-OCRv3) - runs on page load
+- Click-to-segment (EdgeSAM encoder + decoder) - runs on demand
+- WebGPU with WASM fallback via ONNX Runtime Web
 
-**Deployment Strategy**:
-- **MVP**: All ML runs in the cloud (fal.ai) for consistent latency and simpler ops
-- **v2**: Allow the extension to post optional text-region payloads produced locally (ONNX Runtime Web + WebGPU) while keeping the backend detector as the default
-- **Later**: Consider self-hosted for performance-critical models, and evaluate lightweight local inpainting for tiny edits
+**Cloud (Replicate)**:
+- Inpainting (LaMa) - remove original text from backgrounds
+- Upscaling (Real-ESRGAN) - super-resolution for exports
 
-See [ML Pipeline](ml-pipeline.md) for model choices and [Technology Stack](technology-stack.md) for platform decisions.
+See [ML Pipeline](ml-pipeline.md) for model choices.
 
 ---
 
@@ -100,7 +106,7 @@ Web Page → Extension (capture) → POST /api/captures → Phoenix Backend
                                                             ↓
                                                     Enqueue text detection job
                                                             ↓
-                                                    Call ML service (fal.ai)
+                                                    Call ML service (Replicate)
                                                             ↓
                                                     Create TextRegion records
                                                             ↓
@@ -113,7 +119,7 @@ User edits text → LiveView event → Update TextRegion.current_text
                                             ↓
                                     Enqueue inpainting job
                                             ↓
-                                    Call LaMa model (fal.ai)
+                                    Call LaMa model (Replicate)
                                             ↓
                                     Composite patch into working_image_path
                                             ↓
@@ -155,7 +161,7 @@ User clicks "Download" → Generate final composite image
 ### ML Layer
 - **What**: Computer vision tasks (detection, inpainting, upscaling)
 - **Not What**: Application logic, data persistence
-- **Tools**: fal.ai API, PaddleOCR, LaMa, Real-ESRGAN
+- **Tools**: Replicate API, PaddleOCR, LaMa, Real-ESRGAN
 
 ## Concurrency Model
 
@@ -178,16 +184,15 @@ User clicks "Download" → Generate final composite image
 
 ### MVP (Current Focus)
 - Single Phoenix server
-- External ML inference (fal.ai)
+- External ML inference (Replicate)
 - Postgres for persistence
 - Oban for job processing
 
 ### Future Optimization Paths
-1. **Local ML**: Move text detection to browser (WebGPU)
-2. **Job Queue**: Upgrade to Oban for better queue management
-3. **CDN**: Serve processed images via CDN
-4. **Caching**: Cache detection results, font guesses
-5. **Horizontal Scaling**: Add more Phoenix nodes behind load balancer
+1. **Local Inpainting**: Lightweight inpainting model in browser for small edits
+2. **CDN**: Serve processed images via CDN
+3. **Caching**: Cache detection results, font guesses
+4. **Horizontal Scaling**: Add more Phoenix nodes behind load balancer
 
 ## Why This Architecture?
 
@@ -198,4 +203,3 @@ User clicks "Download" → Generate final composite image
 5. **Cost-Effective**: Cloud ML for MVP, option to optimize later
 
 See [Design Principles](design-principles.md) for the philosophical foundation of these choices.
-If the extension provides pre-detected regions (future enhancement), those are accepted via `POST /api/captures/:id/text_regions` and will skip the cloud detection job, keeping the rest of the flow unchanged.

@@ -428,13 +428,13 @@ end
 
 ## ML Service Integration
 
-### fal.ai Client
+### Replicate Client
 
 **File**: `lib/lossy/ml/fal_client.ex`
 
 ```elixir
 defmodule Lossy.ML.FalClient do
-  @base_url "https://fal.run/fal-ai"
+  @base_url "https://fal.run/replicate"
 
   def run_model(model_path, input) do
     api_key = Application.get_env(:lossy, :fal_api_key)

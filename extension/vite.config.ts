@@ -7,8 +7,7 @@ export default defineConfig({
       manifest: './manifest.json',
       watchFilePaths: ['manifest.json'],
       additionalInputs: [
-        'content/overlay.ts',
-        'offscreen/offscreen.html'
+        'content/overlay.ts'
       ]
     })
   ],
@@ -17,6 +16,5 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: process.env.NODE_ENV !== 'production'
   },
-  // Copy static assets (model files and WASM files) to dist
   publicDir: 'public'
 })

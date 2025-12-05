@@ -11,11 +11,16 @@
  * - Keyboard shortcuts (Enter, Escape, Cmd+Z, S for segment mode)
  * - Semi-transparent overlay rendering for object segments
  * - Click-to-segment mode with positive/negative points
+ * - Local ML inference when extension is not available
  */
 
-// Module-level state for extension bridge communication
+import { getInferenceProvider, isExtensionAvailable } from '../ml/inference-provider';
+
+// Module-level state
 let segmentRequestCounter = 0;
 const pendingSegmentRequests = new Map();
+let inferenceProvider = null;
+let providerInitPromise = null;
 
 // Listen for responses from the extension bridge
 window.addEventListener('message', (event) => {
@@ -55,6 +60,7 @@ export const MaskOverlay = {
     this.pointMarkersContainer = null;
     this.segmentPending = false;
     this.documentId = this.el.dataset.documentId || '';
+    this.embeddingsReady = false;  // Whether SAM embeddings are computed for current image
 
     // Get image dimensions from data attributes
     this.imageWidth = parseInt(this.el.dataset.imageWidth) || 0;
@@ -138,6 +144,61 @@ export const MaskOverlay = {
 
     // Initial highlight state
     this.updateHighlight();
+
+    // Initialize inference provider (extension or local)
+    this.initInferenceProvider();
+  },
+
+  async initInferenceProvider() {
+    // Only initialize once across all instances
+    if (!providerInitPromise) {
+      providerInitPromise = getInferenceProvider();
+    }
+
+    try {
+      inferenceProvider = await providerInitPromise;
+      console.log('[MaskOverlay] Inference provider ready:', isExtensionAvailable() ? 'extension' : 'local');
+
+      // If using local provider (no extension), run auto text detection
+      if (!isExtensionAvailable()) {
+        this.runAutoTextDetection();
+      }
+    } catch (error) {
+      console.error('[MaskOverlay] Failed to initialize inference provider:', error);
+    }
+  },
+
+  async runAutoTextDetection() {
+    const img = document.getElementById('editor-image');
+    if (!img) return;
+
+    // Wait for image to load
+    if (!img.complete) {
+      await new Promise(resolve => {
+        img.addEventListener('load', resolve, { once: true });
+      });
+    }
+
+    // Check if we already have detected regions (avoid re-running)
+    const existingMasks = this.container.querySelectorAll('.mask-region');
+    if (existingMasks.length > 0) {
+      console.log('[MaskOverlay] Skipping auto text detection - regions already exist');
+      return;
+    }
+
+    console.log('[MaskOverlay] Running auto text detection...');
+
+    try {
+      const regions = await inferenceProvider.detectText(img);
+      if (regions.length > 0) {
+        console.log(`[MaskOverlay] Detected ${regions.length} text regions, sending to server`);
+        this.pushEvent('detected_text_regions', { regions });
+      } else {
+        console.log('[MaskOverlay] No text regions detected');
+      }
+    } catch (error) {
+      console.error('[MaskOverlay] Auto text detection failed:', error);
+    }
   },
 
   updated() {
@@ -633,7 +694,7 @@ export const MaskOverlay = {
     }
   },
 
-  enterSegmentMode() {
+  async enterSegmentMode() {
     this.segmentMode = true;
     this.segmentPoints = [];
     this.segmentPending = false;
@@ -674,6 +735,31 @@ export const MaskOverlay = {
     this.pushEvent("enter_segment_mode", {});
 
     console.log('[MaskOverlay] Entered segment mode');
+
+    // Pre-compute embeddings if using local provider and not already computed
+    // Wait for provider to be ready if it's still initializing
+    if (!inferenceProvider && providerInitPromise) {
+      console.log('[MaskOverlay] Waiting for inference provider to initialize...');
+      try {
+        inferenceProvider = await providerInitPromise;
+      } catch (error) {
+        console.error('[MaskOverlay] Provider initialization failed:', error);
+      }
+    }
+
+    if (inferenceProvider && !isExtensionAvailable() && !this.embeddingsReady) {
+      const img = document.getElementById('editor-image');
+      if (img && img.complete) {
+        console.log('[MaskOverlay] Computing embeddings for segment mode...');
+        try {
+          await inferenceProvider.computeEmbeddings(this.documentId, img);
+          this.embeddingsReady = true;
+          console.log('[MaskOverlay] Embeddings ready');
+        } catch (error) {
+          console.error('[MaskOverlay] Failed to compute embeddings:', error);
+        }
+      }
+    }
   },
 
   exitSegmentMode() {
@@ -831,38 +917,48 @@ export const MaskOverlay = {
 
     this.segmentPending = true;
 
-    const requestId = `seg_${++segmentRequestCounter}`;
+    const img = document.getElementById('editor-image');
+    const actualWidth = img?.naturalWidth || this.imageWidth;
+    const actualHeight = img?.naturalHeight || this.imageHeight;
 
     try {
-      const response = await new Promise((resolve, reject) => {
-        // Set a timeout
-        const timeout = setTimeout(() => {
-          pendingSegmentRequests.delete(requestId);
-          reject(new Error('Segment request timeout'));
-        }, 10000);
+      let response;
 
-        pendingSegmentRequests.set(requestId, (result) => {
-          clearTimeout(timeout);
-          resolve(result);
+      // Use inference provider if available
+      if (inferenceProvider && !isExtensionAvailable()) {
+        response = await inferenceProvider.segmentAtPoints(
+          this.documentId,
+          this.segmentPoints,
+          { width: actualWidth, height: actualHeight }
+        );
+      } else {
+        // Fall back to extension via postMessage
+        const requestId = `seg_${++segmentRequestCounter}`;
+        response = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            pendingSegmentRequests.delete(requestId);
+            reject(new Error('Segment request timeout'));
+          }, 10000);
+
+          pendingSegmentRequests.set(requestId, (result) => {
+            clearTimeout(timeout);
+            resolve(result);
+          });
+
+          window.postMessage({
+            type: 'LOSSY_SEGMENT_REQUEST',
+            documentId: this.documentId,
+            points: this.segmentPoints,
+            imageSize: { width: actualWidth, height: actualHeight },
+            requestId
+          }, '*');
         });
+      }
 
-        // Send request to extension via postMessage
-        // Use actual image dimensions (naturalWidth/Height), not document dimensions
-        const img = document.getElementById('editor-image');
-        const actualWidth = img?.naturalWidth || this.imageWidth;
-        const actualHeight = img?.naturalHeight || this.imageHeight;
-
-        window.postMessage({
-          type: 'LOSSY_SEGMENT_REQUEST',
-          documentId: this.documentId,
-          points: this.segmentPoints,
-          imageSize: { width: actualWidth, height: actualHeight },
-          requestId
-        }, '*');
-      });
-
-      if (response.success && response.mask) {
-        this.renderPreviewMask(response.mask);
+      if (response.success && (response.mask || response.mask_png)) {
+        // Normalize response format (provider returns mask_png directly, extension wraps in mask)
+        const maskData = response.mask || response;
+        this.renderPreviewMask(maskData);
       } else {
         console.warn('[MaskOverlay] Segment request failed:', response.error);
       }
@@ -942,40 +1038,52 @@ export const MaskOverlay = {
     }
 
     this.segmentPending = true;
-    const requestId = `seg_confirm_${++segmentRequestCounter}`;
+
+    const img = document.getElementById('editor-image');
+    const actualWidth = img?.naturalWidth || this.imageWidth;
+    const actualHeight = img?.naturalHeight || this.imageHeight;
 
     try {
-      // Request final segmentation and get the mask data
-      const response = await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          pendingSegmentRequests.delete(requestId);
-          reject(new Error('Segment request timeout'));
-        }, 10000);
+      let response;
 
-        pendingSegmentRequests.set(requestId, (result) => {
-          clearTimeout(timeout);
-          resolve(result);
+      // Use inference provider if available
+      if (inferenceProvider && !isExtensionAvailable()) {
+        response = await inferenceProvider.segmentAtPoints(
+          this.documentId,
+          this.segmentPoints,
+          { width: actualWidth, height: actualHeight }
+        );
+      } else {
+        // Fall back to extension via postMessage
+        const requestId = `seg_confirm_${++segmentRequestCounter}`;
+        response = await new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            pendingSegmentRequests.delete(requestId);
+            reject(new Error('Segment request timeout'));
+          }, 10000);
+
+          pendingSegmentRequests.set(requestId, (result) => {
+            clearTimeout(timeout);
+            resolve(result);
+          });
+
+          window.postMessage({
+            type: 'LOSSY_SEGMENT_REQUEST',
+            documentId: this.documentId,
+            points: this.segmentPoints,
+            imageSize: { width: actualWidth, height: actualHeight },
+            requestId
+          }, '*');
         });
+      }
 
-        // Use actual image dimensions (naturalWidth/Height), not document dimensions
-        const img = document.getElementById('editor-image');
-        const actualWidth = img?.naturalWidth || this.imageWidth;
-        const actualHeight = img?.naturalHeight || this.imageHeight;
-
-        window.postMessage({
-          type: 'LOSSY_SEGMENT_REQUEST',
-          documentId: this.documentId,
-          points: this.segmentPoints,
-          imageSize: { width: actualWidth, height: actualHeight },
-          requestId
-        }, '*');
-      });
-
-      if (response.success && response.mask) {
+      // Normalize response format
+      const maskData = response.mask || response;
+      if (response.success && (maskData.mask_png || response.mask_png)) {
         // Send the mask PNG and bbox to the server to save
         this.pushEvent("confirm_segment", {
-          mask_png: response.mask.mask_png,
-          bbox: response.mask.bbox
+          mask_png: maskData.mask_png || response.mask_png,
+          bbox: maskData.bbox || response.bbox
         });
 
         console.log('[MaskOverlay] Segment confirmed and sent to server');

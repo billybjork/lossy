@@ -36,9 +36,27 @@ config :esbuild,
   version: "0.25.4",
   lossy: [
     args:
-      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --external:/models/* --external:/wasm/* --alias:@=.),
     cd: Path.expand("../assets", __DIR__),
-    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+    env: %{
+      "NODE_PATH" => [
+        Path.expand("../deps", __DIR__),
+        Path.expand("../assets/node_modules", __DIR__),
+        Mix.Project.build_path()
+      ]
+    }
+  ],
+  lossy_worker: [
+    args:
+      ~w(js/ml/inference-worker.ts --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --external:/models/* --external:/wasm/* --alias:@=.),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{
+      "NODE_PATH" => [
+        Path.expand("../deps", __DIR__),
+        Path.expand("../assets/node_modules", __DIR__),
+        Mix.Project.build_path()
+      ]
+    }
   ],
   lossy_css: [
     args: ~w(css/app.css --bundle --outdir=../priv/static/assets/css),

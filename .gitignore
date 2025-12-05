@@ -1,49 +1,65 @@
-# The directory Mix will write compiled artifacts to.
-_build/
+# =============================================================================
+# Phoenix / Elixir (lossy/)
+# =============================================================================
 
-# If you run "mix test --cover", coverage assets end up here.
-cover/
+# Mix build artifacts
+lossy/_build/
+lossy/cover/
+lossy/deps/
+lossy/doc/
+lossy/.fetch
+lossy/*.ez
+lossy/lossy-*.tar
+lossy/tmp/
+lossy/.elixir_ls/
 
-# The directory Mix downloads your dependencies sources to.
-deps/
-
-# Where 3rd-party dependencies like ExDoc output generated docs.
-doc/
-
-# Ignore .fetch files in case you like to edit your project deps locally.
-.fetch
-
-# If the VM crashes, it generates a dump, let's ignore it too.
+# Elixir crash dumps
 erl_crash.dump
 
-# Also ignore archive artifacts (built via "mix archive.build").
-*.ez
+# Phoenix assets
+lossy/priv/static/assets/
+lossy/priv/static/cache_manifest.json
 
-# Temporary files, for example, from tests.
-tmp/
+# ML models and WASM (large binary files)
+lossy/priv/static/models/
+lossy/priv/static/wasm/
 
-# Ignore package tarball (built via "mix hex.build").
-lossy-*.tar
+# Uploads
+lossy/priv/static/uploads/
+lossy/priv/uploads/
 
-# Ignore macOS system files
-.DS_Store
+# Database dumps
+lossy/priv/repo/structure.sql
 
-# Ignore VS Code settings
-.vscode
+# npm in assets
+lossy/assets/node_modules/
 
-# Environment variables (contains secrets)
+# =============================================================================
+# Extension
+# =============================================================================
+
+extension/node_modules/
+extension/dist/
+
+# =============================================================================
+# Common
+# =============================================================================
+
+# Environment files
 .env
 .env.*
 !.env.example
 
-# Ignore assets that are produced by build tools.
-priv/static/assets/
+# macOS
+.DS_Store
 
-# Ignore digested assets cache.
-priv/static/cache_manifest.json
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-# In case you use Node.js/npm, you want to ignore these.
+# Logs
+*.log
 npm-debug.log
-assets/node_modules/
-
-priv/static/uploads

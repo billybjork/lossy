@@ -164,6 +164,23 @@ defmodule LossyWeb.EditLive do
     {:noreply, socket}
   end
 
+  # Client-side text detection handler (from local ML inference)
+  @impl true
+  def handle_event("detected_text_regions", %{"regions" => regions}, socket) do
+    document = socket.assigns.document
+
+    case Documents.create_detected_regions_from_text_detection(document, regions) do
+      {:ok, _regions} ->
+        # Document update will be broadcast via PubSub
+        {:noreply, socket}
+
+      {:error, reason} ->
+        require Logger
+        Logger.warning("Failed to save detected text regions: #{inspect(reason)}")
+        {:noreply, socket}
+    end
+  end
+
   # Segment mode handlers
   @impl true
   def handle_event("enter_segment_mode", _params, socket) do

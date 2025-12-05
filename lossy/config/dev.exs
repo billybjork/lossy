@@ -26,6 +26,7 @@ config :lossy, LossyWeb.Endpoint,
   secret_key_base: "yWRa/3ggQNptudY1nGleIxx1Y/18IodjUnZn5WasfzeVyz1rGRACEtBAOld/4MiJ",
   watchers: [
     esbuild: {Esbuild, :install_and_run, [:lossy, ~w(--sourcemap=inline --watch)]},
+    esbuild_worker: {Esbuild, :install_and_run, [:lossy_worker, ~w(--sourcemap=inline --watch)]},
     esbuild_css: {Esbuild, :install_and_run, [:lossy_css, ~w(--watch)]}
   ]
 

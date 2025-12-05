@@ -164,7 +164,7 @@ Settings we may want to add later:
 - **Debug mode**: Verbose logging in console
 
 ### Backend ML Services
-- **External API keys**: For fal.ai or other ML services
+- **External API keys**: For Replicate or other ML services
 - **Model versions**: Pin specific model versions for stability
 - **Fallback behavior**: What to do when external services are unavailable
 

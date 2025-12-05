@@ -9,8 +9,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    "types": ["chrome", "@webgpu/types"]
+    "types": ["chrome"]
   },
-  "include": ["background/**/*", "content/**/*", "lib/**/*", "offscreen/**/*", "types/**/*"],
+  "include": ["background/**/*", "content/**/*", "lib/**/*", "types/**/*"],
   "exclude": ["node_modules", "dist"]
 }

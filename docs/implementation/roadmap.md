@@ -157,8 +157,8 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 ### Tasks
 
 #### ML Service Integration
-- [ ] Sign up for fal.ai account and get API key
-- [ ] Research available PaddleOCR or DBNet models on fal.ai
+- [ ] Sign up for Replicate account and get API key
+- [ ] Research available PaddleOCR or DBNet models on Replicate
 - [ ] Implement `Lossy.ML.FalClient` module
   - `create_prediction/2`
   - `get_prediction/1`
@@ -206,7 +206,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - ✨ HTML/CSS overlay rendering (simpler than Canvas, works great for bounding boxes)
 
 **Next Steps:**
-- 🔴 **CRITICAL**: Replace stubbed text detection in `lossy/lib/lossy/workers/text_detection.ex:13-35` with actual fal.ai/PaddleOCR integration
+- 🔴 **CRITICAL**: Replace stubbed text detection in `lossy/lib/lossy/workers/text_detection.ex:13-35` with actual Replicate/PaddleOCR integration
 
 ---
 
@@ -219,7 +219,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 ### Tasks
 
 #### ML Service: Inpainting
-- [ ] Research LaMa model on fal.ai
+- [ ] Research LaMa model on Replicate
 - [ ] Implement `Lossy.ML.Inpainting` module
   - `inpaint/2` (takes image path and bbox)
   - Create binary mask for region
@@ -296,7 +296,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
   - Programmatically click to trigger download
 
 #### Upscaling (Optional HD Export)
-- [ ] Research Real-ESRGAN model on fal.ai
+- [ ] Research Real-ESRGAN model on Replicate
 - [ ] Implement `Lossy.ML.Upscaling` module
   - `upscale/2` (takes image path and scale factor)
   - Call Real-ESRGAN model
@@ -473,7 +473,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 **Risk**: ML models don't perform well on real-world images
 - **Mitigation**: Test on diverse dataset early; have fallback to manual region selection
 
-**Risk**: fal.ai API has high latency or cost
+**Risk**: Replicate API has high latency or cost
 - **Mitigation**: Monitor usage; consider self-hosted as backup
 
 **Risk**: Extension doesn't work on all websites (CORS, CSP)
@@ -501,7 +501,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 ### 🔄 In Progress
 3. **Complete Phase 2**: Replace stubbed text detection with real ML integration
    - File to update: `lossy/lib/lossy/workers/text_detection.ex:13-35`
-   - Integrate fal.ai API + PaddleOCR/DBNet model
+   - Integrate Replicate API + PaddleOCR/DBNet model
    - See [Text Detection Implementation](ml-integration.md) for details
 
 ### 🎯 Coming Next

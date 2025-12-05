@@ -1,49 +1,41 @@
-# Lossy Documentation
+# Lossy
 
-Lossy is a browser-based photo and video editing tool that enables users to capture images from any web page and edit text overlays baked into those images.
+Edit text baked into any image on the web.
 
-## What is Lossy?
+## What It Does
 
-Lossy allows you to:
-- Capture images from any web page using a browser extension
-- Automatically detect text regions within images using ML
-- Edit and replace text that's baked into images
-- Export high-quality edited images
+1. **Capture** - Browser extension grabs images from any webpage
+2. **Detect** - ML finds text regions automatically (runs locally via WebGPU)
+3. **Segment** - Click-to-select objects with EdgeSAM
+4. **Edit** - Replace text, inpaint backgrounds (cloud)
+5. **Export** - Download high-quality edited image
 
-Think of it as "Grab Text" from Canva, but for any image on the web.
+## Stack
 
-## Documentation Index
-
-### Strategic Overview
-- **[Product Vision](docs/product-vision.md)** - Goals, user flows, and product modes
-- **[Architecture](docs/architecture.md)** - System components and how they interact
-- **[Data Model](docs/data-model.md)** - Database schema and entity relationships
-- **[ML Pipeline](docs/ml-pipeline.md)** - Machine learning models and processing decisions
-- **[Technology Stack](docs/technology-stack.md)** - Key technology choices and rationale
-- **[Design Principles](docs/design-principles.md)** - Guiding philosophy and architectural principles
-- **[Configuration](docs/configuration.md)** - All configurable values and where they live
-
-### Implementation Guides
-- **[Browser Extension](docs/implementation/extension.md)** - TypeScript/MV3 extension implementation
-- **[Backend](docs/implementation/backend.md)** - Elixir/Phoenix backend implementation
-- **[Editor UI](docs/implementation/editor.md)** - LiveView-based editor implementation
-- **[Roadmap](docs/implementation/roadmap.md)** - Phase-by-phase implementation plan
-
-## Quick Start
-
-See [Implementation Roadmap](docs/implementation/roadmap.md) for the step-by-step development plan.
-
-## Core Technology Stack
-
-- **Frontend**: TypeScript, Manifest V3 browser extension
-- **Backend**: Elixir, Phoenix, LiveView
+- **Extension**: TypeScript, Manifest V3 (capture only)
+- **Web App**: Elixir, Phoenix, LiveView
+- **Local ML**: ONNX Runtime + WebGPU (text detection, segmentation)
+- **Cloud ML**: Replicate (inpainting, upscaling)
 - **Database**: PostgreSQL
-- **ML Inference**: Cloud-based (fal.ai) with future local inference
-- **Image Processing**: ImageMagick/libvips
 
-## MVP Goal
+## Development
 
-Ship a vertical slice:
-> From a random web page → grab an image → edit baked-in text → download final image
+```bash
+# Phoenix app
+cd lossy
+mix setup
+mix phx.server
 
-With minimal but well-factored code, clear data models, and an easily extensible foundation.
+# Extension
+cd extension
+npm install
+npm run dev
+```
+
+Load extension from `extension/dist` in Chrome/Edge.
+
+## Docs
+
+- [Architecture](docs/architecture.md) - System components
+- [ML Pipeline](docs/ml-pipeline.md) - Model choices and performance
+- [Data Model](docs/data-model.md) - Database schema

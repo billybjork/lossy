@@ -53,7 +53,7 @@ This document covers key technology choices and the rationale behind them.
 
 ### Platform Options
 
-#### fal.ai
+#### Replicate
 **Pros**:
 - High-performance image/video infrastructure
 - Serverless GPU with better optimization
@@ -80,7 +80,7 @@ This document covers key technology choices and the rationale behind them.
 
 ### MVP Decision
 
-**Run every ML stage in the cloud (fal.ai to start).**
+**Run every ML stage in the cloud (Replicate to start).**
 
 **Reasoning**:
 - Quick to integrate (HTTP API with SDKs)
@@ -91,18 +91,18 @@ This document covers key technology choices and the rationale behind them.
 
 **Path to local detection**:
 - Keep the `/api/captures` contract flexible so the extension can optionally attach polygon detections later
-- Wrap ML integrations behind behaviours so swapping in fal.ai or a self-hosted service does not leak into business logic
+- Wrap ML integrations behind behaviours so swapping in Replicate or a self-hosted service does not leak into business logic
 
 ### Future Considerations
 
 **Scale-up / v2-v3**:
-- If latency becomes an issue → consider fal.ai
+- If latency becomes an issue → consider Replicate
 - If volume scales significantly → evaluate self-hosted GPU stack
 - If privacy is critical → move models on-premise or to user's browser
 
 **Hybrid Approach** (likely end-state):
 - Text detection: Local (ONNX in browser)
-- Inpainting: Cloud (fal.ai/self-hosted)
+- Inpainting: Cloud (Replicate/self-hosted)
 - Upscaling: Cloud with caching
 
 ---
@@ -419,7 +419,7 @@ config :lossy, :ml_pipeline,
 1. **Elixir + Phoenix**: Best-in-class for real-time, concurrent apps
 2. **LiveView**: Eliminates frontend complexity while maintaining rich interactivity
 3. **PostgreSQL**: Industry standard, rock-solid, great Elixir support
-4. **fal.ai**: High-performance ML inference without infrastructure burden
+4. **Replicate**: High-performance ML inference without infrastructure burden
 5. **Google Fonts**: Largest high-quality open-source font library
 6. **Plain Phoenix/Ecto**: Right-sized for MVP, clear upgrade path if needed
 

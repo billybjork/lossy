@@ -281,8 +281,8 @@ end
 
 **Avoid**: Tight coupling
 ```elixir
-# fal.ai API calls scattered throughout codebase
-HTTPoison.post("https://fal.run/fal-ai/...")
+# API calls scattered throughout codebase
+Req.post("https://api.replicate.com/v1/predictions", ...)
 ```
 
 **Why**:

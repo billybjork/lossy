@@ -75,9 +75,10 @@ defmodule Lossy.MixProject do
       "ecto.reset": ["ecto.drop", "ecto.setup"],
       test: ["ecto.create --quiet", "ecto.migrate --quiet", "test"],
       "assets.setup": ["esbuild.install --if-missing"],
-      "assets.build": ["compile", "esbuild lossy", "esbuild lossy_css"],
+      "assets.build": ["compile", "esbuild lossy", "esbuild lossy_worker", "esbuild lossy_css"],
       "assets.deploy": [
         "esbuild lossy --minify",
+        "esbuild lossy_worker --minify",
         "esbuild lossy_css --minify",
         "phx.digest"
       ],

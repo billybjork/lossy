@@ -4,32 +4,31 @@ This document covers all machine learning and computer vision decisions for Loss
 
 ## Local vs Cloud Inference
 
-### Where Local Inference is Desirable
+### Local (Web Worker)
 
-**Text Detection**:
-- Reasonably small models (10-50MB when quantized)
-- Good candidate for ONNX Runtime Web + WebGPU
-- Benefits: low latency, no round trip, privacy, offline support
+**Text Detection** (DBNet/PP-OCRv3):
+- ~2.3MB model, runs on page load
+- ONNX Runtime Web with WebGPU (WASM fallback)
+- <100ms inference on modern hardware
 
-### Where Cloud Inference is Better (for now)
+**Click-to-Segment** (EdgeSAM):
+- Encoder: 21MB model, runs once to compute embeddings
+- Decoder: 15MB model, runs per click (~80ms)
+- Embeddings cached per document for fast iteration
 
-**Inpainting & Super-Resolution**:
-- Heavier models (diffusion, LaMa, etc.)
-- GPU-intensive; require significant VRAM
-- Better to run on dedicated GPU infrastructure initially
+### Cloud (Replicate)
 
-### MVP Strategy
+**Inpainting** (LaMa):
+- Remove original text from backgrounds
+- GPU-intensive, ~1-3 seconds per region
 
-**Run ALL ML in the cloud** (fal.ai to start):
-- Simpler deployment and debugging
-- Single round-trip for complete text detection
-- Predictable infrastructure while the MVP ships
+**Upscaling** (Real-ESRGAN):
+- Super-resolution for exports
+- 4x upscaling, ~5-10 seconds
 
-**Roadmap**:
-- **v2**: Allow the extension to post optional text-region payloads (ONNX Runtime Web + WebGPU) while keeping cloud detection as default
-- **v3**: Explore local lightweight inpainting for small edits
+### Future
 
-This keeps concurrency and pipeline complexity in Elixir (where it's easier) early on.
+- Local lightweight inpainting for small edits
 
 ---
 
@@ -53,7 +52,7 @@ This keeps concurrency and pipeline complexity in Elixir (where it's easier) ear
 
 ### MVP Choice
 
-**Use PaddleOCR/DBNet-based text detection in the cloud** (via fal.ai or self-hosted).
+**Use PaddleOCR/DBNet-based text detection in the cloud** (via Replicate or self-hosted).
 
 **Output Format**:
 - List of bounding boxes (quadrilaterals preferred for rotated text support)
@@ -65,12 +64,9 @@ This keeps concurrency and pipeline complexity in Elixir (where it's easier) ear
 - Can inflate bounding boxes slightly for inpainting masks
 - Accurate placement for text overlays
 
-### Local Inference Path (v2)
+### Implementation
 
-Convert **DBNet with MobileNet backbone** to ONNX:
-- Quantize to INT8 or FP16
-- Run with ONNX Runtime Web + WebGPU/WASM in extension context
-- Target: <100ms inference on modern hardware
+Text detection runs locally in the web app's Web Worker using ONNX Runtime with WebGPU. The PP-OCRv3 model is served from `/models/det_v3.onnx`.
 
 ---
 
@@ -95,7 +91,7 @@ Convert **DBNet with MobileNet backbone** to ONNX:
 
 ### MVP Choice
 
-**Use LaMa** (via fal.ai or dedicated microservice).
+**Use LaMa** (via Replicate or dedicated microservice).
 
 **Input**:
 - Image patch around text region
@@ -326,53 +322,31 @@ Export
 
 ## Model Hosting & Integration
 
-See [Technology Stack](technology-stack.md) for platform decisions (fal.ai vs self-hosted).
+See [Technology Stack](technology-stack.md) for platform decisions (Replicate vs self-hosted).
 
-### MVP: fal.ai API
+### MVP: Replicate API
 
 **Text Detection**:
-- Use PaddleOCR model on fal.ai
+- Use PaddleOCR model on Replicate
 - Input: Image URL or base64
 - Output: JSON list of bounding boxes
 
 **Inpainting**:
-- Use LaMa model on fal.ai
+- Use LaMa model on Replicate
 - Input: Image + mask
 - Output: Inpainted image
 
 **Upscaling**:
-- Use Real-ESRGAN model on fal.ai
+- Use Real-ESRGAN model on Replicate
 - Input: Image, scale factor
 - Output: Upscaled image
 
-### API Call Pattern (Elixir)
-
-```elixir
-# Pseudo-code
-defmodule Lossy.ML.FalClient do
-  def detect_text(image_url) do
-    HTTPoison.post(
-      "https://fal.run/fal-ai/paddleocr",
-      %{input: %{image_url: image_url}},
-      headers: [{"Authorization", "Key #{api_key}"}]
-    )
-  end
-
-  def inpaint_region(image_url, mask_url) do
-    HTTPoison.post(
-      "https://fal.run/fal-ai/lama",
-      %{input: %{image_url: image_url, mask_url: mask_url}},
-      headers: [{"Authorization", "Key #{api_key}"}]
-    )
-  end
-end
-```
-
 ---
 
-## Performance Targets (MVP)
+## Performance Targets
 
-- **Text Detection**: <5 seconds for typical web image (~1920x1080)
+- **Text Detection** (local): <100ms on WebGPU, <500ms on WASM
+- **Click-to-Segment** (local): ~1s first click (encoder), ~80ms subsequent clicks
 - **Inpainting (per region)**: <3 seconds
 - **Upscaling (4x)**: <10 seconds
 - **Total time (single region edit)**: <20 seconds end-to-end
@@ -381,24 +355,19 @@ end
 
 ## Future Optimizations
 
-1. **Local Text Detection** (v2)
-   - Move to ONNX + WebGPU in browser
-   - Target: <100ms detection
-   - Eliminates one round-trip
-
-2. **Batch Processing** (v2)
+1. **Batch Processing**
    - Inpaint multiple regions in single API call
    - Reduces overhead for optimistic mode
 
-3. **Model Caching** (v3)
+2. **Model Caching**
    - Cache detection results
    - Avoid re-detection if image unchanged
 
-4. **Progressive Enhancement** (v3)
+3. **Progressive Enhancement**
    - Show low-res preview immediately
    - Upgrade to HD in background
 
-5. **Local Inpainting** (v4)
+4. **Local Inpainting**
    - Lightweight inpainting model in browser
    - For small edits only
    - Fall back to cloud for complex cases
