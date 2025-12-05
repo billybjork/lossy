@@ -5,10 +5,11 @@ defmodule Lossy.Documents do
 
   require Logger
   import Ecto.Query, warn: false
-  alias Lossy.Repo
   alias Lossy.Assets
+  alias Lossy.Repo
 
-  alias Lossy.Documents.{Document, DetectedRegion, Naming}
+  alias Lossy.Documents.{DetectedRegion, Document, Naming}
+  alias Lossy.Workers.Inpainting, as: InpaintingWorker
 
   ## Documents
 
@@ -157,7 +158,7 @@ defmodule Lossy.Documents do
 
   defp enqueue_inpainting_job(document, mask_paths, region_ids) do
     case %{document_id: document.id, mask_paths: mask_paths, region_ids: region_ids}
-         |> Lossy.Workers.Inpainting.new()
+         |> InpaintingWorker.new()
          |> Oban.insert() do
       {:ok, _job} ->
         update_document(document, %{status: :inpainting})
@@ -317,70 +318,66 @@ defmodule Lossy.Documents do
       segment_count: length(segment_regions)
     )
 
-    # Get a base path for saving masks (use static uploads dir for serving)
-    # Use document name if available, fall back to UUID for legacy documents
-    dir_name = document.name || document.id
-
-    base_path =
-      Path.join([
-        "priv/static/uploads",
-        dir_name,
-        "masks"
-      ])
-
-    # Ensure directory exists
+    base_path = mask_base_path(document)
     File.mkdir_p!(base_path)
 
     now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
-    # Start z_index after text regions (offset by 1000 to not conflict)
-    z_index_offset = 1000
 
     regions_data =
       segment_regions
       |> Enum.with_index(1)
-      |> Enum.map(fn {region_data, index} ->
-        # Save the mask PNG from base64 to a file
-        mask_png = region_data["mask_png"] || region_data[:mask_png]
-        mask_path = save_mask_png(mask_png, base_path, index)
-
-        # Extension sends "score" (predicted IoU) and "stabilityScore"
-        score = region_data["score"] || region_data[:score]
-        stability_score = region_data["stabilityScore"] || region_data[:stabilityScore]
-        area = region_data["area"] || region_data[:area] || 0
-
-        %{
-          id: Ecto.UUID.generate(),
-          document_id: document.id,
-          type: :object,
-          bbox: normalize_bbox(region_data["bbox"] || region_data[:bbox]),
-          mask_path: mask_path,
-          # Segments don't have polygon data
-          polygon: [],
-          confidence: score || 1.0,
-          metadata: %{
-            area: area,
-            stability_score: stability_score
-          },
-          z_index: z_index_offset + index,
-          status: :detected,
-          inserted_at: now,
-          updated_at: now
-        }
-      end)
-      # Filter out regions where mask save failed
+      |> Enum.map(&build_segment_region(&1, document.id, base_path, now))
       |> Enum.filter(& &1.mask_path)
 
-    if Enum.empty?(regions_data) do
-      Logger.warning("No segment masks were saved successfully", document_id: document.id)
-      {:ok, []}
-    else
-      case Repo.insert_all(DetectedRegion, regions_data, returning: true) do
-        {count, regions} ->
-          Logger.info("Created #{count} segment regions", document_id: document.id)
-          broadcast_document_update(document)
-          {:ok, regions}
-      end
-    end
+    insert_segment_regions(regions_data, document)
+  end
+
+  defp mask_base_path(document) do
+    dir_name = document.name || document.id
+    Path.join(["priv/static/uploads", dir_name, "masks"])
+  end
+
+  # Start z_index after text regions (offset by 1000 to not conflict)
+  @segment_z_index_offset 1000
+
+  defp build_segment_region({region_data, index}, document_id, base_path, now) do
+    mask_png = get_field(region_data, :mask_png)
+    mask_path = save_mask_png(mask_png, base_path, index)
+
+    %{
+      id: Ecto.UUID.generate(),
+      document_id: document_id,
+      type: :object,
+      bbox: normalize_bbox(get_field(region_data, :bbox)),
+      mask_path: mask_path,
+      polygon: [],
+      confidence: get_field(region_data, :score) || 1.0,
+      metadata: %{
+        area: get_field(region_data, :area) || 0,
+        stability_score: get_field(region_data, :stabilityScore)
+      },
+      z_index: @segment_z_index_offset + index,
+      status: :detected,
+      inserted_at: now,
+      updated_at: now
+    }
+  end
+
+  defp insert_segment_regions([], document) do
+    Logger.warning("No segment masks were saved successfully", document_id: document.id)
+    {:ok, []}
+  end
+
+  defp insert_segment_regions(regions_data, document) do
+    {count, regions} = Repo.insert_all(DetectedRegion, regions_data, returning: true)
+    Logger.info("Created #{count} segment regions", document_id: document.id)
+    broadcast_document_update(document)
+    {:ok, regions}
+  end
+
+  # Get a field from a map that may have string or atom keys
+  defp get_field(map, key) when is_atom(key) do
+    Map.get(map, Atom.to_string(key)) || Map.get(map, key)
   end
 
   # Save a base64 PNG mask to a file, returns the file path or nil on failure

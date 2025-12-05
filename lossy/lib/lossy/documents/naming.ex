@@ -5,8 +5,8 @@ defmodule Lossy.Documents.Naming do
   """
 
   import Ecto.Query
-  alias Lossy.Repo
   alias Lossy.Documents.Document
+  alias Lossy.Repo
 
   @doc """
   Generates the next available name for today.

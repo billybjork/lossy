@@ -13,10 +13,10 @@ defmodule Lossy.Workers.Inpainting do
 
   require Logger
   import Ecto.Query
-  alias Lossy.{Documents, Assets, Repo}
+  alias Lossy.{Assets, Documents, Repo}
   alias Lossy.Documents.{Document, HistoryEntry}
-  alias Lossy.ML.Inpainting
   alias Lossy.ImageProcessing.Mask
+  alias Lossy.ML.Inpainting
 
   @impl Oban.Worker
   def perform(%Oban.Job{args: %{"document_id" => doc_id, "mask_paths" => mask_paths} = args}) do

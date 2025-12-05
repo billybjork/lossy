@@ -58,15 +58,6 @@ defmodule LossyWeb.EditLive do
   end
 
   @impl true
-  def handle_info({:masks_detected, masks}, socket) do
-    # Push masks to client for rendering
-    {:noreply,
-     socket
-     |> assign(masks: masks)
-     |> push_event("masks_updated", %{masks: masks})}
-  end
-
-  @impl true
   def handle_info({:inpainting_complete, _result}, socket) do
     {:noreply,
      socket
@@ -158,8 +149,7 @@ defmodule LossyWeb.EditLive do
 
   @impl true
   def handle_event("redo", _params, socket) do
-    # Redo not yet implemented - silently ignore
-    # TODO: Implement by storing "after" states in history entries
+    # Redo not yet implemented - would require storing "after" states in history entries
     _result = Documents.redo(socket.assigns.document)
     {:noreply, socket}
   end
@@ -168,17 +158,9 @@ defmodule LossyWeb.EditLive do
   @impl true
   def handle_event("detected_text_regions", %{"regions" => regions}, socket) do
     document = socket.assigns.document
-
-    case Documents.create_detected_regions_from_text_detection(document, regions) do
-      {:ok, _regions} ->
-        # Document update will be broadcast via PubSub
-        {:noreply, socket}
-
-      {:error, reason} ->
-        require Logger
-        Logger.warning("Failed to save detected text regions: #{inspect(reason)}")
-        {:noreply, socket}
-    end
+    # Function always succeeds, document update is broadcast via PubSub
+    {:ok, _regions} = Documents.create_detected_regions_from_text_detection(document, regions)
+    {:noreply, socket}
   end
 
   # Segment mode handlers
