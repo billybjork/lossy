@@ -132,7 +132,8 @@ defmodule Lossy.Workers.Inpainting do
 
   defp broadcast_update(document) do
     # Preload associations on existing document (avoids 4-query refetch)
-    document = Repo.preload(document, [:detected_regions, :original_asset, :working_asset], force: true)
+    document =
+      Repo.preload(document, [:detected_regions, :original_asset, :working_asset], force: true)
 
     Phoenix.PubSub.broadcast(
       Lossy.PubSub,

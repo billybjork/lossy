@@ -256,7 +256,8 @@ defmodule LossyWeb.EditLive do
     |> Enum.map(fn region ->
       %{
         id: region.id,
-        type: Atom.to_string(region.type),  # "text", "object", or "manual"
+        # "text", "object", or "manual"
+        type: Atom.to_string(region.type),
         bbox: region.bbox,
         z_index: region.z_index,
         mask_url: mask_path_to_url(region.mask_path)

@@ -4,6 +4,7 @@ defmodule Lossy.Repo.Migrations.DropUnusedTables do
   def change do
     # Remove user_id from documents (unused User scaffold)
     drop index(:documents, [:user_id])
+
     alter table(:documents) do
       remove :user_id
     end

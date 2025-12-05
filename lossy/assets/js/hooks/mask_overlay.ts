@@ -14,18 +14,84 @@
  * - Local ML inference when extension is not available
  */
 
-import { getInferenceProvider, isExtensionAvailable } from '../ml/inference-provider';
+import type { Hook } from 'phoenix_live_view';
+import { getInferenceProvider, isExtensionAvailable, type InferenceProvider } from '../ml/inference-provider';
+import type { PointPrompt, BoundingBox } from '../ml/types';
 
 // Module-level state
 let segmentRequestCounter = 0;
-const pendingSegmentRequests = new Map();
-let inferenceProvider = null;
-let providerInitPromise = null;
+const pendingSegmentRequests = new Map<string, (result: SegmentResponse) => void>();
+let inferenceProvider: InferenceProvider | null = null;
+let providerInitPromise: Promise<InferenceProvider> | null = null;
+
+interface SegmentResponse {
+  success: boolean;
+  mask?: MaskData;
+  mask_png?: string;
+  bbox?: BoundingBox;
+  error?: string;
+}
+
+interface MaskData {
+  mask_png: string;
+  bbox: BoundingBox;
+}
+
+interface DragStart {
+  x: number;
+  y: number;
+}
+
+interface DragRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+interface SegmentPoint {
+  x: number;
+  y: number;
+  label: number;
+}
+
+interface MaskOverlayState {
+  container: HTMLElement;
+  hoveredMaskId: string | null;
+  selectedMaskIds: Set<string>;
+  maskImageCache: Map<string, HTMLCanvasElement>;
+  pageLoadTime: number;
+  shimmerPlayed: boolean;
+  isDragging: boolean;
+  dragStart: DragStart | null;
+  dragRect: HTMLDivElement | null;
+  dragShift: boolean;
+  segmentMode: boolean;
+  segmentPoints: SegmentPoint[];
+  previewMaskCanvas: HTMLCanvasElement | null;
+  pointMarkersContainer: HTMLDivElement | null;
+  cursorOverlay: HTMLDivElement | null;
+  segmentPending: boolean;
+  documentId: string;
+  embeddingsReady: boolean;
+  imageWidth: number;
+  imageHeight: number;
+  resizeObserver: ResizeObserver | null;
+  mouseMoveHandler: (e: MouseEvent) => void;
+  mouseUpHandler: (e: MouseEvent) => void;
+  containerClickHandler: (e: MouseEvent) => void;
+  keydownHandler: (e: KeyboardEvent) => void;
+}
 
 // Listen for responses from the extension bridge
-window.addEventListener('message', (event) => {
+window.addEventListener('message', (event: MessageEvent) => {
   if (event.data.type === 'LOSSY_SEGMENT_RESPONSE') {
-    const { requestId, success, mask, error } = event.data;
+    const { requestId, success, mask, error } = event.data as {
+      requestId: string;
+      success: boolean;
+      mask?: MaskData;
+      error?: string;
+    };
     const resolve = pendingSegmentRequests.get(requestId);
     if (resolve) {
       pendingSegmentRequests.delete(requestId);
@@ -34,7 +100,7 @@ window.addEventListener('message', (event) => {
   }
 });
 
-export const MaskOverlay = {
+export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   mounted() {
     this.container = this.el;
     this.hoveredMaskId = null;
@@ -58,16 +124,20 @@ export const MaskOverlay = {
     this.segmentPoints = [];  // Array of { x, y, label } in image coordinates
     this.previewMaskCanvas = null;
     this.pointMarkersContainer = null;
+    this.cursorOverlay = null;
     this.segmentPending = false;
     this.documentId = this.el.dataset.documentId || '';
     this.embeddingsReady = false;  // Whether SAM embeddings are computed for current image
 
     // Get image dimensions from data attributes
-    this.imageWidth = parseInt(this.el.dataset.imageWidth) || 0;
-    this.imageHeight = parseInt(this.el.dataset.imageHeight) || 0;
+    this.imageWidth = parseInt(this.el.dataset.imageWidth || '0') || 0;
+    this.imageHeight = parseInt(this.el.dataset.imageHeight || '0') || 0;
+
+    // Initialize resize observer
+    this.resizeObserver = null;
 
     // Position masks once image is loaded
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (img) {
       if (img.complete) {
         this.positionMasks();
@@ -91,22 +161,22 @@ export const MaskOverlay = {
     this.attachMaskListeners();
 
     // Drag selection listeners
-    this.container.addEventListener('mousedown', (e) => this.startDrag(e));
-    this.mouseMoveHandler = (e) => this.updateDrag(e);
-    this.mouseUpHandler = (e) => this.endDrag(e);
+    this.container.addEventListener('mousedown', (e: MouseEvent) => this.startDrag(e));
+    this.mouseMoveHandler = (e: MouseEvent) => this.updateDrag(e);
+    this.mouseUpHandler = (e: MouseEvent) => this.endDrag(e);
     document.addEventListener('mousemove', this.mouseMoveHandler);
     document.addEventListener('mouseup', this.mouseUpHandler);
 
     // Container click handler for segment mode (capture phase fires BEFORE children)
-    this.containerClickHandler = (e) => this.handleContainerClick(e);
+    this.containerClickHandler = (e: MouseEvent) => this.handleContainerClick(e);
     this.container.addEventListener('click', this.containerClickHandler, true);
 
     // Keyboard events for shortcuts
-    this.keydownHandler = (e) => this.handleKeydown(e);
+    this.keydownHandler = (e: KeyboardEvent) => this.handleKeydown(e);
     document.addEventListener('keydown', this.keydownHandler);
 
     // Listen for mask updates from server (e.g., after undo or inpainting)
-    this.handleEvent("masks_updated", ({masks}) => {
+    this.handleEvent("masks_updated", ({ masks }: { masks: unknown[] }) => {
       // Check shimmer eligibility before DOM updates
       const shouldShimmer = !this.shimmerPlayed &&
                             masks.length > 0 &&
@@ -169,13 +239,13 @@ export const MaskOverlay = {
   },
 
   async runAutoTextDetection() {
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (!img) return;
 
     // Wait for image to load
     if (!img.complete) {
-      await new Promise(resolve => {
-        img.addEventListener('load', resolve, { once: true });
+      await new Promise<void>(resolve => {
+        img.addEventListener('load', () => resolve(), { once: true });
       });
     }
 
@@ -189,7 +259,7 @@ export const MaskOverlay = {
     console.log('[MaskOverlay] Running auto text detection...');
 
     try {
-      const regions = await inferenceProvider.detectText(img);
+      const regions = await inferenceProvider!.detectText(img);
       if (regions.length > 0) {
         console.log(`[MaskOverlay] Detected ${regions.length} text regions, sending to server`);
         this.pushEvent('detected_text_regions', { regions });
@@ -220,7 +290,7 @@ export const MaskOverlay = {
   },
 
   positionMasks() {
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (!img) return;
 
     const displayWidth = img.clientWidth;
@@ -233,12 +303,12 @@ export const MaskOverlay = {
     const scaleY = displayHeight / naturalHeight;
 
     // Position each mask element
-    const masks = this.container.querySelectorAll('.mask-region');
-    masks.forEach(mask => {
-      const x = parseFloat(mask.dataset.bboxX) || 0;
-      const y = parseFloat(mask.dataset.bboxY) || 0;
-      const w = parseFloat(mask.dataset.bboxW) || 0;
-      const h = parseFloat(mask.dataset.bboxH) || 0;
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+    masks.forEach((mask: HTMLElement) => {
+      const x = parseFloat(mask.dataset.bboxX || '0') || 0;
+      const y = parseFloat(mask.dataset.bboxY || '0') || 0;
+      const w = parseFloat(mask.dataset.bboxW || '0') || 0;
+      const h = parseFloat(mask.dataset.bboxH || '0') || 0;
 
       // Scale to display coordinates
       mask.style.left = `${x * scaleX}px`;
@@ -249,9 +319,9 @@ export const MaskOverlay = {
   },
 
   attachMaskListeners() {
-    const masks = this.container.querySelectorAll('.mask-region');
-    masks.forEach(mask => {
-      const maskId = mask.dataset.maskId;
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+    masks.forEach((mask: HTMLElement) => {
+      const maskId = mask.dataset.maskId || '';
 
       // Remove old listeners (in case of re-render)
       mask.onmouseenter = null;
@@ -274,7 +344,7 @@ export const MaskOverlay = {
       };
 
       // Click handler (guard for segment mode in case CSS fails)
-      mask.onclick = (e) => {
+      mask.onclick = (e: MouseEvent) => {
         if (this.segmentMode) return;
         e.stopPropagation();
         const shift = e.shiftKey;
@@ -297,9 +367,10 @@ export const MaskOverlay = {
     });
   },
 
-  handleKeydown(e) {
+  handleKeydown(e: KeyboardEvent) {
     // Only handle if no input is focused
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    const target = e.target as HTMLElement;
+    if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
     // S = toggle segment mode
     if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
@@ -359,14 +430,14 @@ export const MaskOverlay = {
   },
 
   updateHighlight() {
-    const masks = this.container.querySelectorAll('.mask-region');
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     const hasSelection = this.selectedMaskIds.size > 0;
     const hasHover = this.hoveredMaskId !== null;
 
     // Don't update mask states in segment mode - they should stay dimmed
     if (!this.segmentMode) {
-      masks.forEach(mask => {
-        const maskId = mask.dataset.maskId;
+      masks.forEach((mask: HTMLElement) => {
+        const maskId = mask.dataset.maskId || '';
         const isHovered = maskId === this.hoveredMaskId;
         const isSelected = this.selectedMaskIds.has(maskId);
 
@@ -398,20 +469,20 @@ export const MaskOverlay = {
   },
 
   triggerShimmer() {
-    const masks = this.container.querySelectorAll('.mask-region');
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     if (masks.length === 0) return;
 
     // Add shimmer class to all masks
-    masks.forEach(mask => mask.classList.add('mask-shimmer'));
+    masks.forEach((mask: HTMLElement) => mask.classList.add('mask-shimmer'));
 
     // Remove after animation completes
     setTimeout(() => {
-      masks.forEach(mask => mask.classList.remove('mask-shimmer'));
+      masks.forEach((mask: HTMLElement) => mask.classList.remove('mask-shimmer'));
     }, 650);
   },
 
   // Drag selection methods
-  createDragRect() {
+  createDragRect(): HTMLDivElement {
     const rect = document.createElement('div');
     rect.className = 'drag-selection-rect';
     rect.style.cssText = `
@@ -426,9 +497,10 @@ export const MaskOverlay = {
     return rect;
   },
 
-  startDrag(e) {
+  startDrag(e: MouseEvent) {
     // Only start drag on container background, not on masks
-    if (e.target.classList.contains('mask-region')) return;
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('mask-region')) return;
     if (e.button !== 0) return;  // Left click only
 
     const containerRect = this.container.getBoundingClientRect();
@@ -444,7 +516,7 @@ export const MaskOverlay = {
     }
   },
 
-  updateDrag(e) {
+  updateDrag(e: MouseEvent) {
     if (!this.dragStart) return;
 
     const containerRect = this.container.getBoundingClientRect();
@@ -468,19 +540,21 @@ export const MaskOverlay = {
     const height = Math.abs(currentY - this.dragStart.y);
 
     // Update rubber band position
-    this.dragRect.style.left = `${left}px`;
-    this.dragRect.style.top = `${top}px`;
-    this.dragRect.style.width = `${width}px`;
-    this.dragRect.style.height = `${height}px`;
-    this.dragRect.style.display = 'block';
+    if (this.dragRect) {
+      this.dragRect.style.left = `${left}px`;
+      this.dragRect.style.top = `${top}px`;
+      this.dragRect.style.width = `${width}px`;
+      this.dragRect.style.height = `${height}px`;
+      this.dragRect.style.display = 'block';
+    }
 
     // Preview: highlight masks that intersect
-    const rect = { left, top, right: left + width, bottom: top + height };
+    const rect: DragRect = { left, top, right: left + width, bottom: top + height };
     const intersecting = this.getMasksInRect(rect);
     this.previewDragSelection(intersecting);
   },
 
-  endDrag(e) {
+  endDrag(e: MouseEvent) {
     if (!this.dragStart) return;
 
     if (this.isDragging) {
@@ -493,13 +567,13 @@ export const MaskOverlay = {
       const width = Math.abs(currentX - this.dragStart.x);
       const height = Math.abs(currentY - this.dragStart.y);
 
-      const rect = { left, top, right: left + width, bottom: top + height };
+      const rect: DragRect = { left, top, right: left + width, bottom: top + height };
       const selected = this.getMasksInRect(rect);
 
       if (selected.length > 0) {
         // Update local selection
         if (this.dragShift) {
-          selected.forEach(id => this.selectedMaskIds.add(id));
+          selected.forEach((id: string) => this.selectedMaskIds.add(id));
         } else {
           this.selectedMaskIds = new Set(selected);
         }
@@ -523,12 +597,12 @@ export const MaskOverlay = {
     }
   },
 
-  getMasksInRect(rect) {
-    const masks = this.container.querySelectorAll('.mask-region');
+  getMasksInRect(rect: DragRect): string[] {
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     const containerRect = this.container.getBoundingClientRect();
-    const result = [];
+    const result: string[] = [];
 
-    masks.forEach(mask => {
+    masks.forEach((mask: HTMLElement) => {
       const maskRect = mask.getBoundingClientRect();
 
       // Convert to container-relative coordinates
@@ -540,19 +614,19 @@ export const MaskOverlay = {
       // Check intersection (any overlap counts)
       if (!(rect.right < maskLeft || rect.left > maskRight ||
             rect.bottom < maskTop || rect.top > maskBottom)) {
-        result.push(mask.dataset.maskId);
+        result.push(mask.dataset.maskId || '');
       }
     });
 
     return result;
   },
 
-  previewDragSelection(intersectingIds) {
-    const masks = this.container.querySelectorAll('.mask-region');
+  previewDragSelection(intersectingIds: string[]) {
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     const previewSet = new Set(intersectingIds);
 
-    masks.forEach(mask => {
-      const maskId = mask.dataset.maskId;
+    masks.forEach((mask: HTMLElement) => {
+      const maskId = mask.dataset.maskId || '';
       const isIntersecting = previewSet.has(maskId);
       const isSelected = this.selectedMaskIds.has(maskId);
 
@@ -568,15 +642,15 @@ export const MaskOverlay = {
 
   // Render segment masks (type: 'object') as semi-transparent overlays
   renderSegmentMasks() {
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (!img) return;
 
-    const masks = this.container.querySelectorAll('.mask-region');
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
 
-    masks.forEach(mask => {
+    masks.forEach((mask: HTMLElement) => {
       const maskType = mask.dataset.maskType;
       const maskUrl = mask.dataset.maskUrl;
-      const maskId = mask.dataset.maskId;
+      const maskId = mask.dataset.maskId || '';
 
       // Only render canvas overlays for object segments with mask URLs
       if (maskType !== 'object' || !maskUrl) return;
@@ -585,10 +659,10 @@ export const MaskOverlay = {
       if (this.maskImageCache.has(maskId)) return;
 
       // Get bbox coordinates (mask PNG is full-image-resolution, we need to extract bbox portion)
-      const bboxX = parseFloat(mask.dataset.bboxX) || 0;
-      const bboxY = parseFloat(mask.dataset.bboxY) || 0;
-      const bboxW = parseFloat(mask.dataset.bboxW) || 0;
-      const bboxH = parseFloat(mask.dataset.bboxH) || 0;
+      const bboxX = parseFloat(mask.dataset.bboxX || '0') || 0;
+      const bboxY = parseFloat(mask.dataset.bboxY || '0') || 0;
+      const bboxW = parseFloat(mask.dataset.bboxW || '0') || 0;
+      const bboxH = parseFloat(mask.dataset.bboxH || '0') || 0;
 
       // Skip if bbox is invalid
       if (bboxW <= 0 || bboxH <= 0) return;
@@ -608,7 +682,7 @@ export const MaskOverlay = {
         // Draw only the bbox portion of the mask
         // drawImage(image, sx, sy, sw, sh, dx, dy, dw, dh)
         // This extracts the bbox region from the full-resolution mask
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d')!;
 
         // Enable high-quality image smoothing for soft edges
         ctx.imageSmoothingEnabled = true;
@@ -653,8 +727,8 @@ export const MaskOverlay = {
   updateSegmentMaskSizes() {
     // Canvases use 100% width/height of parent, so they auto-resize
     // This method exists for any additional resize logic if needed
-    const canvases = this.container.querySelectorAll('.segment-mask-canvas');
-    canvases.forEach(canvas => {
+    const canvases = this.container.querySelectorAll('.segment-mask-canvas') as NodeListOf<HTMLCanvasElement>;
+    canvases.forEach((_canvas: HTMLCanvasElement) => {
       // Force redraw if needed - currently CSS handles sizing
     });
   },
@@ -664,7 +738,7 @@ export const MaskOverlay = {
     const hasSelection = this.selectedMaskIds.size > 0;
     const hasHover = this.hoveredMaskId !== null;
 
-    this.maskImageCache.forEach((canvas, maskId) => {
+    this.maskImageCache.forEach((canvas: HTMLCanvasElement, maskId: string) => {
       const isHovered = maskId === this.hoveredMaskId;
       const isSelected = this.selectedMaskIds.has(maskId);
 
@@ -708,7 +782,8 @@ export const MaskOverlay = {
     this.container.style.cursor = 'crosshair';
 
     // Dim existing masks
-    this.container.querySelectorAll('.mask-region').forEach(mask => {
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+    masks.forEach((mask: HTMLElement) => {
       mask.classList.add('mask-dimmed');
     });
 
@@ -716,7 +791,7 @@ export const MaskOverlay = {
     const jsContainer = document.getElementById('js-overlay-container');
 
     // Create point markers container
-    if (!this.pointMarkersContainer) {
+    if (!this.pointMarkersContainer && jsContainer) {
       this.pointMarkersContainer = document.createElement('div');
       this.pointMarkersContainer.className = 'segment-point-markers';
       this.pointMarkersContainer.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 100;';
@@ -724,7 +799,7 @@ export const MaskOverlay = {
     }
 
     // Create cursor overlay to force crosshair cursor in segment mode
-    if (!this.cursorOverlay) {
+    if (!this.cursorOverlay && jsContainer) {
       this.cursorOverlay = document.createElement('div');
       this.cursorOverlay.className = 'segment-cursor-overlay';
       this.cursorOverlay.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair !important; z-index: 150;';
@@ -748,7 +823,7 @@ export const MaskOverlay = {
     }
 
     if (inferenceProvider && !isExtensionAvailable() && !this.embeddingsReady) {
-      const img = document.getElementById('editor-image');
+      const img = document.getElementById('editor-image') as HTMLImageElement | null;
       if (img && img.complete) {
         console.log('[MaskOverlay] Computing embeddings for segment mode...');
         try {
@@ -796,7 +871,7 @@ export const MaskOverlay = {
     console.log('[MaskOverlay] Exited segment mode');
   },
 
-  handleContainerClick(e) {
+  handleContainerClick(e: MouseEvent) {
     // Only handle clicks in segment mode
     if (!this.segmentMode) return;
 
@@ -816,8 +891,8 @@ export const MaskOverlay = {
     this.addSegmentPoint(point.x, point.y, label);
   },
 
-  getImageCoordinates(e) {
-    const img = document.getElementById('editor-image');
+  getImageCoordinates(e: MouseEvent): { x: number; y: number } | null {
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (!img) return null;
 
     const containerRect = this.container.getBoundingClientRect();
@@ -836,7 +911,7 @@ export const MaskOverlay = {
     return { x, y };
   },
 
-  addSegmentPoint(x, y, label) {
+  addSegmentPoint(x: number, y: number, label: number) {
     this.segmentPoints.push({ x, y, label });
     this.renderPointMarkers();
 
@@ -867,7 +942,7 @@ export const MaskOverlay = {
     // Clear existing markers
     this.pointMarkersContainer.innerHTML = '';
 
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (!img) return;
 
     const displayWidth = img.clientWidth;
@@ -875,7 +950,7 @@ export const MaskOverlay = {
     const naturalWidth = img.naturalWidth || this.imageWidth;
     const naturalHeight = img.naturalHeight || this.imageHeight;
 
-    this.segmentPoints.forEach((pt, index) => {
+    this.segmentPoints.forEach((pt: SegmentPoint) => {
       // Convert image coordinates to display coordinates
       const displayX = (pt.x / naturalWidth) * displayWidth;
       const displayY = (pt.y / naturalHeight) * displayHeight;
@@ -904,7 +979,7 @@ export const MaskOverlay = {
       `;
       marker.textContent = pt.label === 1 ? '+' : '-';
 
-      this.pointMarkersContainer.appendChild(marker);
+      this.pointMarkersContainer!.appendChild(marker);
     });
   },
 
@@ -917,30 +992,35 @@ export const MaskOverlay = {
 
     this.segmentPending = true;
 
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     const actualWidth = img?.naturalWidth || this.imageWidth;
     const actualHeight = img?.naturalHeight || this.imageHeight;
 
     try {
-      let response;
+      let response: SegmentResponse;
 
       // Use inference provider if available
       if (inferenceProvider && !isExtensionAvailable()) {
-        response = await inferenceProvider.segmentAtPoints(
+        const result = await inferenceProvider.segmentAtPoints(
           this.documentId,
-          this.segmentPoints,
+          this.segmentPoints as PointPrompt[],
           { width: actualWidth, height: actualHeight }
         );
+        response = {
+          success: true,
+          mask_png: result.mask_png,
+          bbox: result.bbox
+        };
       } else {
         // Fall back to extension via postMessage
         const requestId = `seg_${++segmentRequestCounter}`;
-        response = await new Promise((resolve, reject) => {
+        response = await new Promise<SegmentResponse>((resolve, reject) => {
           const timeout = setTimeout(() => {
             pendingSegmentRequests.delete(requestId);
             reject(new Error('Segment request timeout'));
           }, 10000);
 
-          pendingSegmentRequests.set(requestId, (result) => {
+          pendingSegmentRequests.set(requestId, (result: SegmentResponse) => {
             clearTimeout(timeout);
             resolve(result);
           });
@@ -957,7 +1037,10 @@ export const MaskOverlay = {
 
       if (response.success && (response.mask || response.mask_png)) {
         // Normalize response format (provider returns mask_png directly, extension wraps in mask)
-        const maskData = response.mask || response;
+        const maskData: MaskData = response.mask || {
+          mask_png: response.mask_png!,
+          bbox: response.bbox!
+        };
         this.renderPreviewMask(maskData);
       } else {
         console.warn('[MaskOverlay] Segment request failed:', response.error);
@@ -969,13 +1052,13 @@ export const MaskOverlay = {
     }
   },
 
-  renderPreviewMask(maskData) {
+  renderPreviewMask(maskData: MaskData) {
     // Remove old preview
     if (this.previewMaskCanvas) {
       this.previewMaskCanvas.remove();
     }
 
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (!img) return;
 
     // Create canvas for preview mask
@@ -995,7 +1078,7 @@ export const MaskOverlay = {
     canvas.width = img.clientWidth;
     canvas.height = img.clientHeight;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d')!;
 
     // Load the mask PNG
     const maskImg = new Image();
@@ -1039,30 +1122,35 @@ export const MaskOverlay = {
 
     this.segmentPending = true;
 
-    const img = document.getElementById('editor-image');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
     const actualWidth = img?.naturalWidth || this.imageWidth;
     const actualHeight = img?.naturalHeight || this.imageHeight;
 
     try {
-      let response;
+      let response: SegmentResponse;
 
       // Use inference provider if available
       if (inferenceProvider && !isExtensionAvailable()) {
-        response = await inferenceProvider.segmentAtPoints(
+        const result = await inferenceProvider.segmentAtPoints(
           this.documentId,
-          this.segmentPoints,
+          this.segmentPoints as PointPrompt[],
           { width: actualWidth, height: actualHeight }
         );
+        response = {
+          success: true,
+          mask_png: result.mask_png,
+          bbox: result.bbox
+        };
       } else {
         // Fall back to extension via postMessage
         const requestId = `seg_confirm_${++segmentRequestCounter}`;
-        response = await new Promise((resolve, reject) => {
+        response = await new Promise<SegmentResponse>((resolve, reject) => {
           const timeout = setTimeout(() => {
             pendingSegmentRequests.delete(requestId);
             reject(new Error('Segment request timeout'));
           }, 10000);
 
-          pendingSegmentRequests.set(requestId, (result) => {
+          pendingSegmentRequests.set(requestId, (result: SegmentResponse) => {
             clearTimeout(timeout);
             resolve(result);
           });
@@ -1078,12 +1166,13 @@ export const MaskOverlay = {
       }
 
       // Normalize response format
-      const maskData = response.mask || response;
-      if (response.success && (maskData.mask_png || response.mask_png)) {
+      const maskPng = response.mask?.mask_png || response.mask_png;
+      const bbox = response.mask?.bbox || response.bbox;
+      if (response.success && maskPng) {
         // Send the mask PNG and bbox to the server to save
         this.pushEvent("confirm_segment", {
-          mask_png: maskData.mask_png || response.mask_png,
-          bbox: maskData.bbox || response.bbox
+          mask_png: maskPng,
+          bbox: bbox
         });
 
         console.log('[MaskOverlay] Segment confirmed and sent to server');

@@ -4,7 +4,15 @@
  * Handles contenteditable text regions for the Canva-style editing experience.
  * Auto-focuses, selects text on mount, and commits changes on Enter or blur.
  */
-export const EditableText = {
+
+import type { Hook } from 'phoenix_live_view';
+
+interface EditableTextState {
+  handleKeyDown: (e: KeyboardEvent) => void;
+  handleBlur: (e: FocusEvent) => void;
+}
+
+export const EditableText: Hook<EditableTextState, HTMLElement> = {
   mounted() {
     // Focus the element
     this.el.focus();
@@ -13,11 +21,13 @@ export const EditableText = {
     const range = document.createRange();
     range.selectNodeContents(this.el);
     const selection = window.getSelection();
-    selection.removeAllRanges();
-    selection.addRange(range);
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
 
     // Handle Enter key to commit (without shift)
-    this.handleKeyDown = (e) => {
+    this.handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Enter' && !e.shiftKey) {
         e.preventDefault();
         this.commit();
@@ -30,7 +40,7 @@ export const EditableText = {
     this.el.addEventListener('keydown', this.handleKeyDown);
 
     // Handle blur to auto-commit
-    this.handleBlur = (e) => {
+    this.handleBlur = (_e: FocusEvent) => {
       // Small delay to allow click events to fire first
       setTimeout(() => {
         this.commit();
@@ -51,7 +61,7 @@ export const EditableText = {
   },
 
   commit() {
-    const text = this.el.textContent.trim();
+    const text = this.el.textContent?.trim() || '';
     const regionId = this.el.dataset.regionId;
 
     // Push event to LiveView
@@ -66,4 +76,4 @@ export const EditableText = {
     // For now, just blur which will commit
     this.el.blur();
   }
-}
+};

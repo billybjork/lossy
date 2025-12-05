@@ -96,7 +96,8 @@ defmodule Lossy.Documents do
 
   defp broadcast_document_update(%Document{} = document) do
     # Preload associations on existing document (avoids 4-query refetch)
-    document = Repo.preload(document, [:detected_regions, :original_asset, :working_asset], force: true)
+    document =
+      Repo.preload(document, [:detected_regions, :original_asset, :working_asset], force: true)
 
     Phoenix.PubSub.broadcast(
       Lossy.PubSub,
@@ -319,11 +320,13 @@ defmodule Lossy.Documents do
     # Get a base path for saving masks (use static uploads dir for serving)
     # Use document name if available, fall back to UUID for legacy documents
     dir_name = document.name || document.id
-    base_path = Path.join([
-      "priv/static/uploads",
-      dir_name,
-      "masks"
-    ])
+
+    base_path =
+      Path.join([
+        "priv/static/uploads",
+        dir_name,
+        "masks"
+      ])
 
     # Ensure directory exists
     File.mkdir_p!(base_path)
@@ -351,7 +354,8 @@ defmodule Lossy.Documents do
           type: :object,
           bbox: normalize_bbox(region_data["bbox"] || region_data[:bbox]),
           mask_path: mask_path,
-          polygon: [],  # Segments don't have polygon data
+          # Segments don't have polygon data
+          polygon: [],
           confidence: score || 1.0,
           metadata: %{
             area: area,
@@ -422,11 +426,13 @@ defmodule Lossy.Documents do
     # Get a base path for saving masks
     # Use document name if available, fall back to UUID for legacy documents
     dir_name = document.name || document.id
-    base_path = Path.join([
-      "priv/static/uploads",
-      dir_name,
-      "masks"
-    ])
+
+    base_path =
+      Path.join([
+        "priv/static/uploads",
+        dir_name,
+        "masks"
+      ])
 
     # Ensure directory exists
     File.mkdir_p!(base_path)
