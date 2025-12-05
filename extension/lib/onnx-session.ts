@@ -2,111 +2,195 @@
  * ONNX Runtime Session Manager
  *
  * Manages WebGPU/WASM session lifecycle with caching and fallback.
+ * Supports multiple model types: text detection, SAM encoder, SAM decoder.
  * Uses locally bundled ONNX Runtime (MV3 doesn't allow CDN loading).
  */
 
 import * as ort from 'onnxruntime-web/webgpu';
+import { getModel, type ModelKey } from './model-cache';
 
 type InferenceSession = ort.InferenceSession;
 
-let sessionInstance: InferenceSession | null = null;
-let sessionPromise: Promise<InferenceSession> | null = null;
-let currentBackend: 'webgpu' | 'wasm' | null = null;
+export type SessionType = 'textDetection' | 'samEncoder' | 'samDecoder';
 
-const MODEL_URL = chrome.runtime.getURL('models/det_v3.onnx');
+interface SessionState {
+  instance: InferenceSession | null;
+  promise: Promise<InferenceSession> | null;
+  backend: 'webgpu' | 'wasm' | null;
+}
+
+// Session states for each model type
+const sessions: Record<SessionType, SessionState> = {
+  textDetection: { instance: null, promise: null, backend: null },
+  samEncoder: { instance: null, promise: null, backend: null },
+  samDecoder: { instance: null, promise: null, backend: null },
+};
+
+// Map session types to model keys
+const SESSION_TO_MODEL: Record<SessionType, ModelKey> = {
+  textDetection: 'textDetection',
+  samEncoder: 'samEncoder',
+  samDecoder: 'samDecoder',
+};
+
+// Cached WebGPU availability check
+let webgpuAvailable: boolean | null = null;
 
 // Configure WASM paths to use bundled files
 ort.env.wasm.wasmPaths = chrome.runtime.getURL('/');
 
 /**
- * Check if WebGPU is available
+ * Check if WebGPU is available (cached)
  */
 async function isWebGPUAvailable(): Promise<boolean> {
+  if (webgpuAvailable !== null) {
+    return webgpuAvailable;
+  }
+
   if (!navigator.gpu) {
+    webgpuAvailable = false;
     return false;
   }
 
   try {
     const adapter = await navigator.gpu.requestAdapter();
-    return adapter !== null;
+    webgpuAvailable = adapter !== null;
+    return webgpuAvailable;
   } catch {
+    webgpuAvailable = false;
     return false;
   }
 }
 
 /**
- * Get or create the ONNX inference session
- * Uses WebGPU if available, falls back to WASM
+ * Create an ONNX session for a specific model
  */
-export async function getSession(): Promise<InferenceSession> {
-  // Return existing session if available
-  if (sessionInstance) {
-    return sessionInstance;
-  }
+async function createSession(type: SessionType): Promise<InferenceSession> {
+  const modelKey = SESSION_TO_MODEL[type];
+  console.log(`[Lossy] Creating ${type} session...`);
 
-  // Return existing promise if session is being created
-  if (sessionPromise) {
-    return sessionPromise;
-  }
-
-  // Create new session
-  sessionPromise = createSession();
-
-  try {
-    sessionInstance = await sessionPromise;
-    return sessionInstance;
-  } finally {
-    sessionPromise = null;
-  }
-}
-
-async function createSession(): Promise<InferenceSession> {
-  console.log('[Lossy] createSession called, loading model...');
-
-  // Fetch the model
-  const response = await fetch(MODEL_URL);
-  if (!response.ok) {
-    throw new Error(`Failed to load model: ${response.status}`);
-  }
-
-  const modelBuffer = await response.arrayBuffer();
-  console.log(`[Lossy] Model loaded: ${(modelBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
+  // Get model from cache or fetch
+  const modelBuffer = await getModel(modelKey);
+  console.log(`[Lossy] Model ${type} loaded: ${(modelBuffer.byteLength / 1024 / 1024).toFixed(2)} MB`);
 
   // Try WebGPU first
-  const webgpuAvailable = await isWebGPUAvailable();
+  const useWebGPU = await isWebGPUAvailable();
 
-  if (webgpuAvailable) {
+  if (useWebGPU) {
     try {
-      console.log('[Lossy] Attempting WebGPU backend...');
+      console.log(`[Lossy] Attempting WebGPU backend for ${type}...`);
       const session = await ort.InferenceSession.create(modelBuffer, {
         executionProviders: ['webgpu'],
-        graphOptimizationLevel: 'all'
+        graphOptimizationLevel: 'all',
       });
-      currentBackend = 'webgpu';
-      console.log('[Lossy] WebGPU session created successfully');
+      sessions[type].backend = 'webgpu';
+      console.log(`[Lossy] ${type} WebGPU session created successfully`);
       return session;
     } catch (error) {
-      console.warn('[Lossy] WebGPU failed, falling back to WASM:', error);
+      console.warn(`[Lossy] WebGPU failed for ${type}, falling back to WASM:`, error);
     }
   }
 
   // Fall back to WASM
-  console.log('[Lossy] Using WASM backend...');
+  console.log(`[Lossy] Using WASM backend for ${type}...`);
   const session = await ort.InferenceSession.create(modelBuffer, {
     executionProviders: ['wasm'],
-    graphOptimizationLevel: 'all'
+    graphOptimizationLevel: 'all',
   });
-  currentBackend = 'wasm';
-  console.log('[Lossy] WASM session created successfully');
+  sessions[type].backend = 'wasm';
+  console.log(`[Lossy] ${type} WASM session created successfully`);
   return session;
 }
 
 /**
- * Get the current execution backend
+ * Get or create a session for a specific model type
+ */
+async function getSessionByType(type: SessionType): Promise<InferenceSession> {
+  const state = sessions[type];
+
+  // Return existing session if available
+  if (state.instance) {
+    return state.instance;
+  }
+
+  // Return existing promise if session is being created
+  if (state.promise) {
+    return state.promise;
+  }
+
+  // Create new session
+  state.promise = createSession(type);
+
+  try {
+    state.instance = await state.promise;
+    return state.instance;
+  } finally {
+    state.promise = null;
+  }
+}
+
+// ============================================================================
+// Public API - Text Detection (original API preserved for compatibility)
+// ============================================================================
+
+/**
+ * Get or create the text detection ONNX session
+ * @deprecated Use getTextDetectionSession() instead
+ */
+export async function getSession(): Promise<InferenceSession> {
+  return getTextDetectionSession();
+}
+
+/**
+ * Get the text detection session
+ */
+export async function getTextDetectionSession(): Promise<InferenceSession> {
+  return getSessionByType('textDetection');
+}
+
+/**
+ * Get the current execution backend for text detection
+ * @deprecated Use getBackend('textDetection') instead
  */
 export function getCurrentBackend(): 'webgpu' | 'wasm' | null {
-  return currentBackend;
+  return sessions.textDetection.backend;
 }
+
+// ============================================================================
+// Public API - SAM Sessions
+// ============================================================================
+
+/**
+ * Get the SAM encoder session
+ */
+export async function getSamEncoderSession(): Promise<InferenceSession> {
+  return getSessionByType('samEncoder');
+}
+
+/**
+ * Get the SAM decoder session
+ */
+export async function getSamDecoderSession(): Promise<InferenceSession> {
+  return getSessionByType('samDecoder');
+}
+
+/**
+ * Get the backend for a specific session type
+ */
+export function getBackend(type: SessionType): 'webgpu' | 'wasm' | null {
+  return sessions[type].backend;
+}
+
+/**
+ * Check if a session is loaded
+ */
+export function isSessionLoaded(type: SessionType): boolean {
+  return sessions[type].instance !== null;
+}
+
+// ============================================================================
+// Tensor Utilities
+// ============================================================================
 
 /**
  * Create an ONNX Tensor
@@ -120,13 +204,66 @@ export async function createTensor(
 }
 
 /**
- * Dispose of the session to free resources
+ * Create a tensor from Int32Array
+ */
+export function createInt32Tensor(data: Int32Array, dims: readonly number[]): ort.Tensor {
+  return new ort.Tensor('int32', data, dims);
+}
+
+/**
+ * Create a tensor from Float32Array
+ */
+export function createFloat32Tensor(data: Float32Array, dims: readonly number[]): ort.Tensor {
+  return new ort.Tensor('float32', data, dims);
+}
+
+// ============================================================================
+// Session Management
+// ============================================================================
+
+/**
+ * Dispose of a specific session type to free resources
+ */
+export async function disposeSessionByType(type: SessionType): Promise<void> {
+  const state = sessions[type];
+  if (state.instance) {
+    await state.instance.release();
+    state.instance = null;
+    state.backend = null;
+    console.log(`[Lossy] ${type} session disposed`);
+  }
+}
+
+/**
+ * Dispose of the text detection session (original API)
+ * @deprecated Use disposeSessionByType('textDetection') instead
  */
 export async function disposeSession(): Promise<void> {
-  if (sessionInstance) {
-    await sessionInstance.release();
-    sessionInstance = null;
-    currentBackend = null;
-    console.log('[Lossy] ONNX session disposed');
-  }
+  await disposeSessionByType('textDetection');
+}
+
+/**
+ * Dispose all sessions to free resources
+ */
+export async function disposeAllSessions(): Promise<void> {
+  const types: SessionType[] = ['textDetection', 'samEncoder', 'samDecoder'];
+  await Promise.all(types.map((type) => disposeSessionByType(type)));
+  console.log('[Lossy] All ONNX sessions disposed');
+}
+
+/**
+ * Preload all sessions (useful for eager loading)
+ */
+export async function preloadAllSessions(): Promise<void> {
+  console.log('[Lossy] Preloading all ONNX sessions...');
+  const startTime = performance.now();
+
+  await Promise.all([
+    getTextDetectionSession(),
+    getSamEncoderSession(),
+    getSamDecoderSession(),
+  ]);
+
+  const elapsed = performance.now() - startTime;
+  console.log(`[Lossy] All sessions preloaded in ${elapsed.toFixed(0)}ms`);
 }

@@ -8,7 +8,7 @@ defmodule Lossy.Documents do
   alias Lossy.Repo
   alias Lossy.Assets
 
-  alias Lossy.Documents.{Document, DetectedRegion}
+  alias Lossy.Documents.{Document, DetectedRegion, Naming}
 
   ## Documents
 
@@ -17,8 +17,28 @@ defmodule Lossy.Documents do
   """
   def create_capture(attrs \\ %{}) do
     Logger.info("Creating capture document",
-      attrs: Map.take(attrs, ["source_url", "capture_mode"])
+      attrs: Map.take(attrs, ["source_url", "capture_mode", :source_url, :capture_mode])
     )
+
+    # Generate human-readable name and extract domain
+    # Handle both string and atom keys from attrs
+    source_url = attrs["source_url"] || attrs[:source_url]
+    name = Naming.generate_name()
+    source_domain = Naming.extract_domain(source_url)
+
+    # Detect key type and add name/domain with matching key type
+    attrs =
+      if Map.has_key?(attrs, :source_url) do
+        # Atom keys
+        attrs
+        |> Map.put(:name, name)
+        |> Map.put(:source_domain, source_domain)
+      else
+        # String keys
+        attrs
+        |> Map.put("name", name)
+        |> Map.put("source_domain", source_domain)
+      end
 
     result =
       %Document{}
@@ -285,6 +305,179 @@ defmodule Lossy.Documents do
     end)
   end
 
+  @doc """
+  Creates detected regions from extension-provided segment (object) detection results.
+  Saves mask PNGs to files and creates DetectedRegion records with type :object.
+  """
+  def create_detected_regions_from_segments(%Document{} = document, segment_regions)
+      when is_list(segment_regions) do
+    Logger.info("Creating detected regions from segments",
+      document_id: document.id,
+      segment_count: length(segment_regions)
+    )
+
+    # Get a base path for saving masks (use static uploads dir for serving)
+    # Use document name if available, fall back to UUID for legacy documents
+    dir_name = document.name || document.id
+    base_path = Path.join([
+      "priv/static/uploads",
+      dir_name,
+      "masks"
+    ])
+
+    # Ensure directory exists
+    File.mkdir_p!(base_path)
+
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+    # Start z_index after text regions (offset by 1000 to not conflict)
+    z_index_offset = 1000
+
+    regions_data =
+      segment_regions
+      |> Enum.with_index(1)
+      |> Enum.map(fn {region_data, index} ->
+        # Save the mask PNG from base64 to a file
+        mask_png = region_data["mask_png"] || region_data[:mask_png]
+        mask_path = save_mask_png(mask_png, base_path, index)
+
+        # Extension sends "score" (predicted IoU) and "stabilityScore"
+        score = region_data["score"] || region_data[:score]
+        stability_score = region_data["stabilityScore"] || region_data[:stabilityScore]
+        area = region_data["area"] || region_data[:area] || 0
+
+        %{
+          id: Ecto.UUID.generate(),
+          document_id: document.id,
+          type: :object,
+          bbox: normalize_bbox(region_data["bbox"] || region_data[:bbox]),
+          mask_path: mask_path,
+          polygon: [],  # Segments don't have polygon data
+          confidence: score || 1.0,
+          metadata: %{
+            area: area,
+            stability_score: stability_score
+          },
+          z_index: z_index_offset + index,
+          status: :detected,
+          inserted_at: now,
+          updated_at: now
+        }
+      end)
+      # Filter out regions where mask save failed
+      |> Enum.filter(& &1.mask_path)
+
+    if Enum.empty?(regions_data) do
+      Logger.warning("No segment masks were saved successfully", document_id: document.id)
+      {:ok, []}
+    else
+      case Repo.insert_all(DetectedRegion, regions_data, returning: true) do
+        {count, regions} ->
+          Logger.info("Created #{count} segment regions", document_id: document.id)
+          broadcast_document_update(document)
+          {:ok, regions}
+      end
+    end
+  end
+
+  # Save a base64 PNG mask to a file, returns the file path or nil on failure
+  defp save_mask_png(nil, _base_path, _index), do: nil
+
+  defp save_mask_png(mask_png, base_path, index) when is_binary(mask_png) do
+    # Strip data URL prefix if present
+    data =
+      case mask_png do
+        "data:image/png;base64," <> base64_data -> base64_data
+        base64_data -> base64_data
+      end
+
+    case Base.decode64(data) do
+      {:ok, binary} ->
+        # Support both integer and string indices
+        filename = if is_integer(index), do: "segment_#{index}.png", else: "#{index}.png"
+        path = Path.join(base_path, filename)
+
+        case File.write(path, binary) do
+          :ok ->
+            Logger.debug("Saved segment mask", path: path)
+            path
+
+          {:error, reason} ->
+            Logger.warning("Failed to save segment mask", path: path, reason: reason)
+            nil
+        end
+
+      :error ->
+        Logger.warning("Failed to decode base64 mask data", index: index)
+        nil
+    end
+  end
+
+  @doc """
+  Add a manual region from click-to-segment.
+  Takes a base64-encoded mask PNG and bbox, creates a new region with type :manual.
+  """
+  def add_manual_region(%Document{} = document, mask_png, bbox) when is_binary(mask_png) do
+    Logger.info("Adding manual region from click-to-segment", document_id: document.id)
+
+    # Get a base path for saving masks
+    # Use document name if available, fall back to UUID for legacy documents
+    dir_name = document.name || document.id
+    base_path = Path.join([
+      "priv/static/uploads",
+      dir_name,
+      "masks"
+    ])
+
+    # Ensure directory exists
+    File.mkdir_p!(base_path)
+
+    # Generate a unique index for the mask filename
+    timestamp = System.system_time(:millisecond)
+    mask_path = save_mask_png(mask_png, base_path, "manual_#{timestamp}")
+
+    if is_nil(mask_path) do
+      {:error, :mask_save_failed}
+    else
+      now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+      # Count existing regions to set z_index
+      existing_count =
+        DetectedRegion
+        |> where([r], r.document_id == ^document.id)
+        |> Repo.aggregate(:count)
+
+      # Use z_index after existing regions (offset by 2000 for manual regions)
+      z_index = 2000 + existing_count
+
+      region_data = %{
+        id: Ecto.UUID.generate(),
+        document_id: document.id,
+        type: :manual,
+        bbox: normalize_bbox(bbox),
+        mask_path: mask_path,
+        polygon: [],
+        confidence: 1.0,
+        metadata: %{source: "click_to_segment"},
+        z_index: z_index,
+        status: :detected,
+        inserted_at: now,
+        updated_at: now
+      }
+
+      case Repo.insert_all(DetectedRegion, [region_data], returning: true) do
+        {1, [region]} ->
+          Logger.info("Created manual region", region_id: region.id, document_id: document.id)
+          document = get_document(document.id)
+          broadcast_document_update(document)
+          {:ok, document}
+
+        _ ->
+          Logger.error("Failed to create manual region", document_id: document.id)
+          {:error, :insert_failed}
+      end
+    end
+  end
+
   ## Undo/Redo
 
   @doc """
@@ -373,6 +566,8 @@ defmodule Lossy.Documents do
   Returns {:ok, export_path} where the final image is saved.
   """
   def generate_export(%Document{} = document) do
+    alias Lossy.ImageProcessing.XMP
+
     Logger.info("Generating export", document_id: document.id)
 
     # Reload document with all associations
@@ -387,13 +582,32 @@ defmodule Lossy.Documents do
 
       asset ->
         source_path = Assets.asset_path(asset)
-        export_path = generate_export_path(document.id)
+        export_path = generate_export_path(document)
 
-        # Copy the current state to export path
-        case File.cp(source_path, export_path) do
+        # Embed XMP metadata with source URL, fallback to simple copy on failure
+        result =
+          case XMP.embed_source_url(source_path, document.source_url, export_path) do
+            {:ok, _} ->
+              :ok
+
+            {:error, _reason} ->
+              # Fallback: copy without metadata
+              Logger.warning("XMP embedding failed, copying without metadata",
+                document_id: document.id
+              )
+
+              File.cp(source_path, export_path)
+          end
+
+        case result do
           :ok ->
-            Logger.info("Export generated", document_id: document.id, path: export_path)
-            {:ok, export_path}
+            Logger.info("Export generated",
+              document_id: document.id,
+              name: document.name,
+              path: export_path
+            )
+
+            {:ok, export_path, document.name}
 
           {:error, reason} ->
             Logger.error("Failed to generate export", reason: inspect(reason))
@@ -402,8 +616,10 @@ defmodule Lossy.Documents do
     end
   end
 
-  defp generate_export_path(document_id) do
-    dir = Path.join(["priv/static/uploads", document_id])
+  defp generate_export_path(%Document{} = document) do
+    # Use document name if available, fall back to UUID for legacy documents
+    dir_name = document.name || document.id
+    dir = Path.join(["priv/static/uploads", dir_name])
     File.mkdir_p!(dir)
     Path.join(dir, "export_#{System.system_time(:millisecond)}.png")
   end

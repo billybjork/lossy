@@ -24,6 +24,11 @@
       "matches": ["https://*/*", "http://*/*"],
       "js": ["content/content.ts"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["http://localhost:4000/edit/*"],
+      "js": ["content/editor-bridge.ts"],
+      "run_at": "document_idle"
     }
   ],
   "commands": {

@@ -277,6 +277,7 @@ figure {
 
 .mask-region {
   opacity: 0;
+  cursor: pointer;
   /* Dual-color border: visible on any background */
   outline: 1px solid rgba(0, 0, 0, 0.6);
   outline-offset: -1px;
@@ -311,6 +312,97 @@ figure {
   opacity: 0.4;
   border-color: rgba(255, 255, 255, 0.4);
   outline-color: rgba(0, 0, 0, 0.3);
+}
+
+/* Object masks: hide bounding box, show only segment canvas.
+   Always visible (opacity: 1) so canvas child can render.
+   Canvas controls its own visibility via JS. */
+.mask-region[data-mask-type="object"] {
+  opacity: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+
+.mask-region[data-mask-type="object"].mask-idle,
+.mask-region[data-mask-type="object"].mask-hovered,
+.mask-region[data-mask-type="object"].mask-selected,
+.mask-region[data-mask-type="object"].mask-dimmed {
+  opacity: 1;
+  border: none;
+  outline: none;
+  background: transparent;
+}
+
+/* Shimmer effect for newly-detected masks */
+@keyframes mask-shimmer {
+  0% {
+    background-position: 200% 0;
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    background-position: -100% 0;
+    opacity: 0;
+  }
+}
+
+.mask-region.mask-shimmer {
+  opacity: 1;
+  border-color: transparent;
+  outline-color: transparent;
+  background: transparent;
+}
+
+.mask-region.mask-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.5) 50%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  animation: mask-shimmer 600ms ease-out forwards;
+  pointer-events: none;
+}
+
+/* =============================================================================
+   Segment Mask Canvas Overlays
+   Semi-transparent colored overlays for object segmentation masks
+   ============================================================================= */
+
+.segment-mask-canvas {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease, filter 0.15s ease;
+  /* Ensure canvas scales properly within bbox */
+  object-fit: fill;
+}
+
+/* Show segment masks on hover/select via JS opacity control */
+.mask-region.mask-hovered .segment-mask-canvas,
+.mask-region.mask-selected .segment-mask-canvas {
+  opacity: 1;
+}
+
+.mask-region.mask-selected .segment-mask-canvas {
+  filter: brightness(1.2);
+}
+
+.mask-region.mask-dimmed .segment-mask-canvas {
+  opacity: 0.3;
+}
+
+/* Segment mode: disable mask interaction via CSS (JS just toggles .segment-mode on container) */
+.segment-mode .mask-region {
+  pointer-events: none;
+  cursor: crosshair !important;  /* Force crosshair cursor in segment mode */
 }
 
 /* =============================================================================

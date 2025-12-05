@@ -56,14 +56,15 @@ defmodule LossyWeb.CaptureController do
     end
   end
 
-  # Async processing of capture - downloads image and saves text regions
+  # Async processing of capture - downloads image and saves text/segment regions
   defp process_capture_async(document_id, params) do
     Logger.info("Starting async capture processing", document_id: document_id)
 
     document = Documents.get_document(document_id)
 
     with {:ok, document} <- maybe_save_image(document, params),
-         :ok <- maybe_save_text_regions(document, params) do
+         :ok <- maybe_save_text_regions(document, params),
+         :ok <- maybe_save_segment_regions(document, params) do
       # Image and regions saved, mark document as ready
       Documents.update_document(document, %{status: :ready})
       Logger.info("Capture processing completed", document_id: document_id)
@@ -106,7 +107,9 @@ defmodule LossyWeb.CaptureController do
   # Save image from URL if provided
   # Only updates dimensions if not already set (extension may have provided them)
   defp maybe_save_image(document, %{"image_url" => image_url}) when is_binary(image_url) do
-    with {:ok, asset} <- Assets.save_image_from_url(document.id, image_url, :original) do
+    opts = [document_name: document.name]
+
+    with {:ok, asset} <- Assets.save_image_from_url(document.id, image_url, :original, opts) do
       attrs = %{original_asset_id: asset.id}
       # Only set dimensions if not already provided by extension
       attrs = if document.width, do: attrs, else: Map.put(attrs, :width, asset.width)
@@ -118,7 +121,9 @@ defmodule LossyWeb.CaptureController do
   # Save image from base64 data if provided
   # Only updates dimensions if not already set (extension may have provided them)
   defp maybe_save_image(document, %{"image_data" => image_data}) when is_binary(image_data) do
-    with {:ok, asset} <- Assets.save_image_from_base64(document.id, image_data, :original) do
+    opts = [document_name: document.name]
+
+    with {:ok, asset} <- Assets.save_image_from_base64(document.id, image_data, :original, opts) do
       attrs = %{original_asset_id: asset.id}
       # Only set dimensions if not already provided by extension
       attrs = if document.width, do: attrs, else: Map.put(attrs, :width, asset.width)
@@ -146,6 +151,23 @@ defmodule LossyWeb.CaptureController do
 
   # No text regions provided - this is fine
   defp maybe_save_text_regions(_document, _params), do: :ok
+
+  # Save segment (object) regions as DetectedRegion records if provided
+  defp maybe_save_segment_regions(document, %{"segment_regions" => segment_regions})
+       when is_list(segment_regions) and length(segment_regions) > 0 do
+    Logger.info("Saving segment regions",
+      document_id: document.id,
+      segment_count: length(segment_regions)
+    )
+
+    {:ok, _regions} =
+      Documents.create_detected_regions_from_segments(document, segment_regions)
+
+    :ok
+  end
+
+  # No segment regions provided - this is fine
+  defp maybe_save_segment_regions(_document, _params), do: :ok
 
   defp format_errors(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, _opts} -> msg end)

@@ -44,7 +44,7 @@ defmodule Lossy.Workers.Inpainting do
       image_path = get_current_image_path(document)
 
       # Combine multiple masks into one for a single API call
-      with {:ok, combined_mask_path} <- combine_masks_if_needed(mask_paths, document.id),
+      with {:ok, combined_mask_path} <- combine_masks_if_needed(mask_paths, document),
            {:ok, inpainted_path} <- Inpainting.inpaint_with_mask(image_path, combined_mask_path),
            {:ok, document} <-
              save_inpaint_result_with_history(document, inpainted_path, region_ids) do
@@ -74,11 +74,13 @@ defmodule Lossy.Workers.Inpainting do
     Assets.asset_path(asset)
   end
 
-  defp combine_masks_if_needed([single_mask], _doc_id), do: {:ok, single_mask}
+  defp combine_masks_if_needed([single_mask], _document), do: {:ok, single_mask}
 
-  defp combine_masks_if_needed(mask_paths, doc_id) when length(mask_paths) > 1 do
+  defp combine_masks_if_needed(mask_paths, document) when length(mask_paths) > 1 do
     # Generate output path for combined mask
-    dir = Path.join(["priv/static/uploads", doc_id])
+    # Use document name if available, fall back to UUID for legacy documents
+    dir_name = document.name || document.id
+    dir = Path.join(["priv/static/uploads", dir_name])
     File.mkdir_p!(dir)
     output_path = Path.join(dir, "combined_mask_#{System.system_time(:millisecond)}.png")
 
@@ -91,8 +93,10 @@ defmodule Lossy.Workers.Inpainting do
     history_entry = HistoryEntry.new_inpaint(current_image_path, region_ids)
 
     # 2. Save the new inpainted image as working asset
+    opts = [document_name: document.name]
+
     {:ok, new_working_asset} =
-      Assets.save_image_from_path(document.id, inpainted_path, :working)
+      Assets.save_image_from_path(document.id, inpainted_path, :working, opts)
 
     # 3. Update document with new working asset and history entry
     changeset =

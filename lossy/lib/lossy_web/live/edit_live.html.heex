@@ -17,7 +17,7 @@
         <%= if @export_path do %>
           <a
             href={@export_path}
-            download="lossy-export.png"
+            download={@export_filename || "lossy-export.png"}
             class="btn btn-success"
           >
             Download
@@ -86,17 +86,23 @@
             phx-hook="MaskOverlay"
             data-image-width={@document.width}
             data-image-height={@document.height}
+            data-document-id={@document.id}
           >
             <%= for mask <- @masks do %>
               <div
                 data-mask-id={mask.id}
+                data-mask-type={mask.type}
+                data-mask-url={mask.mask_url}
                 data-bbox-x={mask.bbox["x"] || mask.bbox[:x]}
                 data-bbox-y={mask.bbox["y"] || mask.bbox[:y]}
                 data-bbox-w={mask.bbox["w"] || mask.bbox[:w]}
                 data-bbox-h={mask.bbox["h"] || mask.bbox[:h]}
-                class="mask-region absolute pointer-events-auto cursor-pointer"
+                class="mask-region absolute"
               ></div>
             <% end %>
+
+            <!-- Container for JS-created elements (ignored by LiveView) -->
+            <div id="js-overlay-container" phx-update="ignore"></div>
           </div>
 
           <!-- Loading indicator when inpainting -->
@@ -144,13 +150,29 @@
         @fresh_arrival && "opacity-0"
       ]}
     >
-      <nav class="editor-toolbar" aria-label="Editor controls">
-        <span>Hover to highlight</span>
-        <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-        <span>Click to select</span>
-        <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-        <span>Enter to remove</span>
-      </nav>
+      <%= if @segment_mode do %>
+        <nav class="editor-toolbar segment-mode-toolbar" aria-label="Segment mode controls">
+          <span class="segment-mode-badge">Segment Mode</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span>Click to add point</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span>Shift+Click to exclude</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span>Enter to confirm</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span>Esc to cancel</span>
+        </nav>
+      <% else %>
+        <nav class="editor-toolbar" aria-label="Editor controls">
+          <span>Hover to highlight</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span>Click to select</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span>Enter to remove</span>
+          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
+          <span><kbd>S</kbd> to segment</span>
+        </nav>
+      <% end %>
     </footer>
   </div>
 </div>

@@ -34,12 +34,13 @@ defmodule LossyWeb.EditLive do
 
         socket =
           socket
-          |> assign(document: document, page_title: "Edit")
+          |> assign(document: document, page_title: document.name || "Edit")
           |> assign(selected_region_ids: MapSet.new())
           |> assign(inpainting: false)
-          |> assign(export_path: nil, exporting: false)
+          |> assign(export_path: nil, export_filename: nil, exporting: false)
           |> assign(masks: masks)
           |> assign(fresh_arrival: fresh_arrival)
+          |> assign(segment_mode: false)
           |> maybe_push_masks(masks, connected?(socket))
 
         {:ok, socket}
@@ -163,18 +164,49 @@ defmodule LossyWeb.EditLive do
     {:noreply, socket}
   end
 
+  # Segment mode handlers
+  @impl true
+  def handle_event("enter_segment_mode", _params, socket) do
+    {:noreply, assign(socket, segment_mode: true)}
+  end
+
+  @impl true
+  def handle_event("exit_segment_mode", _params, socket) do
+    {:noreply, assign(socket, segment_mode: false)}
+  end
+
+  @impl true
+  def handle_event("confirm_segment", %{"mask_png" => mask_png, "bbox" => bbox}, socket) do
+    # Save the mask from click-to-segment as a new region
+    document = socket.assigns.document
+
+    case Documents.add_manual_region(document, mask_png, bbox) do
+      {:ok, _updated_document} ->
+        # Document update will be broadcast via PubSub
+        {:noreply, assign(socket, segment_mode: false)}
+
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(segment_mode: false)
+         |> put_flash(:error, "Failed to save segment: #{inspect(reason)}")}
+    end
+  end
+
   @impl true
   def handle_event("export", _params, socket) do
     socket = assign(socket, exporting: true)
 
     case Documents.generate_export(socket.assigns.document) do
-      {:ok, export_path} ->
+      {:ok, export_path, document_name} ->
         # Convert file path to public URL
         public_path = export_path_to_url(export_path)
+        # Use document name for download filename, with fallback
+        download_filename = "#{document_name || "lossy-export"}.png"
 
         {:noreply,
          socket
-         |> assign(export_path: public_path, exporting: false)
+         |> assign(export_path: public_path, export_filename: download_filename, exporting: false)
          |> put_flash(:info, "Export generated! Click Download to save.")}
 
       {:error, reason} ->
@@ -207,6 +239,7 @@ defmodule LossyWeb.EditLive do
     |> Enum.map(fn region ->
       %{
         id: region.id,
+        type: Atom.to_string(region.type),  # "text", "object", or "manual"
         bbox: region.bbox,
         z_index: region.z_index,
         mask_url: mask_path_to_url(region.mask_path)

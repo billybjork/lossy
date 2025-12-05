@@ -36,14 +36,14 @@ defmodule Lossy.Assets do
   Saves a base64-encoded image to disk and creates an Asset record.
   Returns {:ok, asset} on success, {:error, reason} on failure.
   """
-  def save_image_from_base64(document_id, base64_data, kind \\ :original) do
+  def save_image_from_base64(document_id, base64_data, kind \\ :original, opts \\ []) do
     Logger.info("Saving image from base64", document_id: document_id, kind: kind)
 
     with {:ok, binary_data, content_type} <- decode_base64_image(base64_data),
          :ok <- validate_file_size(binary_data),
          :ok <- validate_content_type(content_type),
          {:ok, dimensions} <- get_image_dimensions(binary_data),
-         {:ok, file_path} <- write_image_file(document_id, kind, binary_data),
+         {:ok, file_path} <- write_image_file(document_id, kind, binary_data, opts),
          sha256 <- compute_sha256(binary_data) do
       Logger.info("Image saved successfully from base64",
         document_id: document_id,
@@ -77,7 +77,7 @@ defmodule Lossy.Assets do
   Downloads an image from a URL and creates an Asset record.
   Returns {:ok, asset} on success, {:error, reason} on failure.
   """
-  def save_image_from_url(document_id, image_url, kind \\ :original) do
+  def save_image_from_url(document_id, image_url, kind \\ :original, opts \\ []) do
     Logger.info("Downloading image from URL",
       document_id: document_id,
       kind: kind,
@@ -89,7 +89,7 @@ defmodule Lossy.Assets do
          :ok <- validate_file_size(binary_data),
          :ok <- validate_content_type(content_type),
          {:ok, dimensions} <- get_image_dimensions(binary_data),
-         {:ok, file_path} <- write_image_file(document_id, kind, binary_data),
+         {:ok, file_path} <- write_image_file(document_id, kind, binary_data, opts),
          sha256 <- compute_sha256(binary_data) do
       Logger.info("Image downloaded and saved successfully",
         document_id: document_id,
@@ -269,9 +269,11 @@ defmodule Lossy.Assets do
     end
   end
 
-  defp write_image_file(document_id, kind, binary_data, opts \\ []) do
-    # Create directory: priv/static/uploads/{document_id}/
-    dir = Path.join([@upload_dir, document_id])
+  defp write_image_file(document_id, kind, binary_data, opts) do
+    # Use document name if provided, otherwise fall back to UUID
+    # This supports both new (named) and legacy (UUID-only) documents
+    dir_name = Keyword.get(opts, :document_name) || document_id
+    dir = Path.join([@upload_dir, dir_name])
     File.mkdir_p!(dir)
 
     # For inpainted_patch, include region_id to create unique filenames

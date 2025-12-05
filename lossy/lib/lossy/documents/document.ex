@@ -41,6 +41,11 @@ defmodule Lossy.Documents.Document do
     field :metrics, :map, default: %{}
     field :status, Ecto.Enum, values: @valid_statuses, default: :loading
 
+    # Human-readable identifier: lossy-YYYYMMDD-NNN
+    field :name, :string
+    # Extracted hostname from source_url (e.g., "nytimes.com")
+    field :source_domain, :string
+
     # History for undo/redo
     embeds_many :history, HistoryEntry, on_replace: :delete
     field :history_index, :integer, default: 0
@@ -67,7 +72,9 @@ defmodule Lossy.Documents.Document do
       :working_asset_id,
       :status,
       :metrics,
-      :history_index
+      :history_index,
+      :name,
+      :source_domain
     ])
     |> cast_embed(:history, with: &HistoryEntry.changeset/2)
     |> validate_required([:source_url, :capture_mode])
