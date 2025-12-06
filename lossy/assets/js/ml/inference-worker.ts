@@ -3,13 +3,13 @@
  *
  * Single worker managing all models (mirrors extension's offscreen document pattern):
  * - Text detection (DBNet)
- * - SAM encoder (image -> embeddings)
- * - SAM decoder (embeddings + points -> masks)
- * - Embedding cache in worker memory (Map<documentId, Float32Array>)
+ * - SAM 2 encoder (image -> embeddings + high-res features)
+ * - SAM 2 decoder (embeddings + points -> masks)
+ * - Embedding cache in worker memory (Map<documentId, Sam2Embeddings>)
  */
 
 import { detectTextRegions } from './text-detection';
-import { getImageEmbeddings, segmentAtPoints } from './object-segmentation';
+import { getImageEmbeddings, segmentAtPoints, type Sam2Embeddings } from './object-segmentation';
 import { maskToPngAsync } from './mask-utils';
 import { getBackend, isWebGPUAvailable } from './sessions';
 import type {
@@ -23,8 +23,8 @@ import type {
   WorkerResponseProgress,
 } from './types';
 
-// Embedding cache: documentId -> Float32Array
-const embeddingCache = new Map<string, Float32Array>();
+// Embedding cache: documentId -> Sam2Embeddings (includes image_embed + high_res_feats)
+const embeddingCache = new Map<string, Sam2Embeddings>();
 
 // Track initialization state
 let initialized = false;
@@ -120,14 +120,20 @@ async function handleComputeEmbeddings(
   documentId: string,
   imageData: ImageData
 ): Promise<void> {
-  console.log(`[Worker] Computing embeddings for document ${documentId}...`);
+  console.log(`[Worker] Computing SAM 2 embeddings for document ${documentId}...`);
   sendProgress('loading_encoder', 0);
 
   const result = await getImageEmbeddings(imageData);
 
-  // Cache embeddings for this document
+  // Cache embeddings for this document (includes image_embed + high_res_feats)
   embeddingCache.set(documentId, result.embeddings);
-  console.log(`[Worker] Embeddings cached for document ${documentId} (${(result.embeddings.byteLength / 1024 / 1024).toFixed(2)} MB)`);
+
+  // Calculate total size of all embedding tensors
+  const totalBytes =
+    result.embeddings.imageEmbed.byteLength +
+    result.embeddings.highResFeats0.byteLength +
+    result.embeddings.highResFeats1.byteLength;
+  console.log(`[Worker] SAM 2 embeddings cached for document ${documentId} (${(totalBytes / 1024 / 1024).toFixed(2)} MB)`);
 
   const response: WorkerResponseEmbeddingsReady = {
     type: 'EMBEDDINGS_READY',
@@ -147,7 +153,7 @@ async function handleSegmentAtPoints(
   points: Array<{ x: number; y: number; label: number }>,
   imageSize: { width: number; height: number }
 ): Promise<void> {
-  console.log(`[Worker] Segmenting at ${points.length} points for document ${documentId}...`);
+  console.log(`[Worker] SAM 2 segmenting at ${points.length} points for document ${documentId}...`);
 
   // Get cached embeddings
   const embeddings = embeddingCache.get(documentId);

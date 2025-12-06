@@ -9,8 +9,8 @@ export type ModelKey = 'textDetection' | 'samEncoder' | 'samDecoder';
 
 const MODEL_PATHS: Record<ModelKey, string> = {
   textDetection: '/models/det_v3.onnx',
-  samEncoder: '/models/edge_sam_3x_encoder.onnx',
-  samDecoder: '/models/edge_sam_3x_decoder.onnx',
+  samEncoder: '/models/sam2_hiera_tiny_encoder.ort',      // g-ronimo runtime-optimized
+  samDecoder: '/models/sam2_hiera_tiny_decoder_gronimo.onnx',  // g-ronimo decoder
 };
 
 // In-memory cache to avoid re-fetching during a session
