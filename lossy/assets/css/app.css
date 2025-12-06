@@ -289,26 +289,26 @@ figure {
   opacity: 0;
 }
 
-/* Hover state: thick white border with dark outline */
+/* Hover state: bold white border with dark outline */
 .mask-region.mask-hovered {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.2);
   /* Two-color border: white inner, dark outer for visibility on any background */
-  border: 2px solid #ffffff;
-  outline: 2px solid rgba(0, 0, 0, 0.6);
-  outline-offset: -2px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  border: 3px solid #ffffff;
+  outline: 2px solid rgba(0, 0, 0, 0.8);
+  outline-offset: -3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
-/* Selected state: thick blue border with white outline */
+/* Selected state: bold orange border with white outline (SAM style) */
 .mask-region.mask-selected {
   opacity: 1;
-  background: rgba(59, 130, 246, 0.2);
-  /* Two-color border: blue inner, white outer for visibility on any background */
-  border: 3px solid #3b82f6;
-  outline: 2px solid rgba(255, 255, 255, 0.7);
-  outline-offset: -3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+  background: rgba(251, 146, 60, 0.3);
+  /* Two-color border: orange inner, white outer for visibility on any background */
+  border: 4px solid rgb(251, 146, 60);
+  outline: 2px solid rgba(255, 255, 255, 0.9);
+  outline-offset: -4px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
 }
 
 /* Dimmed state: subtle, non-distracting */
