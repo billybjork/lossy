@@ -8,17 +8,18 @@
  * - Header/toolbar hidden (opacity-0)
  *
  * This hook animates the transition:
- * 1. Brief hold for spotlight moment (150ms)
- * 2. Removes .hero-entrance class to trigger CSS transition
- * 3. Fades overlay, fades in UI elements
- * 4. Cleans up and tells server to clear fresh_arrival
+ * 1. Immediately clears @fresh_arrival on server to prevent re-render interference
+ * 2. Brief hold for spotlight moment (150ms)
+ * 3. Removes .hero-entrance class to trigger CSS transition
+ * 4. Fades overlay, fades in UI elements
+ * 5. Cleans up inline styles
  *
  * The .hero-entrance class is shared between skeleton and image, ensuring
  * seamless visual continuity when the image replaces the skeleton.
  *
- * IMPORTANT: We must delay pushEvent("clear_fresh_arrival") until AFTER the
- * animation completes. If called too early, the server re-renders the template
- * without the hero-entrance class, causing the animation to fail.
+ * IMPORTANT: We clear @fresh_arrival immediately when animation starts. This
+ * prevents ML detection (which triggers masks_updated) from causing LiveView
+ * to re-add the hero-entrance class mid-animation.
  */
 
 import type { Hook } from 'phoenix_live_view';
@@ -62,6 +63,10 @@ export const EditorArrival: Hook<EditorArrivalState, HTMLElement> = {
     if (this.hasAnimated) return;
     this.hasAnimated = true;
 
+    // Clear fresh_arrival IMMEDIATELY to prevent LiveView re-renders
+    // (e.g., from ML text detection) from re-adding hero-entrance class
+    this.pushEvent("clear_fresh_arrival", {});
+
     const overlay = document.getElementById('arrival-overlay');
     const header = document.getElementById('editor-header');
     const toolbar = document.getElementById('editor-toolbar');
@@ -99,11 +104,6 @@ export const EditorArrival: Hook<EditorArrivalState, HTMLElement> = {
 
         if (header) header.style.opacity = '';
         if (toolbar) toolbar.style.opacity = '';
-
-        // NOW tell server to clear fresh_arrival flag
-        // This must happen AFTER animation completes to prevent re-render
-        // from stripping styles mid-animation
-        this.pushEvent("clear_fresh_arrival", {});
       }, 700);
     }, 150);
   }
