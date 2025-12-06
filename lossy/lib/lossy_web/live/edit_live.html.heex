@@ -5,7 +5,7 @@
   <% end %>
 
   <div class="editor-content">
-    <!-- Header with export - hidden during fresh arrival -->
+      <!-- Header with export - hidden during fresh arrival -->
     <header
       id="editor-header"
       class={[
@@ -27,7 +27,7 @@
         <button
           phx-click="export"
           disabled={@exporting}
-          class={["btn", if(@exporting, do: "btn-primary", else: "btn-primary")]}
+          class={["btn", "btn-primary"]}
           style={if @exporting, do: "opacity: 0.6; cursor: not-allowed;", else: ""}
         >
           <%= if @exporting do %>
@@ -168,38 +168,5 @@
         <% end %>
       </figure>
     </div>
-    
-<!-- Bottom toolbar - hidden during fresh arrival -->
-    <footer
-      id="editor-toolbar"
-      class={[
-        "mt-4 flex justify-center transition-opacity duration-300",
-        @fresh_arrival && "opacity-0"
-      ]}
-    >
-      <%= if @segment_mode do %>
-        <nav class="editor-toolbar segment-mode-toolbar" aria-label="Segment mode controls">
-          <span class="segment-mode-badge">Segment Mode</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span>Click to add point</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span>Shift+Click to exclude</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span>Enter to confirm</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span>Esc to cancel</span>
-        </nav>
-      <% else %>
-        <nav class="editor-toolbar" aria-label="Editor controls">
-          <span>Hover to highlight</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span>Click to select</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span>Enter to remove</span>
-          <span class="toolbar-separator" aria-hidden="true">&middot;</span>
-          <span><kbd>S</kbd> to segment</span>
-        </nav>
-      <% end %>
-    </footer>
   </div>
 </div>

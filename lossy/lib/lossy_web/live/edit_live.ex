@@ -111,6 +111,21 @@ defmodule LossyWeb.EditLive do
   end
 
   @impl true
+  def handle_event("delete_selected", _params, socket) do
+    selected = socket.assigns.selected_region_ids
+
+    if MapSet.size(selected) > 0 do
+      region_ids = MapSet.to_list(selected)
+      {:ok, _count} = Documents.delete_detected_regions(socket.assigns.document, region_ids)
+
+      # Clear selection (document update will be broadcast via PubSub)
+      {:noreply, assign(socket, selected_region_ids: MapSet.new())}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  @impl true
   def handle_event("inpaint_selected", _params, socket) do
     selected = socket.assigns.selected_region_ids
 
@@ -145,13 +160,6 @@ defmodule LossyWeb.EditLive do
       {:error, reason} ->
         {:noreply, put_flash(socket, :error, "Undo failed: #{inspect(reason)}")}
     end
-  end
-
-  @impl true
-  def handle_event("redo", _params, socket) do
-    # Redo not yet implemented - would require storing "after" states in history entries
-    _result = Documents.redo(socket.assigns.document)
-    {:noreply, socket}
   end
 
   # Client-side text detection handler (from local ML inference)

@@ -426,23 +426,7 @@ figure {
   pointer-events: none;
   z-index: 45;
   opacity: 0;
-  transition: opacity 0.2s ease-out, background 0.1s ease-out;
-}
-
-/* Spotlighted mask - intense multi-layer glow */
-.mask-spotlighted {
-  opacity: 1 !important;
-  filter: drop-shadow(0 0 25px rgba(255, 255, 255, 0.5))
-          drop-shadow(0 0 50px rgba(255, 255, 255, 0.35))
-          drop-shadow(0 0 80px rgba(255, 255, 255, 0.2));
-  transition: filter 0.2s ease-out, opacity 0.2s ease-out;
-}
-
-/* Non-spotlighted masks - dimmed with subtle glow */
-.mask-spotlighted-idle {
-  opacity: 0.25 !important;
-  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.15));
-  transition: filter 0.2s ease-out, opacity 0.2s ease-out;
+  transition: opacity 0.3s ease-out, background 0.3s ease-out;
 }
 
 /* =============================================================================

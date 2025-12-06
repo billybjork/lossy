@@ -8,7 +8,7 @@
 import type { MaskOverlayState, SegmentPoint, BrushStroke, MaskData, SegmentResponse } from './types';
 import type { PointPrompt } from '../../ml/types';
 import type { InferenceProvider } from '../../ml/inference-provider';
-import { douglasPeucker, uniformSubsample } from './utils';
+import { douglasPeucker, uniformSubsample, getImageNaturalDimensions, convertBrushSizeToDisplay, debugLog } from './utils';
 
 /**
  * Enter segment mode
@@ -98,9 +98,7 @@ export async function enterSegmentMode(
   if (state.cursorOverlay && state.lastMousePosition) {
     const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (img) {
-      const displayWidth = img.clientWidth;
-      const naturalWidth = img.naturalWidth || state.imageWidth;
-      const displayBrushSize = (state.brushSize / naturalWidth) * displayWidth;
+      const displayBrushSize = convertBrushSizeToDisplay(state.brushSize, img, state.imageWidth);
 
       state.cursorOverlay.style.left = `${state.lastMousePosition.x}px`;
       state.cursorOverlay.style.top = `${state.lastMousePosition.y}px`;
@@ -113,26 +111,26 @@ export async function enterSegmentMode(
   // Hide default cursor in segment mode
   container.style.cursor = 'none';
 
-  // Create spotlight overlay if in spacebar hover mode
-  if (state.spacebarHoverMode) {
+  // Create spotlight overlay if in Command key spotlight mode
+  if (state.commandKeySpotlightMode) {
     createSpotlightOverlay(state);
   }
 
   // Notify server
   callbacks.pushEvent("enter_segment_mode", {});
 
-  console.log('[SegmentMode] Entered segment mode');
+  debugLog('[SegmentMode] Entered segment mode');
 
   // Pre-compute embeddings if using local provider
   const inferenceProvider = getInferenceProvider();
   if (inferenceProvider && !isExtensionAvailable() && !state.embeddingsReady) {
     const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (img && img.complete) {
-      console.log('[SegmentMode] Computing embeddings...');
+      debugLog('[SegmentMode] Computing embeddings...');
       try {
         await inferenceProvider.computeEmbeddings(state.documentId, img);
         state.embeddingsReady = true;
-        console.log('[SegmentMode] Embeddings ready');
+        debugLog('[SegmentMode] Embeddings ready');
       } catch (error) {
         console.error('[SegmentMode] Failed to compute embeddings:', error);
         // Don't exit segment mode on embedding failure - user can still try
@@ -140,35 +138,6 @@ export async function enterSegmentMode(
       }
     }
   }
-}
-
-/**
- * Ensure segment mode is fully exited (recovery function)
- * Call this if you suspect segment mode is stuck
- */
-export function ensureSegmentModeExited(
-  container: HTMLElement,
-  state: MaskOverlayState
-): void {
-  console.warn('[SegmentMode] Force exiting segment mode');
-
-  // Reset all state flags
-  state.segmentMode = false;
-  state.isDrawingStroke = false;
-  state.segmentPending = false;
-
-  // Clear timers
-  if (state.liveSegmentDebounceId !== null) {
-    clearTimeout(state.liveSegmentDebounceId);
-    state.liveSegmentDebounceId = null;
-  }
-
-  // Remove class
-  container.classList.remove('segment-mode');
-  container.style.cursor = '';
-
-  // Force cleanup
-  forceCleanupSegmentElements();
 }
 
 /**
@@ -184,7 +153,7 @@ export function exitSegmentMode(
     pushEvent: (event: string, payload: unknown) => void
   }
 ): void {
-  console.log('[SegmentMode] Exiting segment mode...');
+  debugLog('[SegmentMode] Exiting segment mode...');
 
   try {
     // CRITICAL: Set state first to prevent race conditions
@@ -308,7 +277,7 @@ export function exitSegmentMode(
       console.warn('[SegmentMode] Error notifying server:', e);
     }
 
-    console.log('[SegmentMode] Successfully exited segment mode');
+    debugLog('[SegmentMode] Successfully exited segment mode');
   } catch (error) {
     console.error('[SegmentMode] CRITICAL: Error during exit, forcing cleanup:', error);
     // Even if everything fails, ensure state is reset
@@ -336,7 +305,7 @@ export function forceCleanupSegmentElements(): void {
         }
       });
       if (segmentElements.length > 0) {
-        console.log(`[SegmentMode] Force cleaned ${segmentElements.length} segment elements`);
+        debugLog(`[SegmentMode] Force cleaned ${segmentElements.length} segment elements`);
       }
     }
   } catch (error) {
@@ -362,8 +331,7 @@ export function getImageCoordinates(
 
   const displayWidth = img.clientWidth;
   const displayHeight = img.clientHeight;
-  const naturalWidth = img.naturalWidth || imageWidth;
-  const naturalHeight = img.naturalHeight || imageHeight;
+  const { width: naturalWidth, height: naturalHeight } = getImageNaturalDimensions(img, imageWidth, imageHeight);
 
   const x = (displayX / displayWidth) * naturalWidth;
   const y = (displayY / displayHeight) * naturalHeight;
@@ -389,9 +357,7 @@ export function updateBrushCursor(
   const displayY = event.clientY - containerRect.top;
 
   // Calculate brush size in display coordinates
-  const displayWidth = img.clientWidth;
-  const naturalWidth = img.naturalWidth || state.imageWidth;
-  const displayBrushSize = (state.brushSize / naturalWidth) * displayWidth;
+  const displayBrushSize = convertBrushSizeToDisplay(state.brushSize, img, state.imageWidth);
 
   // Update cursor position and size
   state.cursorOverlay.style.left = `${displayX}px`;
@@ -526,7 +492,7 @@ export function finishBrushStroke(
     // Trigger full segmentation with all strokes
     requestSegmentCallback();
   } else {
-    console.log('[SegmentMode] Reusing recent live segmentation result');
+    debugLog('[SegmentMode] Reusing recent live segmentation result');
   }
 }
 
@@ -594,7 +560,7 @@ export function removeLastStroke(
     }
   }
 
-  console.log(`[SegmentMode] Removed stroke, ${state.strokeHistory.length} remaining`);
+  debugLog(`[SegmentMode] Removed stroke, ${state.strokeHistory.length} remaining`);
 }
 
 /**
@@ -646,12 +612,11 @@ export function drawBrushPoint(
   // Convert to display coordinates
   const displayWidth = img.clientWidth;
   const displayHeight = img.clientHeight;
-  const naturalWidth = img.naturalWidth || state.imageWidth;
-  const naturalHeight = img.naturalHeight || state.imageHeight;
+  const { width: naturalWidth, height: naturalHeight } = getImageNaturalDimensions(img, state.imageWidth, state.imageHeight);
 
   const displayX = (imgX / naturalWidth) * displayWidth;
   const displayY = (imgY / naturalHeight) * displayHeight;
-  const displayRadius = (state.brushSize / naturalWidth) * displayWidth;
+  const displayRadius = convertBrushSizeToDisplay(state.brushSize, img, state.imageWidth);
 
   // Draw diffuse glow (optimistic mask preview)
   // Use natural brush size based on image dimensions if not specified
@@ -751,7 +716,7 @@ export async function requestSegmentFromStrokes(
   const actualWidth = img?.naturalWidth || state.imageWidth;
   const actualHeight = img?.naturalHeight || state.imageHeight;
 
-  console.log(`[SegmentMode] Requesting segment with ${sampledPoints.length} points from ${state.strokeHistory.length} strokes`);
+  debugLog(`[SegmentMode] Requesting segment with ${sampledPoints.length} points from ${state.strokeHistory.length} strokes`);
 
   try {
     let response: SegmentResponse;
@@ -820,7 +785,7 @@ export async function requestLiveSegmentFromCurrentStroke(
 ): Promise<void> {
   // Don't start new request if one is in progress
   if (state.liveSegmentInProgress) {
-    console.log('[SegmentMode] Skipping live segment - request in progress');
+    debugLog('[SegmentMode] Skipping live segment - request in progress');
     return;
   }
 
@@ -858,7 +823,7 @@ export async function requestLiveSegmentFromCurrentStroke(
   const actualWidth = img?.naturalWidth || state.imageWidth;
   const actualHeight = img?.naturalHeight || state.imageHeight;
 
-  console.log(`[SegmentMode] Live segmentation with ${sampledPoints.length} points from current stroke`);
+  debugLog(`[SegmentMode] Live segmentation with ${sampledPoints.length} points from current stroke`);
 
   try {
     let response: SegmentResponse;
@@ -904,7 +869,7 @@ export async function requestLiveSegmentFromCurrentStroke(
 
     // Check if this request is still current (not stale)
     if (state.lastLiveSegmentRequestId !== requestId) {
-      console.log('[SegmentMode] Discarding stale live segment response');
+      debugLog('[SegmentMode] Discarding stale live segment response');
       return;
     }
 
@@ -1193,7 +1158,7 @@ export async function confirmSegment(
         bbox: bbox
       });
 
-      console.log('[SegmentMode] Segment confirmed');
+      debugLog('[SegmentMode] Segment confirmed');
     } else {
       console.error('[SegmentMode] Failed to get final mask:', response.error);
     }
@@ -1221,12 +1186,12 @@ export function createSpotlightOverlay(state: MaskOverlayState): void {
     left: 0;
     width: 100%;
     height: 100%;
-    background: rgba(0, 0, 0, 0.88);
+    background: rgba(0, 0, 0, 0.92);
     backdrop-filter: blur(2px);
     pointer-events: none;
     z-index: 45;
     opacity: 0;
-    transition: opacity 0.2s ease-out, background 0.1s ease-out;
+    transition: opacity 0.3s ease-out, background 0.3s ease-out;
   `;
 
   jsContainer.appendChild(overlay);
@@ -1243,6 +1208,8 @@ export function createSpotlightOverlay(state: MaskOverlayState): void {
 /**
  * Update spotlight position with radial gradient
  * Creates a radial gradient centered at cursor for enhanced "closing in" feel
+ * Uses larger radius and more gradual falloff for smoother edges
+ * Ensures edges are always dark to prevent bright periphery artifacts
  */
 export function updateSpotlightPosition(
   state: MaskOverlayState,
@@ -1252,9 +1219,11 @@ export function updateSpotlightPosition(
   if (!state.spotlightOverlay) return;
 
   state.spotlightOverlay.style.background = `
-    radial-gradient(circle 600px at ${x}px ${y}px,
-      rgba(0, 0, 0, 0.6),
-      rgba(0, 0, 0, 0.92))
+    radial-gradient(circle 1200px at ${x}px ${y}px,
+      rgba(0, 0, 0, 0.5),
+      rgba(0, 0, 0, 0.75) 35%,
+      rgba(0, 0, 0, 0.88) 60%,
+      rgba(0, 0, 0, 0.95))
   `;
 }
 

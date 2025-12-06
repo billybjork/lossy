@@ -6,6 +6,51 @@
  */
 
 /**
+ * Debug logging helper - only logs when DEBUG_LOSSY flag is set
+ * Enable via: localStorage.setItem('DEBUG_LOSSY', 'true')
+ */
+export function debugLog(message: string, ...args: unknown[]): void {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('DEBUG_LOSSY') === 'true') {
+    console.log(message, ...args);
+  }
+}
+
+/**
+ * Get natural image dimensions with fallback to provided dimensions
+ * Handles cases where naturalWidth/naturalHeight might not be available
+ */
+export function getImageNaturalDimensions(
+  img: HTMLImageElement | null,
+  fallbackWidth: number,
+  fallbackHeight: number
+): { width: number; height: number } {
+  if (!img) {
+    return { width: fallbackWidth, height: fallbackHeight };
+  }
+  return {
+    width: img.naturalWidth || fallbackWidth,
+    height: img.naturalHeight || fallbackHeight
+  };
+}
+
+/**
+ * Convert brush size from natural image coordinates to display coordinates
+ * Takes into account the current display size vs natural image size
+ */
+export function convertBrushSizeToDisplay(
+  brushSizeNatural: number,
+  img: HTMLImageElement | null,
+  fallbackNaturalWidth: number
+): number {
+  if (!img) return brushSizeNatural;
+
+  const displayWidth = img.clientWidth;
+  const naturalWidth = img.naturalWidth || fallbackNaturalWidth;
+
+  return (brushSizeNatural / naturalWidth) * displayWidth;
+}
+
+/**
  * Calculate perpendicular distance from a point to a line segment
  * Used by Douglas-Peucker algorithm for line simplification
  */

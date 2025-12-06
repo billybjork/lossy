@@ -21,6 +21,7 @@ import * as Interaction from './mask-interaction';
 import * as Rendering from './mask-rendering';
 import * as DragSelection from './drag-selection';
 import * as SegmentMode from './segment-mode';
+import { debugLog } from './utils';
 
 // ============ Module-Level State ============
 // Singleton state shared across all hook instances
@@ -66,8 +67,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.dragShift = false;
     this.dragIntersectingIds = new Set();
     this.segmentMode = false;
-    this.segmentModeViaSpacebar = false;
-    this.spacebarHoverMode = false;
+    this.commandKeySegmentMode = false;
+    this.commandKeySpotlightMode = false;
     this.awaitingMaskConfirmation = false;
     this.segmentPoints = [];
     this.previewMaskCanvas = null;
@@ -96,6 +97,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.segmentModeLeaveHandler = null;
     this.spotlightOverlay = null;
     this.spotlightedMaskId = null;
+    this.spotlightDebounceId = null;
 
     // Get image dimensions
     this.imageWidth = parseInt(this.el.dataset.imageWidth || '0') || 0;
@@ -120,7 +122,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       // Reposition on resize
       this.resizeObserver = new ResizeObserver(() => {
         this.positionMasks();
-        Rendering.updateSegmentMaskSizes(this.container);
       });
       this.resizeObserver.observe(img);
     }
@@ -172,7 +173,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       onConfirmSegment: () => this.confirmSegmentKeepPreview(),
       onAdjustBrushSize: (delta: number) => {
         this.brushSize = Math.max(5, Math.min(100, this.brushSize + delta));
-        console.log(`[MaskOverlay] Brush size: ${this.brushSize}`);
+        debugLog(`[MaskOverlay] Brush size: ${this.brushSize}`);
       },
       updateHighlight: () => this.updateHighlight()
     });
@@ -187,8 +188,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       // Enter segment mode on Command key press
       if (e.key === 'Meta' && !this.segmentMode) {
         e.preventDefault();
-        this.segmentModeViaSpacebar = true;
-        this.spacebarHoverMode = true;
+        this.commandKeySegmentMode = true;
+        this.commandKeySpotlightMode = true;
         await this.enterSegmentMode();
 
         // Immediately segment at current cursor position
@@ -199,10 +200,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.spaceKeyupHandler = async (e: KeyboardEvent) => {
       // On Command key release: exit hover mode but keep preview as "selected"
       // User must press Enter to confirm, or Escape to cancel
-      if (e.key === 'Meta' && this.segmentMode && this.segmentModeViaSpacebar) {
+      if (e.key === 'Meta' && this.segmentMode && this.commandKeySegmentMode) {
         e.preventDefault();
-        this.segmentModeViaSpacebar = false;
-        this.spacebarHoverMode = false;
+        this.commandKeySegmentMode = false;
+        this.commandKeySpotlightMode = false;
 
         if (this.previewMaskCanvas && this.lastMaskData) {
           // Exit segment mode UI but keep preview visible as "candidate"
@@ -311,7 +312,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     try {
       inferenceProvider = await providerInitPromise;
-      console.log('[MaskOverlay] Inference provider ready:', isExtensionAvailable() ? 'extension' : 'local');
+      debugLog('[MaskOverlay] Inference provider ready:', isExtensionAvailable() ? 'extension' : 'local');
 
       // If using local provider, run auto text detection
       if (!isExtensionAvailable()) {
@@ -335,19 +336,19 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     // Check if regions already exist
     const existingMasks = this.container.querySelectorAll('.mask-region');
     if (existingMasks.length > 0) {
-      console.log('[MaskOverlay] Skipping auto text detection - regions already exist');
+      debugLog('[MaskOverlay] Skipping auto text detection - regions already exist');
       return;
     }
 
-    console.log('[MaskOverlay] Running auto text detection...');
+    debugLog('[MaskOverlay] Running auto text detection...');
 
     try {
       const regions = await inferenceProvider!.detectText(img);
       if (regions.length > 0) {
-        console.log(`[MaskOverlay] Detected ${regions.length} text regions`);
+        debugLog(`[MaskOverlay] Detected ${regions.length} text regions`);
         this.pushEvent('detected_text_regions', { regions });
       } else {
-        console.log('[MaskOverlay] No text regions detected');
+        debugLog('[MaskOverlay] No text regions detected');
       }
     } catch (error) {
       console.error('[MaskOverlay] Auto text detection failed:', error);
@@ -369,6 +370,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     if (this.resizeObserver) this.resizeObserver.disconnect();
     if (this.liveSegmentDebounceId) clearTimeout(this.liveSegmentDebounceId);
+    if (this.spotlightDebounceId) clearTimeout(this.spotlightDebounceId);
 
     // Remove all event listeners
     document.removeEventListener('keydown', this.keydownHandler);
@@ -445,8 +447,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   // ============ Drag Selection ============
 
   startDrag(e: MouseEvent) {
-    // In spacebar hover mode, don't start dragging - just update cursor position
-    if (this.spacebarHoverMode) {
+    // In Command key spotlight mode, don't start dragging - just update cursor position
+    if (this.commandKeySpotlightMode) {
       return;
     }
 
@@ -458,22 +460,32 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   updateDrag(e: MouseEvent) {
-    // In spacebar hover mode, continuously update segmentation at cursor position
-    if (this.spacebarHoverMode) {
-      // Track which mask cursor is over for spotlight effect
-      const maskId = this.findMaskUnderCursor(e.clientX, e.clientY);
-      if (maskId !== this.spotlightedMaskId) {
-        this.spotlightedMaskId = maskId;
-        this.updateSpotlightHighlight();
-      }
-
-      // Update radial gradient position
+    // In Command key spotlight mode, continuously update segmentation at cursor position
+    if (this.commandKeySpotlightMode) {
+      // Update radial gradient position immediately for smooth following
       if (this.lastMousePosition) {
         SegmentMode.updateSpotlightPosition(
           this as unknown as MaskOverlayState,
           this.lastMousePosition.x,
           this.lastMousePosition.y
         );
+      }
+
+      // Debounce spotlight highlight updates to smooth out twitchiness
+      const maskId = this.findMaskUnderCursor(e.clientX, e.clientY);
+      if (maskId !== this.spotlightedMaskId) {
+        this.spotlightedMaskId = maskId;
+
+        // Clear previous debounce
+        if (this.spotlightDebounceId !== null) {
+          clearTimeout(this.spotlightDebounceId);
+        }
+
+        // Debounce spotlight update for smoother transitions
+        this.spotlightDebounceId = window.setTimeout(() => {
+          this.spotlightDebounceId = null;
+          this.updateSpotlightHighlight();
+        }, 80);
       }
 
       this.segmentAtCursorPosition();
@@ -501,8 +513,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   endDrag(e: MouseEvent) {
-    // In spacebar hover mode, don't handle drag end
-    if (this.spacebarHoverMode) {
+    // In Command key spotlight mode, don't handle drag end
+    if (this.commandKeySpotlightMode) {
       return;
     }
 
@@ -660,9 +672,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     );
   },
 
-  // Segment at current cursor position (for spacebar hover mode)
+  // Segment at current cursor position (for Command key spotlight mode)
   segmentAtCursorPosition() {
-    if (!this.spacebarHoverMode || !this.lastMousePosition) return;
+    if (!this.commandKeySpotlightMode || !this.lastMousePosition) return;
 
     // Debounce segmentation requests
     if (this.liveSegmentDebounceId !== null) {
@@ -747,7 +759,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       // CRITICAL: Only render if this is still the most recent request
       // Prevents flickering from old results rendering after newer ones
       if (this.lastLiveSegmentRequestId !== requestId) {
-        console.log('[MaskOverlay] Discarding stale hover segment response');
+        debugLog('[MaskOverlay] Discarding stale hover segment response');
         return;
       }
 
@@ -800,11 +812,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   /**
-   * Update spotlight highlight effects on masks during spacebar hover mode
+   * Update spotlight highlight effects on masks during Command key spotlight mode
    * Applies spotlight classes and updates segment mask canvas filters
    */
   updateSpotlightHighlight() {
-    if (!this.spacebarHoverMode) return;
+    if (!this.commandKeySpotlightMode) return;
 
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     masks.forEach((mask: HTMLElement) => {

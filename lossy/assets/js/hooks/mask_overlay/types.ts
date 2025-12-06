@@ -75,8 +75,8 @@ export interface MaskOverlayState {
   dragShift: boolean;
   dragIntersectingIds: Set<string>;
   segmentMode: boolean;
-  segmentModeViaSpacebar: boolean;
-  spacebarHoverMode: boolean;
+  commandKeySegmentMode: boolean;
+  commandKeySpotlightMode: boolean;
   awaitingMaskConfirmation: boolean;
   segmentPoints: SegmentPoint[];
   previewMaskCanvas: HTMLCanvasElement | null;
@@ -86,9 +86,10 @@ export interface MaskOverlayState {
   pointMarkersContainer: HTMLDivElement | null;
   cursorOverlay: HTMLDivElement | null;
   segmentPending: boolean;
-  // Spotlight effect state (for spacebar hover mode)
+  // Spotlight effect state (for Command key spotlight mode)
   spotlightOverlay: HTMLDivElement | null;
   spotlightedMaskId: string | null;
+  spotlightDebounceId: number | null;
   documentId: string;
   embeddingsReady: boolean;
   imageWidth: number;

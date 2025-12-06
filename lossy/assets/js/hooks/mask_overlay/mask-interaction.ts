@@ -127,13 +127,19 @@ export function attachMaskListeners(
 
       // Update local selection state
       if (shift) {
+        // Shift+click: toggle mask in/out of selection
         if (state.selectedMaskIds.has(maskId)) {
           state.selectedMaskIds.delete(maskId);
         } else {
           state.selectedMaskIds.add(maskId);
         }
       } else {
-        state.selectedMaskIds = new Set([maskId]);
+        // Regular click: toggle if already the only selected, otherwise select exclusively
+        if (state.selectedMaskIds.size === 1 && state.selectedMaskIds.has(maskId)) {
+          state.selectedMaskIds = new Set(); // Deselect
+        } else {
+          state.selectedMaskIds = new Set([maskId]); // Select exclusively
+        }
       }
 
       // Notify via callback
@@ -187,7 +193,7 @@ export function isPointOverSegmentMask(
 
 /**
  * Create keyboard event handler with configurable callbacks
- * Handles shortcuts: Enter, Escape, Cmd+Z, Cmd+Shift+Z, S, Backspace, [, ]
+ * Handles shortcuts: Enter, Escape, Cmd+Z, Cmd+Shift+Z, Backspace, Delete, [, ]
  */
 export function createKeyboardHandler(
   state: MaskOverlayState,
@@ -199,7 +205,9 @@ export function createKeyboardHandler(
     onToggleSegmentMode: () => void,
     onRemoveLastStroke: () => void,
     onConfirmSegment: () => void,
-    onAdjustBrushSize: (delta: number) => void
+    onAdjustBrushSize: (delta: number) => void,
+    onDelete: () => void,
+    updateHighlight: () => void
   }
 ): (e: KeyboardEvent) => void {
   return (e: KeyboardEvent) => {
@@ -207,11 +215,26 @@ export function createKeyboardHandler(
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
-    // S = toggle segment mode
-    if (e.key === 's' && !e.metaKey && !e.ctrlKey) {
-      e.preventDefault();
-      callbacks.onToggleSegmentMode();
-      return;
+    // If there's a preview canvas (candidate mask), handle Enter/Escape
+    if (state.previewMaskCanvas && !state.segmentMode) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        callbacks.onConfirmSegment();
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        // Cancel the candidate mask - remove preview
+        if (state.previewMaskCanvas) {
+          state.previewMaskCanvas.remove();
+          state.previewMaskCanvas = null;
+        }
+        state.segmentPoints = [];
+        state.lastMaskData = null;
+        callbacks.updateHighlight();
+        return;
+      }
     }
 
     // In segment mode, handle segment-specific keys
@@ -262,6 +285,12 @@ export function createKeyboardHandler(
     if (e.key === 'Escape') {
       e.preventDefault();
       callbacks.onDeselect();
+    }
+
+    // Delete or Backspace = remove selected masks
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.selectedMaskIds.size > 0) {
+      e.preventDefault();
+      callbacks.onDelete();
     }
 
     // Cmd+Z (Mac) or Ctrl+Z (Win) = undo

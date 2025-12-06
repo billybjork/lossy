@@ -15,11 +15,12 @@ export function createDragRect(container: HTMLElement): HTMLDivElement {
   rect.className = 'drag-selection-rect';
   rect.style.cssText = `
     position: absolute;
-    border: 1px dashed rgba(59, 130, 246, 0.8);
-    background: rgba(59, 130, 246, 0.1);
+    border: 2px dashed rgb(59, 130, 246);
+    background: rgba(59, 130, 246, 0.15);
     pointer-events: none;
     display: none;
     z-index: 1000;
+    box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 10px rgba(59, 130, 246, 0.3);
   `;
   container.appendChild(rect);
   return rect;
@@ -38,6 +39,24 @@ export function startDrag(
 
   // In segment mode, don't handle drag (brush strokes instead)
   if (state.segmentMode) return;
+
+  // DEFENSIVE: If segment mode artifacts exist but segment mode is off, clean them up
+  // This prevents stuck state from breaking marquee
+  if (!state.segmentMode && container.classList.contains('segment-mode')) {
+    console.warn('[DragSelection] Detected stuck segment-mode class, cleaning up');
+    container.classList.remove('segment-mode');
+  }
+
+  // Don't start drag on interactive elements (buttons, inputs, links, etc.)
+  const target = event.target as HTMLElement;
+  if (target.tagName === 'BUTTON' || target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' ||
+      target.tagName === 'A' || target.closest('button, input, textarea, select, a')) {
+    return;
+  }
+
+  // DEFENSIVE: Clean up any orphaned segment mode DOM elements that might block interaction
+  cleanupOrphanedSegmentElements();
 
   const containerRect = container.getBoundingClientRect();
   state.dragStart = {
@@ -225,4 +244,20 @@ export function previewDragSelection(
 
   // Update segment mask canvas overlays
   updateSegmentMaskHighlightCallback();
+}
+
+/**
+ * Clean up orphaned segment mode DOM elements
+ * This is a defensive mechanism to ensure marquee works even if segment mode cleanup failed
+ */
+function cleanupOrphanedSegmentElements(): void {
+  const jsContainer = document.getElementById('js-overlay-container');
+  if (!jsContainer) return;
+
+  // Remove any orphaned segment mode elements
+  const orphans = jsContainer.querySelectorAll('.brush-cursor, .segment-point-markers, .brush-stroke-canvas, .segment-preview-mask');
+  if (orphans.length > 0) {
+    console.warn(`[DragSelection] Cleaning up ${orphans.length} orphaned segment mode elements`);
+    orphans.forEach(el => el.remove());
+  }
 }

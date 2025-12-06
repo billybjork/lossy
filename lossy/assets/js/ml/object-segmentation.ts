@@ -22,6 +22,16 @@ import {
 import type { Tensor } from 'onnxruntime-web';
 import type { BoundingBox, PointPrompt, SegmentMask } from './types';
 
+/**
+ * Debug logging helper - only logs when DEBUG_LOSSY flag is set
+ * Enable via: localStorage.setItem('DEBUG_LOSSY', 'true')
+ */
+function debugLog(message: string, ...args: unknown[]): void {
+  if (typeof localStorage !== 'undefined' && localStorage.getItem('DEBUG_LOSSY') === 'true') {
+    console.log(message, ...args);
+  }
+}
+
 // SAM 2 input size (fixed)
 const SAM_INPUT_SIZE = 1024;
 
@@ -29,6 +39,12 @@ const SAM_INPUT_SIZE = 1024;
 // Equivalent to pixel values: [123.675, 116.28, 103.53] / [58.395, 57.12, 57.375]
 const PIXEL_MEAN = [0.485, 0.456, 0.406];
 const PIXEL_STD = [0.229, 0.224, 0.225];
+
+// Mask quality thresholds for aggressive filtering (ensures clean, solid objects)
+// These thresholds filter out speckled, fragmented, or low-confidence masks
+const MIN_IOU = 0.65;         // Minimum IoU score (high confidence only)
+const MIN_STABILITY = 0.88;   // Minimum stability score (very coherent boundaries)
+const MIN_COMPACTNESS = 0.85; // Minimum compactness (solid interior, no islands/speckles)
 
 // Resize info to track transformation
 interface ResizeInfo {
@@ -124,11 +140,11 @@ async function runEncoder(imageData: ImageData): Promise<{
   let highResFeats0: Float32Array | null = null;
   let highResFeats1: Float32Array | null = null;
 
-  console.log(`[ML] Encoder output names: ${session.outputNames.join(', ')}`);
+  debugLog(`[ML] Encoder output names: ${session.outputNames.join(', ')}`);
   for (const name of session.outputNames) {
     const output = results[name];
     const dims = output.dims as number[];
-    console.log(`[ML] Encoder output '${name}': dims=${JSON.stringify(dims)}, size=${(output.data as Float32Array).length}`);
+    debugLog(`[ML] Encoder output '${name}': dims=${JSON.stringify(dims)}, size=${(output.data as Float32Array).length}`);
 
     if (name === 'image_embed') {
       imageEmbed = new Float32Array(output.data as Float32Array);
@@ -187,9 +203,9 @@ async function runDecoder(
     coordsData[i * 2] = transformed.x;
     coordsData[i * 2 + 1] = transformed.y;
     labelsData[i] = pt.label;
-    console.log(`[ML] Point ${i}: original (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}) -> transformed (${transformed.x.toFixed(1)}, ${transformed.y.toFixed(1)}), label=${pt.label}`);
+    debugLog(`[ML] Point ${i}: original (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}) -> transformed (${transformed.x.toFixed(1)}, ${transformed.y.toFixed(1)}), label=${pt.label}`);
   });
-  console.log(`[ML] ResizeInfo: original ${resizeInfo.originalWidth}x${resizeInfo.originalHeight}, scaleX=${resizeInfo.scaleX.toFixed(4)}, scaleY=${resizeInfo.scaleY.toFixed(4)}`);
+  debugLog(`[ML] ResizeInfo: original ${resizeInfo.originalWidth}x${resizeInfo.originalHeight}, scaleX=${resizeInfo.scaleX.toFixed(4)}, scaleY=${resizeInfo.scaleY.toFixed(4)}`);
 
   // Prepare inputs for SAM 2 decoder
   // SAM 2 expects:
@@ -235,7 +251,7 @@ async function runDecoder(
   for (const name of session.outputNames) {
     const output = results[name];
     const dims = output.dims as number[];
-    console.log(`[ML] Decoder output '${name}': dims=${JSON.stringify(dims)}`);
+    debugLog(`[ML] Decoder output '${name}': dims=${JSON.stringify(dims)}`);
     if (name === 'masks') {
       allMasks = new Float32Array(output.data as Float32Array);
       // Shape is [1, num_masks, H, W]
@@ -252,27 +268,86 @@ async function runDecoder(
     throw new Error('Missing decoder outputs (masks or iou_predictions)');
   }
 
-  // Select the mask with the highest IoU score
-  let bestIdx = 0;
-  let bestScore = scores[0];
-  for (let i = 1; i < numMasks; i++) {
-    if (scores[i] > bestScore) {
-      bestScore = scores[i];
-      bestIdx = i;
-    }
-  }
-
-  // Extract the best mask from [1, numMasks, H, W] -> [H, W]
+  // Calculate quality metrics for each candidate mask
+  // AGGRESSIVE high-confidence segmentation: only accept clean, solid objects
   const maskSize = maskDims.width * maskDims.height;
-  const mask = new Float32Array(maskSize);
-  const offset = bestIdx * maskSize;
-  for (let i = 0; i < maskSize; i++) {
-    mask[i] = allMasks[offset + i];
+  const candidates = [];
+
+  for (let i = 0; i < numMasks; i++) {
+    const offset = i * maskSize;
+    const maskData = allMasks.slice(offset, offset + maskSize);
+
+    // Calculate stability score (measures coherence - penalizes fragmentation)
+    const stability = calculateStabilityScore(maskData);
+
+    // Calculate compactness: measure how solid the interior is
+    // Count transitions (row-wise and column-wise flips = fragmentation)
+    let transitions = 0;
+    const width = maskDims.width;
+    const height = maskDims.height;
+
+    // Row-wise transitions (horizontal fragmentation)
+    for (let y = 0; y < height; y++) {
+      for (let x = 1; x < width; x++) {
+        const prev = maskData[y * width + (x - 1)] > 0;
+        const curr = maskData[y * width + x] > 0;
+        if (prev !== curr) transitions++;
+      }
+    }
+
+    // Column-wise transitions (vertical fragmentation)
+    for (let x = 0; x < width; x++) {
+      for (let y = 1; y < height; y++) {
+        const prev = maskData[(y - 1) * width + x] > 0;
+        const curr = maskData[y * width + x] > 0;
+        if (prev !== curr) transitions++;
+      }
+    }
+
+    // Calculate mask coverage and compactness
+    let positivePixels = 0;
+    for (let j = 0; j < maskSize; j++) {
+      if (maskData[j] > 0) positivePixels++;
+    }
+    const coverage = positivePixels / maskSize;
+
+    // Compactness: fewer transitions per positive pixel = more solid
+    // Normalize by positive pixels to avoid penalizing larger masks
+    const compactness = positivePixels > 0 ? 1 - Math.min(1, transitions / (positivePixels * 4)) : 0;
+
+    // Combined quality score: heavily weight IoU, boost by stability AND compactness
+    const iouScore = scores[i];
+    const qualityScore = iouScore * (1 + stability * 0.4 + compactness * 0.4) * (coverage > 0.001 ? 1 : 0.5);
+
+    candidates.push({
+      index: i,
+      iouScore,
+      stability,
+      compactness,
+      coverage,
+      qualityScore,
+      maskData
+    });
   }
 
-  console.log(`[ML] Selected mask ${bestIdx} with score ${bestScore.toFixed(3)} (scores: ${Array.from(scores).map(s => s.toFixed(3)).join(', ')})`);
+  // Sort by quality score descending
+  candidates.sort((a, b) => b.qualityScore - a.qualityScore);
 
-  return { mask, score: bestScore, maskDims };
+  // Apply aggressive filtering using file-level threshold constants
+  const bestCandidate = candidates.find(c =>
+    c.iouScore >= MIN_IOU &&
+    c.stability >= MIN_STABILITY &&
+    c.compactness >= MIN_COMPACTNESS
+  ) || candidates[0];
+
+  const mask = bestCandidate.maskData;
+
+  debugLog(`[ML] Candidates: ${candidates.map(c =>
+    `[${c.index}] IoU=${c.iouScore.toFixed(3)} stab=${c.stability.toFixed(3)} comp=${c.compactness.toFixed(3)} cov=${(c.coverage * 100).toFixed(1)}% Q=${c.qualityScore.toFixed(3)}`
+  ).join(' ')}`);
+  debugLog(`[ML] Selected mask ${bestCandidate.index} (IoU=${bestCandidate.iouScore.toFixed(3)}, stability=${bestCandidate.stability.toFixed(3)}, compactness=${bestCandidate.compactness.toFixed(3)})`);
+
+  return { mask, score: bestCandidate.iouScore, maskDims };
 }
 
 /**
@@ -427,7 +502,7 @@ export async function segmentAtPoints(
 
   const positiveCount = points.filter(p => p.label === 1).length;
   const negativeCount = points.filter(p => p.label === 0).length;
-  console.log(`[ML] SAM 2 click-to-segment with ${positiveCount} positive, ${negativeCount} negative points: score=${score.toFixed(3)}, stability=${stabilityScore.toFixed(3)}, area=${area} in ${(performance.now() - startTime).toFixed(0)}ms`);
+  debugLog(`[ML] SAM 2 click-to-segment with ${positiveCount} positive, ${negativeCount} negative points: score=${score.toFixed(3)}, stability=${stabilityScore.toFixed(3)}, area=${area} in ${(performance.now() - startTime).toFixed(0)}ms`);
 
   return { mask, bbox, score, stabilityScore, area };
 }

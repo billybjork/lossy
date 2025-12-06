@@ -99,17 +99,6 @@ export function renderSegmentMasks(
 }
 
 /**
- * Update segment mask canvas sizes on resize
- * Currently canvases auto-resize via CSS, but this hook exists for future needs
- */
-export function updateSegmentMaskSizes(container: HTMLElement): void {
-  const canvases = container.querySelectorAll('.segment-mask-canvas') as NodeListOf<HTMLCanvasElement>;
-  canvases.forEach((_canvas: HTMLCanvasElement) => {
-    // Force redraw if needed - currently CSS handles sizing
-  });
-}
-
-/**
  * Update highlight state for all masks
  * Applies visual classes based on hover/selection state
  */
@@ -482,6 +471,9 @@ export function updateSegmentMaskSpotlight(
   maskImageCache.forEach((cached: CachedMask, maskId: string) => {
     const canvas = cached.canvas;
     const isSpotlighted = maskId === spotlightedMaskId;
+
+    // Set smooth transition timing
+    canvas.style.transition = 'filter 0.35s ease-out, opacity 0.35s ease-out';
 
     if (isSpotlighted) {
       // Intense spotlight - multi-layer glow

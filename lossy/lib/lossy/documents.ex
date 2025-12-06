@@ -210,29 +210,36 @@ defmodule Lossy.Documents do
   ## Detected Regions
 
   @doc """
-  Gets all detected regions for a document.
-  """
-  def list_detected_regions(%Document{} = document) do
-    DetectedRegion
-    |> where([r], r.document_id == ^document.id)
-    |> order_by([r], asc: r.z_index)
-    |> Repo.all()
-  end
-
-  @doc """
-  Gets a single detected region by ID.
-  """
-  def get_detected_region(id) do
-    Repo.get(DetectedRegion, id)
-  end
-
-  @doc """
   Updates a detected region.
   """
   def update_detected_region(%DetectedRegion{} = region, attrs) do
     region
     |> DetectedRegion.changeset(attrs)
     |> Repo.update()
+  end
+
+  @doc """
+  Deletes detected regions by their IDs and broadcasts document update.
+  Returns {:ok, count} where count is the number of deleted regions.
+  """
+  def delete_detected_regions(%Document{} = document, region_ids) when is_list(region_ids) do
+    Logger.info("Deleting detected regions",
+      document_id: document.id,
+      region_ids: region_ids
+    )
+
+    {count, _} =
+      DetectedRegion
+      |> where([r], r.id in ^region_ids and r.document_id == ^document.id)
+      |> Repo.delete_all()
+
+    Logger.info("Deleted #{count} detected regions", document_id: document.id)
+
+    # Broadcast update to refresh LiveView
+    document = get_document(document.id)
+    broadcast_document_update(document)
+
+    {:ok, count}
   end
 
   @doc """
