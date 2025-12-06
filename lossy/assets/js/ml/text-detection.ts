@@ -28,8 +28,8 @@ const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
 
 // Detection parameters
-const DETECTION_THRESHOLD = 0.3;  // Probability threshold for text regions
-const MIN_BOX_SIZE = 5;           // Minimum box size in pixels
+const DETECTION_THRESHOLD = 0.4;  // Probability threshold for text regions
+const MIN_BOX_SIZE = 8;           // Minimum box size in pixels
 const UNCLIP_RATIO = 1.5;         // Ratio to expand detected boxes
 
 /**

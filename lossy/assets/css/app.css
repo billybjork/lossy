@@ -271,19 +271,17 @@ figure {
 }
 
 /* =============================================================================
-   Mask Overlay - Simple Bounding Box Style
-   Performant border-based approach (no filters/shadows)
+   Mask Overlay - Bounding Box Style with High Contrast
+   Two-color borders for visibility on any background
    ============================================================================= */
 
 .mask-region {
   opacity: 0;
   cursor: pointer;
-  /* Dual-color border: visible on any background */
-  outline: 1px solid rgba(0, 0, 0, 0.6);
-  outline-offset: -1px;
-  border: 1px solid rgba(255, 255, 255, 0.8);
   background: transparent;
-  transition: opacity 0.15s ease-out, border-color 0.15s ease-out, background-color 0.15s ease-out;
+  border: none;
+  outline: none;
+  transition: opacity 0.15s ease-out, background-color 0.15s ease-out, box-shadow 0.15s ease-out, border-color 0.15s ease-out;
 }
 
 /* Idle state: invisible */
@@ -291,47 +289,65 @@ figure {
   opacity: 0;
 }
 
-/* Hover state: visible with subtle highlight */
+/* Hover state: thick white border with dark outline */
 .mask-region.mask-hovered {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 1);
-  outline-color: rgba(0, 0, 0, 0.8);
+  background: rgba(255, 255, 255, 0.12);
+  /* Two-color border: white inner, dark outer for visibility on any background */
+  border: 2px solid #ffffff;
+  outline: 2px solid rgba(0, 0, 0, 0.6);
+  outline-offset: -2px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
 }
 
-/* Selected state: blue border, visible */
+/* Selected state: thick blue border with white outline */
 .mask-region.mask-selected {
   opacity: 1;
-  background: rgba(59, 130, 246, 0.12);
-  border: 2px solid rgba(59, 130, 246, 0.9);
-  outline: 1px solid rgba(0, 0, 0, 0.5);
+  background: rgba(59, 130, 246, 0.2);
+  /* Two-color border: blue inner, white outer for visibility on any background */
+  border: 3px solid #3b82f6;
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: -3px;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
 }
 
-/* Dimmed state: faded but still visible */
+/* Dimmed state: subtle, non-distracting */
 .mask-region.mask-dimmed {
-  opacity: 0.4;
-  border-color: rgba(255, 255, 255, 0.4);
-  outline-color: rgba(0, 0, 0, 0.3);
+  opacity: 0.35;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  outline: 1px solid rgba(0, 0, 0, 0.2);
+  background: transparent;
 }
 
-/* Object masks: hide bounding box, show only segment canvas.
-   Always visible (opacity: 1) so canvas child can render.
-   Canvas controls its own visibility via JS. */
-.mask-region[data-mask-type="object"] {
+/* Segment masks (object/manual): Always visible so canvas child can render.
+   NO bounding box borders - the canvas overlay shows the mask shape with its own border.
+   Nearly-invisible background ensures mouse events are captured for pixel-level hit testing.
+   - 'object': automatic segmentation
+   - 'manual': user click-to-segment */
+.mask-region[data-mask-type="object"],
+.mask-region[data-mask-type="manual"] {
   opacity: 1;
   border: none;
   outline: none;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.001);
+  background-image: none;
+  box-shadow: none;
+  animation: none;
 }
 
 .mask-region[data-mask-type="object"].mask-idle,
 .mask-region[data-mask-type="object"].mask-hovered,
 .mask-region[data-mask-type="object"].mask-selected,
-.mask-region[data-mask-type="object"].mask-dimmed {
+.mask-region[data-mask-type="manual"].mask-idle,
+.mask-region[data-mask-type="manual"].mask-hovered,
+.mask-region[data-mask-type="manual"].mask-selected {
   opacity: 1;
   border: none;
   outline: none;
-  background: transparent;
+  background: rgba(0, 0, 0, 0.001);
+  background-image: none;
+  box-shadow: none;
+  animation: none;
 }
 
 /* Shimmer effect for newly-detected masks */
@@ -371,32 +387,24 @@ figure {
   pointer-events: none;
 }
 
+/* For object/manual segments, shimmer is handled by JS canvas animation */
+.mask-region[data-mask-type="object"].mask-shimmer::after,
+.mask-region[data-mask-type="manual"].mask-shimmer::after {
+  display: none;
+}
+
 /* =============================================================================
-   Segment Mask Canvas Overlays
-   Semi-transparent colored overlays for object segmentation masks
+   Segment Mask Canvas Overlays (Meta SAM style)
+   Canvas-based overlays with crisp colored outlines rendered via JS
    ============================================================================= */
 
 .segment-mask-canvas {
   position: absolute;
   pointer-events: none;
   opacity: 0;
-  transition: opacity 0.15s ease, filter 0.15s ease;
+  transition: opacity 0.15s ease;
   /* Ensure canvas scales properly within bbox */
   object-fit: fill;
-}
-
-/* Show segment masks on hover/select via JS opacity control */
-.mask-region.mask-hovered .segment-mask-canvas,
-.mask-region.mask-selected .segment-mask-canvas {
-  opacity: 1;
-}
-
-.mask-region.mask-selected .segment-mask-canvas {
-  filter: brightness(1.2);
-}
-
-.mask-region.mask-dimmed .segment-mask-canvas {
-  opacity: 0.3;
 }
 
 /* Segment mode: disable mask interaction via CSS (JS just toggles .segment-mode on container) */

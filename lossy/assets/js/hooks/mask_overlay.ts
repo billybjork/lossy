@@ -24,6 +24,22 @@ const pendingSegmentRequests = new Map<string, (result: SegmentResponse) => void
 let inferenceProvider: InferenceProvider | null = null;
 let providerInitPromise: Promise<InferenceProvider> | null = null;
 
+// Color palette for unique per-mask colors (Meta SAM style)
+// Each mask gets assigned a color from this palette for visual distinction
+const MASK_COLORS = [
+  { fill: 'rgba(251, 146, 60, 0.4)', stroke: 'rgb(251, 146, 60)' },   // Orange
+  { fill: 'rgba(59, 130, 246, 0.4)', stroke: 'rgb(59, 130, 246)' },   // Blue
+  { fill: 'rgba(34, 197, 94, 0.4)', stroke: 'rgb(34, 197, 94)' },     // Green
+  { fill: 'rgba(168, 85, 247, 0.4)', stroke: 'rgb(168, 85, 247)' },   // Purple
+  { fill: 'rgba(236, 72, 153, 0.4)', stroke: 'rgb(236, 72, 153)' },   // Pink
+  { fill: 'rgba(6, 182, 212, 0.4)', stroke: 'rgb(6, 182, 212)' },     // Cyan
+  { fill: 'rgba(245, 158, 11, 0.4)', stroke: 'rgb(245, 158, 11)' },   // Amber
+  { fill: 'rgba(99, 102, 241, 0.4)', stroke: 'rgb(99, 102, 241)' },   // Indigo
+];
+
+// Hover state uses white/neutral overlay
+const HOVER_COLOR = { fill: 'rgba(255, 255, 255, 0.25)', stroke: 'rgb(255, 255, 255)' };
+
 interface SegmentResponse {
   success: boolean;
   mask?: MaskData;
@@ -63,17 +79,24 @@ interface BrushStroke {
   brushSize: number;
 }
 
+interface CachedMask {
+  canvas: HTMLCanvasElement;
+  alphaData: ImageData;
+  colorIndex: number;
+}
+
 interface MaskOverlayState {
   container: HTMLElement;
   hoveredMaskId: string | null;
   selectedMaskIds: Set<string>;
-  maskImageCache: Map<string, HTMLCanvasElement>;
+  maskImageCache: Map<string, CachedMask>;
   pageLoadTime: number;
   shimmerPlayed: boolean;
   isDragging: boolean;
   dragStart: DragStart | null;
   dragRect: HTMLDivElement | null;
   dragShift: boolean;
+  dragIntersectingIds: Set<string>;
   segmentMode: boolean;
   segmentPoints: SegmentPoint[];
   previewMaskCanvas: HTMLCanvasElement | null;
@@ -193,6 +216,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.dragStart = null;
     this.dragRect = null;
     this.dragShift = false;  // Track if shift was held at drag start
+    this.dragIntersectingIds = new Set();
 
     // Click-to-segment state
     this.segmentMode = false;
@@ -414,30 +438,62 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     masks.forEach((mask: HTMLElement) => {
       const maskId = mask.dataset.maskId || '';
+      const maskType = mask.dataset.maskType;
+      const isSegment = maskType === 'object' || maskType === 'manual';
 
       // Remove old listeners (in case of re-render)
       mask.onmouseenter = null;
       mask.onmouseleave = null;
+      mask.onmousemove = null;
       mask.onclick = null;
 
-      // Hover handlers (guard for segment mode in case CSS fails)
-      mask.onmouseenter = () => {
-        if (this.segmentMode) return;
-        this.hoveredMaskId = maskId;
-        this.updateHighlight();
-      };
+      if (isSegment) {
+        // For segments, check if cursor is over actual mask pixels
+        mask.onmousemove = (e: MouseEvent) => {
+          if (this.segmentMode) return;
+          const isOverMask = this.isPointOverSegmentMask(maskId, e, mask);
+          if (isOverMask && this.hoveredMaskId !== maskId) {
+            this.hoveredMaskId = maskId;
+            this.updateHighlight();
+          } else if (!isOverMask && this.hoveredMaskId === maskId) {
+            this.hoveredMaskId = null;
+            this.updateHighlight();
+          }
+        };
 
-      mask.onmouseleave = () => {
-        if (this.segmentMode) return;
-        if (this.hoveredMaskId === maskId) {
-          this.hoveredMaskId = null;
+        mask.onmouseleave = () => {
+          if (this.segmentMode) return;
+          if (this.hoveredMaskId === maskId) {
+            this.hoveredMaskId = null;
+            this.updateHighlight();
+          }
+        };
+      } else {
+        // For text regions, use simple bounding box hover
+        mask.onmouseenter = () => {
+          if (this.segmentMode) return;
+          this.hoveredMaskId = maskId;
           this.updateHighlight();
-        }
-      };
+        };
 
-      // Click handler (guard for segment mode in case CSS fails)
+        mask.onmouseleave = () => {
+          if (this.segmentMode) return;
+          if (this.hoveredMaskId === maskId) {
+            this.hoveredMaskId = null;
+            this.updateHighlight();
+          }
+        };
+      }
+
+      // Click handler - for segments, also check mask pixels
       mask.onclick = (e: MouseEvent) => {
         if (this.segmentMode) return;
+
+        // For segments, only register click if over actual mask
+        if (isSegment && !this.isPointOverSegmentMask(maskId, e, mask)) {
+          return; // Don't stop propagation - let click pass through
+        }
+
         e.stopPropagation();
         const shift = e.shiftKey;
 
@@ -457,6 +513,40 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         this.updateHighlight();
       };
     });
+  },
+
+  // Check if a point is over an opaque pixel of a segment mask using pre-computed alpha data
+  isPointOverSegmentMask(maskId: string, e: MouseEvent, maskElement: HTMLElement): boolean {
+    const cached = this.maskImageCache.get(maskId);
+    if (!cached) {
+      // Cache not loaded yet - fall back to bbox detection
+      return true;
+    }
+
+    const { alphaData } = cached;
+
+    // Get mouse position relative to the mask element
+    const rect = maskElement.getBoundingClientRect();
+    const displayX = e.clientX - rect.left;
+    const displayY = e.clientY - rect.top;
+
+    // Convert from display coordinates to alpha data coordinates
+    const scaleX = alphaData.width / rect.width;
+    const scaleY = alphaData.height / rect.height;
+    const dataX = Math.floor(displayX * scaleX);
+    const dataY = Math.floor(displayY * scaleY);
+
+    // Check bounds
+    if (dataX < 0 || dataX >= alphaData.width || dataY < 0 || dataY >= alphaData.height) {
+      return false;
+    }
+
+    // Get alpha value from pre-computed data (RGBA, so alpha is every 4th byte starting at index 3)
+    const pixelIndex = (dataY * alphaData.width + dataX) * 4;
+    const alpha = alphaData.data[pixelIndex + 3];
+
+    // Consider "over mask" if alpha is above a threshold
+    return alpha > 10;
   },
 
   handleKeydown(e: KeyboardEvent) {
@@ -540,7 +630,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   updateHighlight() {
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
-    const hasSelection = this.selectedMaskIds.size > 0;
     const hasHover = this.hoveredMaskId !== null;
 
     // In segment mode, disable pointer events on all masks
@@ -560,13 +649,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         // Remove all state classes
         mask.classList.remove('mask-hovered', 'mask-selected', 'mask-dimmed', 'mask-idle');
 
-        // Apply appropriate class
+        // Apply appropriate class (no dimming - other masks stay idle)
         if (isSelected) {
           mask.classList.add('mask-selected');
         } else if (isHovered) {
           mask.classList.add('mask-hovered');
-        } else if (hasSelection || hasHover) {
-          mask.classList.add('mask-dimmed');
         } else {
           mask.classList.add('mask-idle');
         }
@@ -588,12 +675,127 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     if (masks.length === 0) return;
 
-    // Add shimmer class to all masks
-    masks.forEach((mask: HTMLElement) => mask.classList.add('mask-shimmer'));
+    const shimmerCanvases: HTMLCanvasElement[] = [];
 
-    // Remove after animation completes
+    masks.forEach((mask: HTMLElement) => {
+      const maskType = mask.dataset.maskType;
+
+      // For text regions, use CSS shimmer
+      if (maskType !== 'object' && maskType !== 'manual') {
+        mask.classList.add('mask-shimmer');
+        return;
+      }
+
+      // For object/manual segments, create canvas-based shimmer with sweeping gradient
+      const maskUrl = mask.dataset.maskUrl;
+      if (!maskUrl) return;
+
+      const bboxX = parseFloat(mask.dataset.bboxX || '0') || 0;
+      const bboxY = parseFloat(mask.dataset.bboxY || '0') || 0;
+      const bboxW = parseFloat(mask.dataset.bboxW || '0') || 0;
+      const bboxH = parseFloat(mask.dataset.bboxH || '0') || 0;
+      if (bboxW <= 0 || bboxH <= 0) return;
+
+      // Create shimmer canvas
+      const shimmerCanvas = document.createElement('canvas');
+      shimmerCanvas.className = 'segment-shimmer-canvas';
+      shimmerCanvas.width = bboxW;
+      shimmerCanvas.height = bboxH;
+      shimmerCanvas.style.cssText = `
+        position: absolute;
+        left: 0; top: 0;
+        width: 100%; height: 100%;
+        pointer-events: none;
+        z-index: 10;
+      `;
+      mask.appendChild(shimmerCanvas);
+      shimmerCanvases.push(shimmerCanvas);
+
+      // Load mask and animate the sweeping gradient
+      const maskImg = new Image();
+      maskImg.crossOrigin = 'anonymous';
+      maskImg.onload = () => {
+        const ctx = shimmerCanvas.getContext('2d')!;
+        const duration = 600;
+        const startTime = performance.now();
+
+        const animate = (currentTime: number) => {
+          const elapsed = currentTime - startTime;
+          const progress = Math.min(elapsed / duration, 1);
+
+          // Clear canvas
+          ctx.clearRect(0, 0, bboxW, bboxH);
+
+          // Draw the mask first (extracts bbox portion from full mask)
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
+
+          // Use mask as clip, then draw gradient
+          ctx.globalCompositeOperation = 'source-in';
+
+          // Animated gradient position: starts at left (-100%), sweeps to right (200%)
+          // CSS background-position 200%→-100% with 200% size visually sweeps left to right
+          const gradientPos = -1 + (progress * 3); // -1 -> 2
+          const centerX = gradientPos * bboxW;
+
+          // Create gradient matching CSS 110deg angle
+          // CSS: 0deg = up, clockwise. For canvas coordinates, use 110 - 90 = 20deg
+          const angle = ((110 - 90) * Math.PI) / 180;
+          const length = Math.max(bboxW, bboxH) * 2;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+
+          const gradient = ctx.createLinearGradient(
+            centerX - cos * length / 2,
+            -sin * length / 2,
+            centerX + cos * length / 2,
+            sin * length / 2
+          );
+          gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+          gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0)');
+          gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+          gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0)');
+          gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, bboxW, bboxH);
+
+          // Fade out in last 25% (matching CSS animation)
+          if (progress > 0.75) {
+            shimmerCanvas.style.opacity = String(1 - ((progress - 0.75) / 0.25));
+          }
+
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          }
+        };
+
+        requestAnimationFrame(animate);
+      };
+      maskImg.src = maskUrl;
+    });
+
+    // Remove text shimmer and cleanup segment shimmer canvases after animation
     setTimeout(() => {
-      masks.forEach((mask: HTMLElement) => mask.classList.remove('mask-shimmer'));
+      masks.forEach((mask: HTMLElement) => {
+        const maskType = mask.dataset.maskType;
+        if (maskType !== 'object' && maskType !== 'manual') {
+          mask.style.borderColor = 'transparent';
+          mask.style.outlineColor = 'transparent';
+        }
+        mask.classList.remove('mask-shimmer');
+      });
+
+      // Remove shimmer canvases
+      shimmerCanvases.forEach(canvas => canvas.remove());
+
+      // Clean up inline styles after fade-out transition completes
+      setTimeout(() => {
+        masks.forEach((mask: HTMLElement) => {
+          mask.style.removeProperty('border-color');
+          mask.style.removeProperty('outline-color');
+        });
+      }, 200);
     }, 650);
   },
 
@@ -622,9 +824,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       return;
     }
 
-    // Only start drag on container background, not on masks
-    const target = e.target as HTMLElement;
-    if (target.classList.contains('mask-region')) return;
+    // Allow marquee to start from anywhere, including over mask regions.
+    // The 5px drag threshold in updateDrag distinguishes between clicks and drags.
+    // If user clicks without dragging, endDrag does nothing and the mask's
+    // click handler fires to select that individual mask.
 
     const containerRect = this.container.getBoundingClientRect();
     this.dragStart = {
@@ -727,6 +930,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.isDragging = false;
     this.dragStart = null;
     this.dragShift = false;
+    this.dragIntersectingIds = new Set();
     if (this.dragRect) {
       this.dragRect.style.display = 'none';
     }
@@ -760,6 +964,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     const previewSet = new Set(intersectingIds);
 
+    // Track intersecting IDs for segment mask hover effect
+    this.dragIntersectingIds = previewSet;
+
     masks.forEach((mask: HTMLElement) => {
       const maskId = mask.dataset.maskId || '';
       const isIntersecting = previewSet.has(maskId);
@@ -773,6 +980,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         mask.classList.add('mask-dimmed');
       }
     });
+
+    // Update segment mask canvas overlays to show hover effect for intersecting masks
+    this.updateSegmentMaskHighlight();
   },
 
   // Render segment masks (type: 'object') as semi-transparent overlays
@@ -782,16 +992,25 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
 
+    // Track color index assignment for new masks
+    let nextColorIndex = this.maskImageCache.size;
+
     masks.forEach((mask: HTMLElement) => {
       const maskType = mask.dataset.maskType;
       const maskUrl = mask.dataset.maskUrl;
       const maskId = mask.dataset.maskId || '';
 
-      // Only render canvas overlays for object segments with mask URLs
-      if (maskType !== 'object' || !maskUrl) return;
+      // Render canvas overlays for object/manual segments with mask URLs
+      // - 'object': automatic segmentation
+      // - 'manual': user click-to-segment
+      if ((maskType !== 'object' && maskType !== 'manual') || !maskUrl) return;
 
       // Check if already rendered
       if (this.maskImageCache.has(maskId)) return;
+
+      // Assign a color index for this mask
+      const colorIndex = nextColorIndex % MASK_COLORS.length;
+      nextColorIndex++;
 
       // Get bbox coordinates (mask PNG is full-image-resolution, we need to extract bbox portion)
       const bboxX = parseFloat(mask.dataset.bboxX || '0') || 0;
@@ -825,17 +1044,14 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
         ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
 
-        // Use the mask as alpha channel and fill with color
-        ctx.globalCompositeOperation = 'source-in';
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.4)'; // Blue overlay
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Extract alpha data before applying any fill (for dynamic recoloring)
+        const alphaData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
         // Style the canvas
         canvas.style.position = 'absolute';
         canvas.style.pointerEvents = 'none';
         canvas.style.opacity = '0';
         canvas.style.transition = 'opacity 0.15s';
-        canvas.style.filter = 'blur(0.5px)';  // Subtle blur for visual antialiasing
 
         // Position to fill the mask-region (which is already positioned at bbox)
         canvas.style.left = '0';
@@ -846,8 +1062,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         // Insert canvas inside the mask div
         mask.appendChild(canvas);
 
-        // Cache the canvas reference
-        this.maskImageCache.set(maskId, canvas);
+        // Cache canvas, alpha data, and color assignment
+        this.maskImageCache.set(maskId, { canvas, alphaData, colorIndex });
       };
 
       maskImg.onerror = () => {
@@ -868,27 +1084,103 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     });
   },
 
-  // Update highlight to include segment mask visibility
-  updateSegmentMaskHighlight() {
-    const hasSelection = this.selectedMaskIds.size > 0;
-    const hasHover = this.hoveredMaskId !== null;
+  // Generate circular offsets for drawing stroke outline
+  getStrokeOffsets(strokeWidth: number): Array<[number, number]> {
+    const offsets: Array<[number, number]> = [];
+    // Create circular offset pattern for smooth outline
+    for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
+      const dx = Math.round(Math.cos(angle) * strokeWidth);
+      const dy = Math.round(Math.sin(angle) * strokeWidth);
+      // Avoid duplicates
+      if (!offsets.some(([x, y]) => x === dx && y === dy)) {
+        offsets.push([dx, dy]);
+      }
+    }
+    return offsets;
+  },
 
-    this.maskImageCache.forEach((canvas: HTMLCanvasElement, maskId: string) => {
-      const isHovered = maskId === this.hoveredMaskId;
+  // Draw mask with crisp colored outline and semi-transparent fill (Meta SAM style)
+  // Creates a proper stroke by: dilating mask -> coloring -> subtracting original -> adding fill
+  applyMaskWithOutline(
+    maskId: string,
+    fillColor: string,
+    strokeColor: string,
+    strokeWidth: number = 3
+  ) {
+    const cached = this.maskImageCache.get(maskId);
+    if (!cached) return;
+
+    const { canvas, alphaData } = cached;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const w = canvas.width;
+    const h = canvas.height;
+
+    // Create temp canvas for the original mask shape
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = w;
+    maskCanvas.height = h;
+    const maskCtx = maskCanvas.getContext('2d')!;
+    maskCtx.putImageData(alphaData, 0, 0);
+
+    // Create stroke layer: dilated mask minus original = outline only
+    const strokeCanvas = document.createElement('canvas');
+    strokeCanvas.width = w;
+    strokeCanvas.height = h;
+    const strokeCtx = strokeCanvas.getContext('2d')!;
+
+    // Draw dilated mask (multiple offset copies)
+    const offsets = this.getStrokeOffsets(strokeWidth);
+    for (const [dx, dy] of offsets) {
+      strokeCtx.drawImage(maskCanvas, dx, dy);
+    }
+
+    // Cut out the original mask to leave only the stroke outline
+    strokeCtx.globalCompositeOperation = 'destination-out';
+    strokeCtx.drawImage(maskCanvas, 0, 0);
+
+    // Apply stroke color to the outline
+    strokeCtx.globalCompositeOperation = 'source-in';
+    strokeCtx.fillStyle = strokeColor;
+    strokeCtx.fillRect(0, 0, w, h);
+
+    // Create fill layer: original mask with fill color
+    const fillCanvas = document.createElement('canvas');
+    fillCanvas.width = w;
+    fillCanvas.height = h;
+    const fillCtx = fillCanvas.getContext('2d')!;
+    fillCtx.putImageData(alphaData, 0, 0);
+    fillCtx.globalCompositeOperation = 'source-in';
+    fillCtx.fillStyle = fillColor;
+    fillCtx.fillRect(0, 0, w, h);
+
+    // Composite final result: stroke outline + fill
+    ctx.clearRect(0, 0, w, h);
+    ctx.drawImage(strokeCanvas, 0, 0);  // Stroke outline first
+    ctx.drawImage(fillCanvas, 0, 0);    // Fill on top
+  },
+
+  // Update segment mask visibility and styling
+  // Uses canvas-based crisp outlines with unique per-mask colors
+  updateSegmentMaskHighlight() {
+    this.maskImageCache.forEach((cached: CachedMask, maskId: string) => {
+      const canvas = cached.canvas;
+      const isHovered = maskId === this.hoveredMaskId || this.dragIntersectingIds.has(maskId);
       const isSelected = this.selectedMaskIds.has(maskId);
 
       if (isSelected) {
+        // Selected: colored fill + colored outline using mask's assigned color
+        const color = MASK_COLORS[cached.colorIndex];
+        this.applyMaskWithOutline(maskId, color.fill, color.stroke, 3);
         canvas.style.opacity = '1';
-        canvas.style.filter = 'brightness(1.2)';
       } else if (isHovered) {
+        // Hover: white/neutral fill + white outline
+        this.applyMaskWithOutline(maskId, HOVER_COLOR.fill, HOVER_COLOR.stroke, 2);
         canvas.style.opacity = '1';
-        canvas.style.filter = 'none';
-      } else if (hasSelection || hasHover) {
-        canvas.style.opacity = '0.3';
-        canvas.style.filter = 'none';
       } else {
+        // Idle: hidden
         canvas.style.opacity = '0';
-        canvas.style.filter = 'none';
       }
     });
   },
@@ -1169,6 +1461,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (this.segmentPoints.length === 0) return;
     if (!this.documentId) {
       console.warn('[MaskOverlay] No document ID for segmentation');
+      return;
+    }
+
+    // Check if embeddings are ready when using local inference
+    if (inferenceProvider && !isExtensionAvailable() && !this.embeddingsReady) {
+      console.warn('[MaskOverlay] Embeddings not ready yet, skipping segment request');
       return;
     }
 
@@ -1507,6 +1805,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (this.strokeHistory.length === 0) return;
     if (!this.documentId) {
       console.warn('[MaskOverlay] No document ID for segmentation');
+      return;
+    }
+
+    // Check if embeddings are ready when using local inference
+    if (inferenceProvider && !isExtensionAvailable() && !this.embeddingsReady) {
+      console.warn('[MaskOverlay] Embeddings not ready yet, skipping segment request');
       return;
     }
 
