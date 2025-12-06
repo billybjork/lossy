@@ -95,6 +95,8 @@ interface MaskOverlayState {
   strokeHistory: BrushStroke[];
   brushCanvas: HTMLCanvasElement | null;
   isDrawingStroke: boolean;
+  // Track mouse position for immediate cursor display
+  lastMousePosition: { x: number; y: number } | null;
 }
 
 // Douglas-Peucker algorithm for simplifying brush strokes
@@ -208,6 +210,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.strokeHistory = [];
     this.brushCanvas = null;
     this.isDrawingStroke = false;
+    this.lastMousePosition = null;
 
     // Get image dimensions from data attributes
     this.imageWidth = parseInt(this.el.dataset.imageWidth || '0') || 0;
@@ -246,6 +249,15 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.mouseUpHandler = (e: MouseEvent) => this.endDrag(e);
     document.addEventListener('mousemove', this.mouseMoveHandler);
     document.addEventListener('mouseup', this.mouseUpHandler);
+
+    // Track mouse position for immediate brush cursor display
+    this.container.addEventListener('mousemove', (e: MouseEvent) => {
+      const rect = this.container.getBoundingClientRect();
+      this.lastMousePosition = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    });
 
     // Container click handler for segment mode (capture phase fires BEFORE children)
     this.containerClickHandler = (e: MouseEvent) => this.handleContainerClick(e);
@@ -531,12 +543,19 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     const hasSelection = this.selectedMaskIds.size > 0;
     const hasHover = this.hoveredMaskId !== null;
 
-    // Don't update mask states in segment mode - they should stay dimmed
-    if (!this.segmentMode) {
+    // In segment mode, disable pointer events on all masks
+    if (this.segmentMode) {
+      masks.forEach((mask: HTMLElement) => {
+        mask.style.pointerEvents = 'none';
+      });
+    } else {
       masks.forEach((mask: HTMLElement) => {
         const maskId = mask.dataset.maskId || '';
         const isHovered = maskId === this.hoveredMaskId;
         const isSelected = this.selectedMaskIds.has(maskId);
+
+        // Restore pointer events
+        mask.style.pointerEvents = '';
 
         // Remove all state classes
         mask.classList.remove('mask-hovered', 'mask-selected', 'mask-dimmed', 'mask-idle');
@@ -595,16 +614,17 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   startDrag(e: MouseEvent) {
-    // Only start drag on container background, not on masks
-    const target = e.target as HTMLElement;
-    if (target.classList.contains('mask-region')) return;
     if (e.button !== 0) return;  // Left click only
 
-    // In segment mode, start a brush stroke instead of drag selection
+    // In segment mode, start a brush stroke (ignore mask regions)
     if (this.segmentMode) {
       this.startBrushStroke(e);
       return;
     }
+
+    // Only start drag on container background, not on masks
+    const target = e.target as HTMLElement;
+    if (target.classList.contains('mask-region')) return;
 
     const containerRect = this.container.getBoundingClientRect();
     this.dragStart = {
@@ -896,11 +916,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.container.classList.add('segment-mode');
     this.container.style.cursor = 'crosshair';
 
-    // Dim existing masks
+    // Dim existing masks and disable pointer events
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     masks.forEach((mask: HTMLElement) => {
       mask.classList.add('mask-dimmed');
     });
+    this.updateHighlight();
 
     // Get the protected container that LiveView won't touch
     const jsContainer = document.getElementById('js-overlay-container');
@@ -948,6 +969,22 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       });
     }
 
+    // Immediately show brush cursor at last known position
+    if (this.cursorOverlay && this.lastMousePosition) {
+      const img = document.getElementById('editor-image') as HTMLImageElement | null;
+      if (img) {
+        const displayWidth = img.clientWidth;
+        const naturalWidth = img.naturalWidth || this.imageWidth;
+        const displayBrushSize = (this.brushSize / naturalWidth) * displayWidth;
+
+        this.cursorOverlay.style.left = `${this.lastMousePosition.x}px`;
+        this.cursorOverlay.style.top = `${this.lastMousePosition.y}px`;
+        this.cursorOverlay.style.width = `${displayBrushSize}px`;
+        this.cursorOverlay.style.height = `${displayBrushSize}px`;
+        this.cursorOverlay.style.display = 'block';
+      }
+    }
+
     // Hide default cursor in segment mode
     this.container.style.cursor = 'none';
 
@@ -992,7 +1029,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.strokeHistory = [];
     this.isDrawingStroke = false;
 
-    // Update visual state (CSS restores pointer-events/cursor when .segment-mode is removed)
+    // Update visual state
     this.container.classList.remove('segment-mode');
 
     // Clear point markers
