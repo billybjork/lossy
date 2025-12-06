@@ -70,23 +70,28 @@ export async function enterSegmentMode(
     `;
     jsContainer.appendChild(state.cursorOverlay);
 
-    // Add mousemove listener for brush cursor
-    container.addEventListener('mousemove', (e: MouseEvent) => {
+    // IMPORTANT: Store event listener references for proper cleanup
+    state.segmentModeCursorMoveHandler = (e: MouseEvent) => {
       if (!state.segmentMode || !state.cursorOverlay) return;
       updateBrushCursor(e, container, state);
-    });
+    };
 
-    // Show/hide cursor on enter/leave
-    container.addEventListener('mouseenter', () => {
+    state.segmentModeEnterHandler = () => {
       if (state.segmentMode && state.cursorOverlay) {
         state.cursorOverlay.style.display = 'block';
       }
-    });
-    container.addEventListener('mouseleave', () => {
+    };
+
+    state.segmentModeLeaveHandler = () => {
       if (state.cursorOverlay) {
         state.cursorOverlay.style.display = 'none';
       }
-    });
+    };
+
+    // Add event listeners (which will be removed on exit)
+    container.addEventListener('mousemove', state.segmentModeCursorMoveHandler);
+    container.addEventListener('mouseenter', state.segmentModeEnterHandler);
+    container.addEventListener('mouseleave', state.segmentModeLeaveHandler);
   }
 
   // Immediately show brush cursor at last known position
@@ -108,6 +113,11 @@ export async function enterSegmentMode(
   // Hide default cursor in segment mode
   container.style.cursor = 'none';
 
+  // Create spotlight overlay if in spacebar hover mode
+  if (state.spacebarHoverMode) {
+    createSpotlightOverlay(state);
+  }
+
   // Notify server
   callbacks.pushEvent("enter_segment_mode", {});
 
@@ -125,14 +135,46 @@ export async function enterSegmentMode(
         console.log('[SegmentMode] Embeddings ready');
       } catch (error) {
         console.error('[SegmentMode] Failed to compute embeddings:', error);
+        // Don't exit segment mode on embedding failure - user can still try
+        // Extension-based inference or other operations
       }
     }
   }
 }
 
 /**
+ * Ensure segment mode is fully exited (recovery function)
+ * Call this if you suspect segment mode is stuck
+ */
+export function ensureSegmentModeExited(
+  container: HTMLElement,
+  state: MaskOverlayState
+): void {
+  console.warn('[SegmentMode] Force exiting segment mode');
+
+  // Reset all state flags
+  state.segmentMode = false;
+  state.isDrawingStroke = false;
+  state.segmentPending = false;
+
+  // Clear timers
+  if (state.liveSegmentDebounceId !== null) {
+    clearTimeout(state.liveSegmentDebounceId);
+    state.liveSegmentDebounceId = null;
+  }
+
+  // Remove class
+  container.classList.remove('segment-mode');
+  container.style.cursor = '';
+
+  // Force cleanup
+  forceCleanupSegmentElements();
+}
+
+/**
  * Exit segment mode
  * Cleans up UI overlays and resets state
+ * Uses defensive cleanup to ensure marquee tool reliability
  */
 export function exitSegmentMode(
   container: HTMLElement,
@@ -142,57 +184,164 @@ export function exitSegmentMode(
     pushEvent: (event: string, payload: unknown) => void
   }
 ): void {
-  state.segmentMode = false;
-  state.segmentPoints = [];
-  state.segmentPending = false;
+  console.log('[SegmentMode] Exiting segment mode...');
 
-  // Clear brush state
-  state.currentStroke = [];
-  state.strokeHistory = [];
-  state.isDrawingStroke = false;
+  try {
+    // CRITICAL: Set state first to prevent race conditions
+    state.segmentMode = false;
+    state.segmentPoints = [];
+    state.segmentPending = false;
 
-  // Clear live segment state
-  if (state.liveSegmentDebounceId !== null) {
-    clearTimeout(state.liveSegmentDebounceId);
-    state.liveSegmentDebounceId = null;
+    // Clear brush state
+    state.currentStroke = [];
+    state.strokeHistory = [];
+    state.isDrawingStroke = false;
+
+    // Clear live segment state
+    if (state.liveSegmentDebounceId !== null) {
+      clearTimeout(state.liveSegmentDebounceId);
+      state.liveSegmentDebounceId = null;
+    }
+    state.lastLiveSegmentRequestId = null;
+    state.liveSegmentInProgress = false;
+    state.lastLiveSegmentTime = 0;
+
+    // Update visual state
+    container.classList.remove('segment-mode');
+
+    // IMPORTANT: Remove event listeners FIRST (before DOM cleanup)
+    // This prevents orphaned listeners from interfering with marquee
+    try {
+      if (state.segmentModeCursorMoveHandler) {
+        container.removeEventListener('mousemove', state.segmentModeCursorMoveHandler);
+        state.segmentModeCursorMoveHandler = null;
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing cursor move handler:', e);
+    }
+
+    try {
+      if (state.segmentModeEnterHandler) {
+        container.removeEventListener('mouseenter', state.segmentModeEnterHandler);
+        state.segmentModeEnterHandler = null;
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing enter handler:', e);
+    }
+
+    try {
+      if (state.segmentModeLeaveHandler) {
+        container.removeEventListener('mouseleave', state.segmentModeLeaveHandler);
+        state.segmentModeLeaveHandler = null;
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing leave handler:', e);
+    }
+
+    // Clear point markers
+    try {
+      if (state.pointMarkersContainer) {
+        state.pointMarkersContainer.innerHTML = '';
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error clearing point markers:', e);
+    }
+
+    // Remove brush canvas
+    try {
+      if (state.brushCanvas) {
+        state.brushCanvas.remove();
+        state.brushCanvas = null;
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing brush canvas:', e);
+    }
+
+    // Remove preview mask
+    try {
+      if (state.previewMaskCanvas) {
+        state.previewMaskCanvas.remove();
+        state.previewMaskCanvas = null;
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing preview mask:', e);
+    }
+
+    // Remove cursor overlay
+    try {
+      if (state.cursorOverlay) {
+        state.cursorOverlay.remove();
+        state.cursorOverlay = null;
+      }
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing cursor overlay:', e);
+    }
+
+    // Remove spotlight overlay
+    try {
+      removeSpotlightOverlay(state);
+    } catch (e) {
+      console.warn('[SegmentMode] Error removing spotlight overlay:', e);
+    }
+
+    // Restore cursor style
+    try {
+      container.style.cursor = '';
+    } catch (e) {
+      console.warn('[SegmentMode] Error restoring cursor:', e);
+    }
+
+    // DEFENSIVE: Force cleanup any remaining segment mode elements
+    forceCleanupSegmentElements();
+
+    // Restore highlight state
+    try {
+      callbacks.updateHighlight();
+    } catch (e) {
+      console.warn('[SegmentMode] Error updating highlight:', e);
+    }
+
+    // Notify server
+    try {
+      callbacks.pushEvent("exit_segment_mode", {});
+    } catch (e) {
+      console.warn('[SegmentMode] Error notifying server:', e);
+    }
+
+    console.log('[SegmentMode] Successfully exited segment mode');
+  } catch (error) {
+    console.error('[SegmentMode] CRITICAL: Error during exit, forcing cleanup:', error);
+    // Even if everything fails, ensure state is reset
+    state.segmentMode = false;
+    forceCleanupSegmentElements();
   }
-  state.lastLiveSegmentRequestId = null;
-  state.liveSegmentInProgress = false;
-  state.lastLiveSegmentTime = 0;
+}
 
-  // Update visual state
-  container.classList.remove('segment-mode');
-
-  // Clear point markers
-  if (state.pointMarkersContainer) {
-    state.pointMarkersContainer.innerHTML = '';
+/**
+ * Force cleanup of all segment mode DOM elements
+ * This is a nuclear option to ensure marquee reliability
+ */
+export function forceCleanupSegmentElements(): void {
+  try {
+    const jsContainer = document.getElementById('js-overlay-container');
+    if (jsContainer) {
+      const segmentElements = jsContainer.querySelectorAll(
+        '.brush-cursor, .segment-point-markers, .brush-stroke-canvas, .segment-preview-mask, .segment-spotlight-overlay'
+      );
+      segmentElements.forEach(el => {
+        try {
+          el.remove();
+        } catch (e) {
+          console.warn('[SegmentMode] Error removing element:', e);
+        }
+      });
+      if (segmentElements.length > 0) {
+        console.log(`[SegmentMode] Force cleaned ${segmentElements.length} segment elements`);
+      }
+    }
+  } catch (error) {
+    console.error('[SegmentMode] Error in force cleanup:', error);
   }
-
-  // Remove brush canvas
-  if (state.brushCanvas) {
-    state.brushCanvas.remove();
-    state.brushCanvas = null;
-  }
-
-  // Remove preview mask
-  if (state.previewMaskCanvas) {
-    state.previewMaskCanvas.remove();
-    state.previewMaskCanvas = null;
-  }
-
-  // Remove cursor overlay
-  if (state.cursorOverlay) {
-    state.cursorOverlay.remove();
-    state.cursorOverlay = null;
-  }
-
-  // Restore highlight state
-  callbacks.updateHighlight();
-
-  // Notify server
-  callbacks.pushEvent("exit_segment_mode", {});
-
-  console.log('[SegmentMode] Exited segment mode');
 }
 
 /**
@@ -784,6 +933,9 @@ export async function requestLiveSegmentFromCurrentStroke(
  * Render preview mask from segmentation result
  */
 export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): void {
+  // Store mask data for later use (e.g., marching ants)
+  state.lastMaskData = maskData;
+
   // Remove old preview
   if (state.previewMaskCanvas) {
     state.previewMaskCanvas.remove();
@@ -804,7 +956,7 @@ export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): 
     pointer-events: none;
     z-index: 50;
     opacity: 0;
-    transition: opacity 300ms ease-out;
+    transition: opacity 150ms ease-out;
   `;
 
   canvas.width = img.clientWidth;
@@ -817,13 +969,24 @@ export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): 
   maskImg.onload = () => {
     if (!state.segmentMode) return;
 
-    // Draw mask scaled to canvas
-    ctx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+    // In spotlight mode, show actual image section with mask as cutout
+    // In normal mode, show blue tint
+    if (state.spotlightOverlay) {
+      // Draw source image
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
-    // Apply blue tint
-    ctx.globalCompositeOperation = 'source-in';
-    ctx.fillStyle = 'rgba(59, 130, 246, 0.5)';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Use mask as alpha channel to create cutout effect
+      ctx.globalCompositeOperation = 'destination-in';
+      ctx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+    } else {
+      // Draw mask scaled to canvas
+      ctx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+
+      // Apply blue tint
+      ctx.globalCompositeOperation = 'source-in';
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.5)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
 
     // Insert into DOM
     if (state.pointMarkersContainer && state.pointMarkersContainer.parentNode === state.container) {
@@ -854,6 +1017,100 @@ export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): 
   };
 
   maskImg.src = maskData.mask_png;
+}
+
+/**
+ * Create marching ants animation around mask edges
+ * Battle-tested approach: use canvas stroke operations with the mask as clipping path
+ */
+export function createMarchingAnts(
+  maskData: MaskData,
+  state: MaskOverlayState
+): void {
+  // Remove any existing marching ants
+  removeMarchingAnts(state);
+
+  const img = document.getElementById('editor-image') as HTMLImageElement | null;
+  if (!img) return;
+
+  // Create canvas for marching ants
+  const canvas = document.createElement('canvas');
+  canvas.className = 'marching-ants-canvas';
+  canvas.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 51;
+  `;
+
+  canvas.width = img.clientWidth;
+  canvas.height = img.clientHeight;
+
+  const ctx = canvas.getContext('2d')!;
+
+  // Load mask image
+  const maskImg = new Image();
+  maskImg.onload = () => {
+    // Animate marching ants
+    let offset = 0;
+    const animate = () => {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Draw the mask to use as a template
+      ctx.save();
+      ctx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+
+      // Use the mask alpha as a clip for the stroke
+      ctx.globalCompositeOperation = 'source-in';
+
+      // Draw black dashed stroke
+      ctx.strokeStyle = '#000000';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 6]);
+      ctx.lineDashOffset = -offset;
+      ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+      // Switch to destination-over to draw behind
+      ctx.globalCompositeOperation = 'destination-over';
+
+      // Draw white dashed stroke (offset)
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineDashOffset = -offset - 6;
+      ctx.strokeRect(0, 0, canvas.width, canvas.height);
+
+      ctx.restore();
+
+      offset = (offset + 0.5) % 12;
+      state.marchingAntsAnimationId = requestAnimationFrame(animate);
+    };
+
+    animate();
+  };
+
+  maskImg.src = maskData.mask_png;
+
+  // Insert into DOM
+  if (state.container) {
+    state.container.appendChild(canvas);
+    state.marchingAntsCanvas = canvas;
+  }
+}
+
+/**
+ * Remove marching ants animation
+ */
+export function removeMarchingAnts(state: MaskOverlayState): void {
+  if (state.marchingAntsCanvas) {
+    state.marchingAntsCanvas.remove();
+    state.marchingAntsCanvas = null;
+  }
+  if (state.marchingAntsAnimationId !== null) {
+    cancelAnimationFrame(state.marchingAntsAnimationId);
+    state.marchingAntsAnimationId = null;
+  }
 }
 
 /**
@@ -946,4 +1203,68 @@ export async function confirmSegment(
     state.segmentPending = false;
     callbacks.exitSegmentMode();
   }
+}
+
+/**
+ * Create dark spotlight overlay for spacebar hover mode
+ * Adds a dark backdrop with radial gradient to create "closing in" effect
+ */
+export function createSpotlightOverlay(state: MaskOverlayState): void {
+  const jsContainer = document.getElementById('js-overlay-container');
+  if (!jsContainer || state.spotlightOverlay) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'segment-spotlight-overlay';
+  overlay.style.cssText = `
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.88);
+    backdrop-filter: blur(2px);
+    pointer-events: none;
+    z-index: 45;
+    opacity: 0;
+    transition: opacity 0.2s ease-out, background 0.1s ease-out;
+  `;
+
+  jsContainer.appendChild(overlay);
+  state.spotlightOverlay = overlay;
+
+  // Fade in
+  requestAnimationFrame(() => {
+    if (overlay.style) {
+      overlay.style.opacity = '1';
+    }
+  });
+}
+
+/**
+ * Update spotlight position with radial gradient
+ * Creates a radial gradient centered at cursor for enhanced "closing in" feel
+ */
+export function updateSpotlightPosition(
+  state: MaskOverlayState,
+  x: number,
+  y: number
+): void {
+  if (!state.spotlightOverlay) return;
+
+  state.spotlightOverlay.style.background = `
+    radial-gradient(circle 600px at ${x}px ${y}px,
+      rgba(0, 0, 0, 0.6),
+      rgba(0, 0, 0, 0.92))
+  `;
+}
+
+/**
+ * Remove spotlight overlay and reset spotlight state
+ */
+export function removeSpotlightOverlay(state: MaskOverlayState): void {
+  if (state.spotlightOverlay) {
+    state.spotlightOverlay.remove();
+    state.spotlightOverlay = null;
+  }
+  state.spotlightedMaskId = null;
 }

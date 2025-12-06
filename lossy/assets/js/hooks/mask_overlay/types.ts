@@ -75,20 +75,32 @@ export interface MaskOverlayState {
   dragShift: boolean;
   dragIntersectingIds: Set<string>;
   segmentMode: boolean;
+  segmentModeViaSpacebar: boolean;
+  spacebarHoverMode: boolean;
+  awaitingMaskConfirmation: boolean;
   segmentPoints: SegmentPoint[];
   previewMaskCanvas: HTMLCanvasElement | null;
+  lastMaskData: MaskData | null;
+  marchingAntsCanvas: HTMLCanvasElement | null;
+  marchingAntsAnimationId: number | null;
   pointMarkersContainer: HTMLDivElement | null;
   cursorOverlay: HTMLDivElement | null;
   segmentPending: boolean;
+  // Spotlight effect state (for spacebar hover mode)
+  spotlightOverlay: HTMLDivElement | null;
+  spotlightedMaskId: string | null;
   documentId: string;
   embeddingsReady: boolean;
   imageWidth: number;
   imageHeight: number;
   resizeObserver: ResizeObserver | null;
+  mouseDownHandler: (e: MouseEvent) => void;
   mouseMoveHandler: (e: MouseEvent) => void;
   mouseUpHandler: (e: MouseEvent) => void;
   containerClickHandler: (e: MouseEvent) => void;
   keydownHandler: (e: KeyboardEvent) => void;
+  spaceKeydownHandler: (e: KeyboardEvent) => void;
+  spaceKeyupHandler: (e: KeyboardEvent) => void;
   // Brush mode state
   brushSize: number;
   currentStroke: Array<{x: number; y: number; label: number}>;
@@ -105,6 +117,10 @@ export interface MaskOverlayState {
   lastLiveSegmentRequestId: string | null;
   liveSegmentInProgress: boolean;
   lastLiveSegmentTime: number;
+  // Segment mode event listener tracking for proper cleanup
+  segmentModeCursorMoveHandler: ((e: MouseEvent) => void) | null;
+  segmentModeEnterHandler: (() => void) | null;
+  segmentModeLeaveHandler: (() => void) | null;
 }
 
 // ============ Color Constants ============

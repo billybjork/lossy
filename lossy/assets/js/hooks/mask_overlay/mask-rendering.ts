@@ -176,13 +176,13 @@ export function updateSegmentMaskHighlight(
     const isSelected = selectedMaskIds.has(maskId);
 
     if (isSelected) {
-      // Selected: colored fill + colored outline
+      // Selected: bold colored fill + colored outline
       const color = MASK_COLORS[cached.colorIndex];
-      applyMaskWithOutline(maskId, maskImageCache, color.fill, color.stroke, 3);
+      applyMaskWithOutline(maskId, maskImageCache, color.fill, color.stroke, 4);
       canvas.style.opacity = '1';
     } else if (isHovered) {
-      // Hover: white/neutral fill + white outline
-      applyMaskWithOutline(maskId, maskImageCache, HOVER_COLOR.fill, HOVER_COLOR.stroke, 2);
+      // Hover: intense fill only, no border
+      applyMaskFillOnly(maskId, maskImageCache, HOVER_COLOR.fill);
       canvas.style.opacity = '1';
     } else {
       // Idle: hidden
@@ -194,22 +194,49 @@ export function updateSegmentMaskHighlight(
 /**
  * Trigger shimmer animation effect on masks
  * Shows a sweeping gradient effect when masks are first rendered
+ * @param targetMaskIds - Optional set of mask IDs to shimmer. If not provided, shimmers all masks.
  */
 export function triggerShimmer(
   container: HTMLElement,
-  maskImageCache: Map<string, CachedMask>
+  maskImageCache: Map<string, CachedMask>,
+  targetMaskIds?: Set<string>
 ): void {
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
   if (masks.length === 0) return;
 
+  // Collect masks to shimmer with their Y positions for staggering
+  const masksToShimmer: Array<{ mask: HTMLElement; y: number }> = [];
+  masks.forEach((mask: HTMLElement) => {
+    const maskId = mask.dataset.maskId || '';
+    if (targetMaskIds && !targetMaskIds.has(maskId)) return;
+
+    const y = parseFloat(mask.dataset.bboxY || '0') || 0;
+    masksToShimmer.push({ mask, y });
+  });
+
+  if (masksToShimmer.length === 0) return;
+
+  // Sort by Y position (top to bottom)
+  masksToShimmer.sort((a, b) => a.y - b.y);
+
+  // Calculate animation timing based on number of masks
+  const maskCount = masksToShimmer.length;
+  const baseDuration = maskCount > 5 ? 400 : 600; // Speed up if many masks
+  const staggerDelay = maskCount > 1 ? Math.min(80, 300 / maskCount) : 0; // Adaptive stagger
+
   const shimmerCanvases: HTMLCanvasElement[] = [];
 
-  masks.forEach((mask: HTMLElement) => {
+  masksToShimmer.forEach(({ mask }, index) => {
+    const maskId = mask.dataset.maskId || '';
     const maskType = mask.dataset.maskType;
+    const delay = index * staggerDelay;
 
-    // For text regions, use CSS shimmer
+    // For text regions, use CSS shimmer with delay
     if (maskType !== 'object' && maskType !== 'manual') {
-      mask.classList.add('mask-shimmer');
+      setTimeout(() => {
+        mask.classList.add('mask-shimmer');
+        mask.style.animationDuration = `${baseDuration}ms`;
+      }, delay);
       return;
     }
 
@@ -238,17 +265,19 @@ export function triggerShimmer(
     mask.appendChild(shimmerCanvas);
     shimmerCanvases.push(shimmerCanvas);
 
-    // Load mask and animate
+    // Load mask and animate with stagger delay
     const maskImg = new Image();
     maskImg.crossOrigin = 'anonymous';
     maskImg.onload = () => {
-      const ctx = shimmerCanvas.getContext('2d')!;
-      const duration = 600;
-      const startTime = performance.now();
+      // Wait for stagger delay before starting animation
+      setTimeout(() => {
+        const ctx = shimmerCanvas.getContext('2d')!;
+        const duration = baseDuration;
+        const startTime = performance.now();
 
-      const animate = (currentTime: number) => {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
+        const animate = (currentTime: number) => {
+          const elapsed = currentTime - startTime;
+          const progress = Math.min(elapsed / duration, 1);
 
         // Clear canvas
         ctx.clearRect(0, 0, bboxW, bboxH);
@@ -291,33 +320,36 @@ export function triggerShimmer(
         if (progress < 1) {
           requestAnimationFrame(animate);
         }
-      };
+        };
 
-      requestAnimationFrame(animate);
+        requestAnimationFrame(animate);
+      }, delay);
     };
     maskImg.src = maskUrl;
   });
 
-  // Cleanup after animation
+  // Cleanup after all animations complete (last mask's delay + duration + buffer)
+  const totalDuration = (maskCount - 1) * staggerDelay + baseDuration + 50;
   setTimeout(() => {
-    masks.forEach((mask: HTMLElement) => {
+    masksToShimmer.forEach(({ mask }) => {
       const maskType = mask.dataset.maskType;
       if (maskType !== 'object' && maskType !== 'manual') {
         mask.style.borderColor = 'transparent';
         mask.style.outlineColor = 'transparent';
       }
       mask.classList.remove('mask-shimmer');
+      mask.style.removeProperty('animation-duration');
     });
 
     shimmerCanvases.forEach(canvas => canvas.remove());
 
     setTimeout(() => {
-      masks.forEach((mask: HTMLElement) => {
+      masksToShimmer.forEach(({ mask }) => {
         mask.style.removeProperty('border-color');
         mask.style.removeProperty('outline-color');
       });
     }, 200);
-  }, 650);
+  }, totalDuration);
 }
 
 /**
@@ -333,6 +365,41 @@ export function getStrokeOffsets(strokeWidth: number): Array<[number, number]> {
     }
   }
   return offsets;
+}
+
+/**
+ * Draw mask with just fill, no outline (for hover state)
+ * Creates an intense highlight without borders
+ */
+export function applyMaskFillOnly(
+  maskId: string,
+  maskImageCache: Map<string, CachedMask>,
+  fillColor: string
+): void {
+  const cached = maskImageCache.get(maskId);
+  if (!cached) return;
+
+  const { canvas, alphaData } = cached;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Clear canvas and reset state
+  ctx.clearRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
+
+  // Draw alpha mask
+  ctx.putImageData(alphaData, 0, 0);
+
+  // Apply fill color
+  ctx.globalCompositeOperation = 'source-in';
+  ctx.fillStyle = fillColor;
+  ctx.fillRect(0, 0, w, h);
+
+  // Reset composite operation
+  ctx.globalCompositeOperation = 'source-over';
 }
 
 /**
@@ -396,6 +463,40 @@ export function applyMaskWithOutline(
 
   // Composite final result
   ctx.clearRect(0, 0, w, h);
+  ctx.globalCompositeOperation = 'source-over';
   ctx.drawImage(strokeCanvas, 0, 0);
   ctx.drawImage(fillCanvas, 0, 0);
+
+  // Reset composite operation
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+/**
+ * Update spotlight effects on segment mask canvases
+ * Called during spacebar hover mode to highlight/dim masks based on cursor position
+ */
+export function updateSegmentMaskSpotlight(
+  maskImageCache: Map<string, CachedMask>,
+  spotlightedMaskId: string | null
+): void {
+  maskImageCache.forEach((cached: CachedMask, maskId: string) => {
+    const canvas = cached.canvas;
+    const isSpotlighted = maskId === spotlightedMaskId;
+
+    if (isSpotlighted) {
+      // Intense spotlight - multi-layer glow
+      canvas.style.filter = `
+        drop-shadow(0 0 25px rgba(255, 255, 255, 0.5))
+        drop-shadow(0 0 50px rgba(255, 255, 255, 0.35))
+        drop-shadow(0 0 80px rgba(255, 255, 255, 0.2))
+      `;
+      canvas.style.opacity = '1';
+    } else {
+      // Subtle spotlight for non-hovered masks
+      canvas.style.filter = `
+        drop-shadow(0 0 8px rgba(255, 255, 255, 0.15))
+      `;
+      canvas.style.opacity = '0.25';
+    }
+  });
 }

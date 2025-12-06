@@ -289,15 +289,16 @@ figure {
   opacity: 0;
 }
 
-/* Hover state: bold white border with dark outline */
+/* Hover state: intense glow without borders */
 .mask-region.mask-hovered {
   opacity: 1;
-  background: rgba(255, 255, 255, 0.2);
-  /* Two-color border: white inner, dark outer for visibility on any background */
-  border: 3px solid #ffffff;
-  outline: 2px solid rgba(0, 0, 0, 0.8);
-  outline-offset: -3px;
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+  background: rgba(255, 255, 255, 0.35);
+  border: none;
+  outline: none;
+  /* Intense glow effect for visibility without obscuring */
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.6),
+    0 0 20px 2px rgba(255, 255, 255, 0.5);
 }
 
 /* Selected state: bold orange border with white outline (SAM style) */
@@ -353,14 +354,11 @@ figure {
 /* Shimmer effect for newly-detected masks */
 @keyframes mask-shimmer {
   0% {
-    background-position: 200% 0;
-    opacity: 1;
-  }
-  75% {
+    background-position: -100% 0;
     opacity: 1;
   }
   100% {
-    background-position: -100% 0;
+    background-position: 200% 0;
     opacity: 0;
   }
 }
@@ -411,6 +409,40 @@ figure {
 .segment-mode .mask-region {
   pointer-events: none;
   cursor: crosshair !important;  /* Force crosshair cursor in segment mode */
+}
+
+/* =============================================================================
+   Spotlight Effect (Spacebar Hover Mode)
+   Cinematic dark backdrop with radial gradient + spotlight glows on masks
+   ============================================================================= */
+
+/* Dark overlay with radial gradient following cursor */
+.segment-spotlight-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 45;
+  opacity: 0;
+  transition: opacity 0.2s ease-out, background 0.1s ease-out;
+}
+
+/* Spotlighted mask - intense multi-layer glow */
+.mask-spotlighted {
+  opacity: 1 !important;
+  filter: drop-shadow(0 0 25px rgba(255, 255, 255, 0.5))
+          drop-shadow(0 0 50px rgba(255, 255, 255, 0.35))
+          drop-shadow(0 0 80px rgba(255, 255, 255, 0.2));
+  transition: filter 0.2s ease-out, opacity 0.2s ease-out;
+}
+
+/* Non-spotlighted masks - dimmed with subtle glow */
+.mask-spotlighted-idle {
+  opacity: 0.25 !important;
+  filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.15));
+  transition: filter 0.2s ease-out, opacity 0.2s ease-out;
 }
 
 /* =============================================================================
