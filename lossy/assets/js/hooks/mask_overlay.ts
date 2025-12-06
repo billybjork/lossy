@@ -55,6 +55,14 @@ interface SegmentPoint {
   label: number;
 }
 
+interface BrushStroke {
+  id: string;
+  rawPoints: Array<{x: number; y: number}>;
+  sampledPoints: SegmentPoint[];
+  label: number;  // 1 = positive, 0 = negative
+  brushSize: number;
+}
+
 interface MaskOverlayState {
   container: HTMLElement;
   hoveredMaskId: string | null;
@@ -81,6 +89,71 @@ interface MaskOverlayState {
   mouseUpHandler: (e: MouseEvent) => void;
   containerClickHandler: (e: MouseEvent) => void;
   keydownHandler: (e: KeyboardEvent) => void;
+  // Brush mode state
+  brushSize: number;
+  currentStroke: Array<{x: number; y: number; label: number}>;
+  strokeHistory: BrushStroke[];
+  brushCanvas: HTMLCanvasElement | null;
+  isDrawingStroke: boolean;
+}
+
+// Douglas-Peucker algorithm for simplifying brush strokes
+function perpendicularDistance(
+  point: {x: number; y: number},
+  lineStart: {x: number; y: number},
+  lineEnd: {x: number; y: number}
+): number {
+  const dx = lineEnd.x - lineStart.x;
+  const dy = lineEnd.y - lineStart.y;
+  const lengthSquared = dx * dx + dy * dy;
+
+  if (lengthSquared === 0) {
+    return Math.hypot(point.x - lineStart.x, point.y - lineStart.y);
+  }
+
+  const t = Math.max(0, Math.min(1,
+    ((point.x - lineStart.x) * dx + (point.y - lineStart.y) * dy) / lengthSquared
+  ));
+
+  const projX = lineStart.x + t * dx;
+  const projY = lineStart.y + t * dy;
+  return Math.hypot(point.x - projX, point.y - projY);
+}
+
+function douglasPeucker(
+  points: Array<{x: number; y: number}>,
+  epsilon: number
+): Array<{x: number; y: number}> {
+  if (points.length < 3) return points;
+
+  let maxDistance = 0;
+  let maxIndex = 0;
+  const end = points.length - 1;
+
+  for (let i = 1; i < end; i++) {
+    const dist = perpendicularDistance(points[i], points[0], points[end]);
+    if (dist > maxDistance) {
+      maxDistance = dist;
+      maxIndex = i;
+    }
+  }
+
+  if (maxDistance > epsilon) {
+    const left = douglasPeucker(points.slice(0, maxIndex + 1), epsilon);
+    const right = douglasPeucker(points.slice(maxIndex), epsilon);
+    return [...left.slice(0, -1), ...right];
+  }
+
+  return [points[0], points[end]];
+}
+
+// Uniform subsample to limit point count
+function uniformSubsample<T>(points: T[], maxCount: number): T[] {
+  if (points.length <= maxCount) return points;
+  const step = points.length / maxCount;
+  return Array.from({ length: maxCount }, (_, i) =>
+    points[Math.floor(i * step)]
+  );
 }
 
 // Listen for responses from the extension bridge
@@ -128,6 +201,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.segmentPending = false;
     this.documentId = this.el.dataset.documentId || '';
     this.embeddingsReady = false;  // Whether SAM embeddings are computed for current image
+
+    // Brush mode state
+    this.brushSize = 20;  // Default brush size in image coordinates
+    this.currentStroke = [];
+    this.strokeHistory = [];
+    this.brushCanvas = null;
+    this.isDrawingStroke = false;
 
     // Get image dimensions from data attributes
     this.imageWidth = parseInt(this.el.dataset.imageWidth || '0') || 0;
@@ -379,9 +459,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       return;
     }
 
-    // In segment mode, Enter confirms, Escape cancels, Backspace removes last point
+    // In segment mode, Enter confirms, Escape cancels, Backspace removes last stroke
     if (this.segmentMode) {
-      if (e.key === 'Enter' && this.segmentPoints.length > 0) {
+      if (e.key === 'Enter' && this.strokeHistory.length > 0) {
         e.preventDefault();
         this.confirmSegment();
         return;
@@ -393,9 +473,26 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         return;
       }
 
-      if (e.key === 'Backspace' && this.segmentPoints.length > 0) {
+      // Backspace removes last stroke
+      if (e.key === 'Backspace' && this.strokeHistory.length > 0) {
         e.preventDefault();
-        this.removeLastPoint();
+        this.removeLastStroke();
+        return;
+      }
+
+      // [ decreases brush size
+      if (e.key === '[') {
+        e.preventDefault();
+        this.brushSize = Math.max(5, this.brushSize - 5);
+        console.log(`[MaskOverlay] Brush size: ${this.brushSize}`);
+        return;
+      }
+
+      // ] increases brush size
+      if (e.key === ']') {
+        e.preventDefault();
+        this.brushSize = Math.min(100, this.brushSize + 5);
+        console.log(`[MaskOverlay] Brush size: ${this.brushSize}`);
         return;
       }
 
@@ -457,9 +554,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       });
     }
 
-    // Update cursor on container (always crosshair in segment mode)
+    // Update cursor on container (hide in segment mode for brush cursor)
     if (this.segmentMode) {
-      this.container.style.cursor = 'crosshair';
+      this.container.style.cursor = 'none';
     } else {
       this.container.style.cursor = hasHover ? 'pointer' : 'crosshair';
     }
@@ -503,6 +600,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (target.classList.contains('mask-region')) return;
     if (e.button !== 0) return;  // Left click only
 
+    // In segment mode, start a brush stroke instead of drag selection
+    if (this.segmentMode) {
+      this.startBrushStroke(e);
+      return;
+    }
+
     const containerRect = this.container.getBoundingClientRect();
     this.dragStart = {
       x: e.clientX - containerRect.left,
@@ -517,6 +620,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   updateDrag(e: MouseEvent) {
+    // In segment mode, update brush stroke
+    if (this.segmentMode && this.isDrawingStroke) {
+      this.continueBrushStroke(e);
+      return;
+    }
+
     if (!this.dragStart) return;
 
     const containerRect = this.container.getBoundingClientRect();
@@ -555,6 +664,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   endDrag(e: MouseEvent) {
+    // In segment mode, finish brush stroke
+    if (this.segmentMode && this.isDrawingStroke) {
+      this.finishBrushStroke(e);
+      return;
+    }
+
     if (!this.dragStart) return;
 
     if (this.isDragging) {
@@ -798,13 +913,43 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       jsContainer.appendChild(this.pointMarkersContainer);
     }
 
-    // Create cursor overlay to force crosshair cursor in segment mode
+    // Create brush cursor overlay (circular indicator that follows mouse)
     if (!this.cursorOverlay && jsContainer) {
       this.cursorOverlay = document.createElement('div');
-      this.cursorOverlay.className = 'segment-cursor-overlay';
-      this.cursorOverlay.style.cssText = 'position: absolute; top: 0; left: 0; width: 100%; height: 100%; cursor: crosshair !important; z-index: 150;';
+      this.cursorOverlay.className = 'brush-cursor';
+      this.cursorOverlay.style.cssText = `
+        position: absolute;
+        pointer-events: none;
+        border: 2px solid white;
+        border-radius: 50%;
+        box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5);
+        z-index: 200;
+        display: none;
+        transform: translate(-50%, -50%);
+      `;
       jsContainer.appendChild(this.cursorOverlay);
+
+      // Add mousemove listener for brush cursor
+      this.container.addEventListener('mousemove', (e: MouseEvent) => {
+        if (!this.segmentMode || !this.cursorOverlay) return;
+        this.updateBrushCursor(e);
+      });
+
+      // Show/hide cursor on enter/leave
+      this.container.addEventListener('mouseenter', () => {
+        if (this.segmentMode && this.cursorOverlay) {
+          this.cursorOverlay.style.display = 'block';
+        }
+      });
+      this.container.addEventListener('mouseleave', () => {
+        if (this.cursorOverlay) {
+          this.cursorOverlay.style.display = 'none';
+        }
+      });
     }
+
+    // Hide default cursor in segment mode
+    this.container.style.cursor = 'none';
 
     // Notify server
     this.pushEvent("enter_segment_mode", {});
@@ -842,12 +987,23 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.segmentPoints = [];
     this.segmentPending = false;
 
+    // Clear brush state
+    this.currentStroke = [];
+    this.strokeHistory = [];
+    this.isDrawingStroke = false;
+
     // Update visual state (CSS restores pointer-events/cursor when .segment-mode is removed)
     this.container.classList.remove('segment-mode');
 
     // Clear point markers
     if (this.pointMarkersContainer) {
       this.pointMarkersContainer.innerHTML = '';
+    }
+
+    // Remove brush canvas
+    if (this.brushCanvas) {
+      this.brushCanvas.remove();
+      this.brushCanvas = null;
     }
 
     // Remove preview mask
@@ -872,23 +1028,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   handleContainerClick(e: MouseEvent) {
-    // Only handle clicks in segment mode
-    if (!this.segmentMode) return;
-
-    // In segment mode, stop propagation so masks don't receive the click
-    e.stopPropagation();
-
-    // Don't place points if we were just dragging
-    if (this.isDragging) return;
-
-    // Get click coordinates relative to image
-    const point = this.getImageCoordinates(e);
-    if (!point) return;
-
-    // Determine point label: Shift = negative (0), normal = positive (1)
-    const label = e.shiftKey ? 0 : 1;
-
-    this.addSegmentPoint(point.x, point.y, label);
+    // In segment mode, brush strokes handle interaction via mousedown/move/up
+    // Just stop propagation so masks don't receive clicks
+    if (this.segmentMode) {
+      e.stopPropagation();
+      return;
+    }
   },
 
   getImageCoordinates(e: MouseEvent): { x: number; y: number } | null {
@@ -1113,8 +1258,293 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     maskImg.src = maskData.mask_png;
   },
 
+  // ============ Brush Stroke Methods ============
+
+  updateBrushCursor(e: MouseEvent) {
+    if (!this.cursorOverlay) return;
+
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (!img) return;
+
+    const containerRect = this.container.getBoundingClientRect();
+    const displayX = e.clientX - containerRect.left;
+    const displayY = e.clientY - containerRect.top;
+
+    // Calculate brush size in display coordinates
+    const displayWidth = img.clientWidth;
+    const naturalWidth = img.naturalWidth || this.imageWidth;
+    const displayBrushSize = (this.brushSize / naturalWidth) * displayWidth;
+
+    // Update cursor position and size
+    this.cursorOverlay.style.left = `${displayX}px`;
+    this.cursorOverlay.style.top = `${displayY}px`;
+    this.cursorOverlay.style.width = `${displayBrushSize}px`;
+    this.cursorOverlay.style.height = `${displayBrushSize}px`;
+    this.cursorOverlay.style.display = 'block';
+  },
+
+  startBrushStroke(e: MouseEvent) {
+    const point = this.getImageCoordinates(e);
+    if (!point) return;
+
+    const label = e.shiftKey ? 0 : 1;  // Shift = negative, normal = positive
+
+    this.isDrawingStroke = true;
+    this.currentStroke = [{ x: point.x, y: point.y, label }];
+
+    // Create brush canvas if needed
+    if (!this.brushCanvas) {
+      this.createBrushCanvas();
+    }
+
+    // Start drawing the stroke visual
+    this.drawBrushPoint(point.x, point.y, label);
+  },
+
+  continueBrushStroke(e: MouseEvent) {
+    if (!this.isDrawingStroke || this.currentStroke.length === 0) return;
+
+    const point = this.getImageCoordinates(e);
+    if (!point) return;
+
+    const label = this.currentStroke[0].label;
+    this.currentStroke.push({ x: point.x, y: point.y, label });
+
+    // Draw the stroke visual
+    this.drawBrushPoint(point.x, point.y, label);
+  },
+
+  finishBrushStroke(_e: MouseEvent) {
+    if (!this.isDrawingStroke || this.currentStroke.length === 0) {
+      this.isDrawingStroke = false;
+      return;
+    }
+
+    this.isDrawingStroke = false;
+
+    // Create stroke object
+    const stroke: BrushStroke = {
+      id: `stroke_${Date.now()}`,
+      rawPoints: this.currentStroke.map((p: {x: number; y: number; label: number}) => ({ x: p.x, y: p.y })),
+      sampledPoints: [],
+      label: this.currentStroke[0].label,
+      brushSize: this.brushSize
+    };
+
+    // Sample points from stroke using Douglas-Peucker
+    stroke.sampledPoints = this.sampleStrokePoints(stroke);
+
+    // Add to history
+    this.strokeHistory.push(stroke);
+    this.currentStroke = [];
+
+    // Trigger segmentation with all strokes
+    this.requestSegmentFromStrokes();
+  },
+
+  sampleStrokePoints(stroke: BrushStroke): SegmentPoint[] {
+    // For single clicks (< 3 points), just use the first point
+    if (stroke.rawPoints.length < 3) {
+      return [{
+        x: stroke.rawPoints[0].x,
+        y: stroke.rawPoints[0].y,
+        label: stroke.label
+      }];
+    }
+
+    // Simplify with Douglas-Peucker (epsilon based on brush size)
+    const epsilon = Math.max(5, stroke.brushSize / 4);
+    const simplified = douglasPeucker(stroke.rawPoints, epsilon);
+
+    // Limit to max 5 points per stroke
+    const maxPointsPerStroke = 5;
+    const sampled = uniformSubsample(simplified, maxPointsPerStroke);
+
+    // Convert to SegmentPoint format
+    return sampled.map(p => ({ x: p.x, y: p.y, label: stroke.label }));
+  },
+
+  getAllSampledPoints(): SegmentPoint[] {
+    // Combine all strokes
+    const allPoints = this.strokeHistory.flatMap((s: BrushStroke) => s.sampledPoints);
+
+    // Limit total to 10 points for SAM
+    return uniformSubsample(allPoints, 10);
+  },
+
+  removeLastStroke() {
+    if (this.strokeHistory.length === 0) return;
+
+    this.strokeHistory.pop();
+
+    // Redraw stroke visuals
+    this.redrawAllStrokes();
+
+    // Update segment points for compatibility
+    this.segmentPoints = this.getAllSampledPoints();
+
+    if (this.strokeHistory.length > 0) {
+      // Re-run segmentation with remaining strokes
+      this.requestSegmentFromStrokes();
+    } else {
+      // No strokes left, clear preview
+      if (this.previewMaskCanvas) {
+        this.previewMaskCanvas.remove();
+        this.previewMaskCanvas = null;
+      }
+    }
+
+    console.log(`[MaskOverlay] Removed stroke, ${this.strokeHistory.length} strokes remaining`);
+  },
+
+  createBrushCanvas() {
+    const jsContainer = document.getElementById('js-overlay-container');
+    if (!jsContainer) return;
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'brush-stroke-canvas';
+    canvas.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 60;
+    `;
+
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (img) {
+      canvas.width = img.clientWidth;
+      canvas.height = img.clientHeight;
+    }
+
+    jsContainer.appendChild(canvas);
+    this.brushCanvas = canvas;
+  },
+
+  drawBrushPoint(imgX: number, imgY: number, label: number) {
+    if (!this.brushCanvas) return;
+
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (!img) return;
+
+    const ctx = this.brushCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Convert image coordinates to display coordinates
+    const displayWidth = img.clientWidth;
+    const displayHeight = img.clientHeight;
+    const naturalWidth = img.naturalWidth || this.imageWidth;
+    const naturalHeight = img.naturalHeight || this.imageHeight;
+
+    const displayX = (imgX / naturalWidth) * displayWidth;
+    const displayY = (imgY / naturalHeight) * displayHeight;
+    const displayRadius = (this.brushSize / naturalWidth) * displayWidth;
+
+    // Draw filled circle with stroke color
+    ctx.beginPath();
+    ctx.arc(displayX, displayY, Math.max(2, displayRadius / 2), 0, Math.PI * 2);
+    ctx.fillStyle = label === 1 ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)';
+    ctx.fill();
+  },
+
+  redrawAllStrokes() {
+    if (!this.brushCanvas) return;
+
+    const ctx = this.brushCanvas.getContext('2d');
+    if (!ctx) return;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, this.brushCanvas.width, this.brushCanvas.height);
+
+    // Redraw all strokes from history
+    for (const stroke of this.strokeHistory) {
+      for (const point of stroke.rawPoints) {
+        this.drawBrushPoint(point.x, point.y, stroke.label);
+      }
+    }
+  },
+
+  async requestSegmentFromStrokes() {
+    if (this.strokeHistory.length === 0) return;
+    if (!this.documentId) {
+      console.warn('[MaskOverlay] No document ID for segmentation');
+      return;
+    }
+
+    this.segmentPending = true;
+
+    // Get sampled points from all strokes
+    const sampledPoints = this.getAllSampledPoints();
+
+    // Also update legacy segmentPoints for compatibility
+    this.segmentPoints = sampledPoints;
+
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    const actualWidth = img?.naturalWidth || this.imageWidth;
+    const actualHeight = img?.naturalHeight || this.imageHeight;
+
+    console.log(`[MaskOverlay] Requesting segment with ${sampledPoints.length} points from ${this.strokeHistory.length} strokes`);
+
+    try {
+      let response: SegmentResponse;
+
+      // Use inference provider if available
+      if (inferenceProvider && !isExtensionAvailable()) {
+        const result = await inferenceProvider.segmentAtPoints(
+          this.documentId,
+          sampledPoints as PointPrompt[],
+          { width: actualWidth, height: actualHeight }
+        );
+        response = {
+          success: true,
+          mask_png: result.mask_png,
+          bbox: result.bbox
+        };
+      } else {
+        // Fall back to extension via postMessage
+        const requestId = `seg_${++segmentRequestCounter}`;
+        response = await new Promise<SegmentResponse>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            pendingSegmentRequests.delete(requestId);
+            reject(new Error('Segment request timeout'));
+          }, 10000);
+
+          pendingSegmentRequests.set(requestId, (result: SegmentResponse) => {
+            clearTimeout(timeout);
+            resolve(result);
+          });
+
+          window.postMessage({
+            type: 'LOSSY_SEGMENT_REQUEST',
+            documentId: this.documentId,
+            points: sampledPoints,
+            imageSize: { width: actualWidth, height: actualHeight },
+            requestId
+          }, '*');
+        });
+      }
+
+      if (response.success && (response.mask || response.mask_png)) {
+        // Normalize response format
+        const maskData: MaskData = response.mask || {
+          mask_png: response.mask_png!,
+          bbox: response.bbox!
+        };
+        this.renderPreviewMask(maskData);
+      } else {
+        console.warn('[MaskOverlay] Segment request failed:', response.error);
+      }
+    } catch (error) {
+      console.error('[MaskOverlay] Segment request error:', error);
+    } finally {
+      this.segmentPending = false;
+    }
+  },
+
   async confirmSegment() {
-    if (this.segmentPoints.length === 0) return;
+    if (this.segmentPoints.length === 0 && this.strokeHistory.length === 0) return;
     if (!this.documentId) {
       console.warn('[MaskOverlay] No document ID for segment confirmation');
       return;
