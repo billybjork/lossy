@@ -97,22 +97,31 @@ export interface MaskOverlayState {
   isDrawingStroke: boolean;
   // Track mouse position for immediate cursor display
   lastMousePosition: { x: number; y: number } | null;
+  // Track when we're confirming a new segment to shimmer it
+  pendingSegmentConfirm: boolean;
+  previousMaskIds: Set<string>;
+  // Live segmentation state (for continuous inference during brush strokes)
+  liveSegmentDebounceId: number | null;
+  lastLiveSegmentRequestId: string | null;
+  liveSegmentInProgress: boolean;
+  lastLiveSegmentTime: number;
 }
 
 // ============ Color Constants ============
 
 // Color palette for unique per-mask colors (Meta SAM style)
 // Each mask gets assigned a color from this palette for visual distinction
+// Bold, vibrant, high-contrast colors for utilitarian clarity
 export const MASK_COLORS = [
-  { fill: 'rgba(251, 146, 60, 0.4)', stroke: 'rgb(251, 146, 60)' },   // Orange
-  { fill: 'rgba(59, 130, 246, 0.4)', stroke: 'rgb(59, 130, 246)' },   // Blue
-  { fill: 'rgba(34, 197, 94, 0.4)', stroke: 'rgb(34, 197, 94)' },     // Green
-  { fill: 'rgba(168, 85, 247, 0.4)', stroke: 'rgb(168, 85, 247)' },   // Purple
-  { fill: 'rgba(236, 72, 153, 0.4)', stroke: 'rgb(236, 72, 153)' },   // Pink
-  { fill: 'rgba(6, 182, 212, 0.4)', stroke: 'rgb(6, 182, 212)' },     // Cyan
-  { fill: 'rgba(245, 158, 11, 0.4)', stroke: 'rgb(245, 158, 11)' },   // Amber
-  { fill: 'rgba(99, 102, 241, 0.4)', stroke: 'rgb(99, 102, 241)' },   // Indigo
+  { fill: 'rgba(251, 146, 60, 0.5)', stroke: 'rgb(251, 146, 60)' },   // Orange
+  { fill: 'rgba(59, 130, 246, 0.5)', stroke: 'rgb(59, 130, 246)' },   // Blue
+  { fill: 'rgba(34, 197, 94, 0.5)', stroke: 'rgb(34, 197, 94)' },     // Green
+  { fill: 'rgba(168, 85, 247, 0.5)', stroke: 'rgb(168, 85, 247)' },   // Purple
+  { fill: 'rgba(236, 72, 153, 0.5)', stroke: 'rgb(236, 72, 153)' },   // Pink
+  { fill: 'rgba(6, 182, 212, 0.5)', stroke: 'rgb(6, 182, 212)' },     // Cyan
+  { fill: 'rgba(245, 158, 11, 0.5)', stroke: 'rgb(245, 158, 11)' },   // Amber
+  { fill: 'rgba(99, 102, 241, 0.5)', stroke: 'rgb(99, 102, 241)' },   // Indigo
 ];
 
-// Hover state uses white/neutral overlay
-export const HOVER_COLOR = { fill: 'rgba(255, 255, 255, 0.25)', stroke: 'rgb(255, 255, 255)' };
+// Hover state uses intense fill overlay without borders for high visibility
+export const HOVER_COLOR = { fill: 'rgba(255, 255, 255, 0.5)', stroke: 'rgb(255, 255, 255)' };

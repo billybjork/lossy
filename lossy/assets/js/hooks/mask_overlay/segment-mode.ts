@@ -151,6 +151,15 @@ export function exitSegmentMode(
   state.strokeHistory = [];
   state.isDrawingStroke = false;
 
+  // Clear live segment state
+  if (state.liveSegmentDebounceId !== null) {
+    clearTimeout(state.liveSegmentDebounceId);
+    state.liveSegmentDebounceId = null;
+  }
+  state.lastLiveSegmentRequestId = null;
+  state.liveSegmentInProgress = false;
+  state.lastLiveSegmentTime = 0;
+
   // Update visual state
   container.classList.remove('segment-mode');
 
@@ -274,7 +283,8 @@ export function startBrushStroke(
 export function continueBrushStroke(
   event: MouseEvent,
   container: HTMLElement,
-  state: MaskOverlayState
+  state: MaskOverlayState,
+  requestLiveSegmentCallback?: () => Promise<void>
 ): void {
   if (!state.isDrawingStroke || state.currentStroke.length === 0) return;
 
@@ -284,8 +294,36 @@ export function continueBrushStroke(
   const label = state.currentStroke[0].label;
   state.currentStroke.push({ x: point.x, y: point.y, label });
 
-  // Draw the stroke visual
+  // Draw the stroke visual (instant feedback)
   drawBrushPoint(point.x, point.y, label, state);
+
+  // Schedule debounced live segmentation
+  if (requestLiveSegmentCallback) {
+    scheduleLiveSegmentation(state, requestLiveSegmentCallback);
+  }
+}
+
+/**
+ * Schedule debounced live segmentation during brush stroke
+ * Clears previous timer and sets new one to fire after debounce delay
+ */
+export function scheduleLiveSegmentation(
+  state: MaskOverlayState,
+  requestLiveSegmentCallback: () => Promise<void>
+): void {
+  // Clear any pending debounce timer
+  if (state.liveSegmentDebounceId !== null) {
+    clearTimeout(state.liveSegmentDebounceId);
+  }
+
+  // Schedule new inference after debounce delay
+  state.liveSegmentDebounceId = window.setTimeout(() => {
+    state.liveSegmentDebounceId = null;
+    // Only trigger if we have enough points for meaningful inference
+    if (state.currentStroke.length >= 3) {
+      requestLiveSegmentCallback();
+    }
+  }, 150); // 150ms debounce matches extension scroll pattern
 }
 
 /**
@@ -297,7 +335,18 @@ export function finishBrushStroke(
 ): void {
   if (!state.isDrawingStroke || state.currentStroke.length === 0) {
     state.isDrawingStroke = false;
+    // Clear any pending live segment timer
+    if (state.liveSegmentDebounceId !== null) {
+      clearTimeout(state.liveSegmentDebounceId);
+      state.liveSegmentDebounceId = null;
+    }
     return;
+  }
+
+  // Clear any pending live segment timer
+  if (state.liveSegmentDebounceId !== null) {
+    clearTimeout(state.liveSegmentDebounceId);
+    state.liveSegmentDebounceId = null;
   }
 
   state.isDrawingStroke = false;
@@ -318,8 +367,18 @@ export function finishBrushStroke(
   state.strokeHistory.push(stroke);
   state.currentStroke = [];
 
-  // Trigger segmentation
-  requestSegmentCallback();
+  // Check if we can reuse recent live segmentation result
+  const timeSinceLastLiveSegment = Date.now() - state.lastLiveSegmentTime;
+  const canReuseLiveResult = timeSinceLastLiveSegment < 500 &&
+                              !state.liveSegmentInProgress &&
+                              state.strokeHistory.length === 1; // Only first stroke
+
+  if (!canReuseLiveResult) {
+    // Trigger full segmentation with all strokes
+    requestSegmentCallback();
+  } else {
+    console.log('[SegmentMode] Reusing recent live segmentation result');
+  }
 }
 
 /**
@@ -445,11 +504,48 @@ export function drawBrushPoint(
   const displayY = (imgY / naturalHeight) * displayHeight;
   const displayRadius = (state.brushSize / naturalWidth) * displayWidth;
 
-  // Draw filled circle
-  ctx.beginPath();
-  ctx.arc(displayX, displayY, Math.max(2, displayRadius / 2), 0, Math.PI * 2);
-  ctx.fillStyle = label === 1 ? 'rgba(34, 197, 94, 0.4)' : 'rgba(239, 68, 68, 0.4)';
-  ctx.fill();
+  // Draw diffuse glow (optimistic mask preview)
+  // Use natural brush size based on image dimensions if not specified
+  const naturalRadius = displayRadius > 0 ? displayRadius : Math.min(displayWidth, displayHeight) * 0.03;
+
+  if (label === 1) {
+    // Positive: Soft blue glow (multiple layers for diffusion)
+    const baseColor = [59, 130, 246]; // Blue
+
+    // Outer glow (most diffuse)
+    const gradient1 = ctx.createRadialGradient(displayX, displayY, 0, displayX, displayY, naturalRadius * 2);
+    gradient1.addColorStop(0, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.15)`);
+    gradient1.addColorStop(0.5, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.08)`);
+    gradient1.addColorStop(1, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0)`);
+    ctx.fillStyle = gradient1;
+    ctx.fillRect(displayX - naturalRadius * 2, displayY - naturalRadius * 2, naturalRadius * 4, naturalRadius * 4);
+
+    // Middle glow
+    const gradient2 = ctx.createRadialGradient(displayX, displayY, 0, displayX, displayY, naturalRadius * 1.2);
+    gradient2.addColorStop(0, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.3)`);
+    gradient2.addColorStop(0.6, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.15)`);
+    gradient2.addColorStop(1, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0)`);
+    ctx.fillStyle = gradient2;
+    ctx.fillRect(displayX - naturalRadius * 1.5, displayY - naturalRadius * 1.5, naturalRadius * 3, naturalRadius * 3);
+
+    // Inner core (brightest)
+    const gradient3 = ctx.createRadialGradient(displayX, displayY, 0, displayX, displayY, naturalRadius * 0.6);
+    gradient3.addColorStop(0, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.5)`);
+    gradient3.addColorStop(0.7, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.25)`);
+    gradient3.addColorStop(1, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0)`);
+    ctx.fillStyle = gradient3;
+    ctx.fillRect(displayX - naturalRadius, displayY - naturalRadius, naturalRadius * 2, naturalRadius * 2);
+  } else {
+    // Negative: Soft red glow for erasing
+    const baseColor = [239, 68, 68]; // Red
+
+    const gradient = ctx.createRadialGradient(displayX, displayY, 0, displayX, displayY, naturalRadius * 1.5);
+    gradient.addColorStop(0, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.4)`);
+    gradient.addColorStop(0.5, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0.2)`);
+    gradient.addColorStop(1, `rgba(${baseColor[0]}, ${baseColor[1]}, ${baseColor[2]}, 0)`);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(displayX - naturalRadius * 2, displayY - naturalRadius * 2, naturalRadius * 4, naturalRadius * 4);
+  }
 }
 
 /**
@@ -563,6 +659,128 @@ export async function requestSegmentFromStrokes(
 }
 
 /**
+ * Request segmentation from current stroke (live preview during drawing)
+ * Uses debouncing and staleness detection to handle rapid updates
+ */
+export async function requestLiveSegmentFromCurrentStroke(
+  state: MaskOverlayState,
+  getInferenceProvider: () => InferenceProvider | null,
+  isExtensionAvailable: () => boolean,
+  pendingSegmentRequests: Map<string, (result: SegmentResponse) => void>,
+  getSegmentRequestCounter: () => number
+): Promise<void> {
+  // Don't start new request if one is in progress
+  if (state.liveSegmentInProgress) {
+    console.log('[SegmentMode] Skipping live segment - request in progress');
+    return;
+  }
+
+  // Need at least a few points for meaningful inference
+  if (state.currentStroke.length < 3) {
+    return;
+  }
+
+  if (!state.documentId) {
+    console.warn('[SegmentMode] No document ID for live segmentation');
+    return;
+  }
+
+  const inferenceProvider = getInferenceProvider();
+
+  // Check if embeddings are ready when using local inference
+  if (inferenceProvider && !isExtensionAvailable() && !state.embeddingsReady) {
+    console.warn('[SegmentMode] Embeddings not ready for live segmentation');
+    return;
+  }
+
+  state.liveSegmentInProgress = true;
+
+  // Sample points from current stroke only
+  const tempStroke: BrushStroke = {
+    id: 'temp_live',
+    rawPoints: state.currentStroke.map((p) => ({ x: p.x, y: p.y })),
+    sampledPoints: [],
+    label: state.currentStroke[0].label,
+    brushSize: state.brushSize
+  };
+  const sampledPoints = sampleStrokePoints(tempStroke);
+
+  const img = document.getElementById('editor-image') as HTMLImageElement | null;
+  const actualWidth = img?.naturalWidth || state.imageWidth;
+  const actualHeight = img?.naturalHeight || state.imageHeight;
+
+  console.log(`[SegmentMode] Live segmentation with ${sampledPoints.length} points from current stroke`);
+
+  try {
+    let response: SegmentResponse;
+    const requestId = `live_seg_${getSegmentRequestCounter()}_${Date.now()}`;
+
+    // Store request ID for staleness detection
+    state.lastLiveSegmentRequestId = requestId;
+
+    if (inferenceProvider && !isExtensionAvailable()) {
+      // Local inference via Web Worker
+      const result = await inferenceProvider.segmentAtPoints(
+        state.documentId,
+        sampledPoints as PointPrompt[],
+        { width: actualWidth, height: actualHeight }
+      );
+      response = {
+        success: true,
+        mask_png: result.mask_png,
+        bbox: result.bbox
+      };
+    } else {
+      // Extension inference via postMessage
+      response = await new Promise<SegmentResponse>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          pendingSegmentRequests.delete(requestId);
+          reject(new Error('Live segment request timeout'));
+        }, 5000); // Shorter timeout for live inference
+
+        pendingSegmentRequests.set(requestId, (result: SegmentResponse) => {
+          clearTimeout(timeout);
+          resolve(result);
+        });
+
+        window.postMessage({
+          type: 'LOSSY_SEGMENT_REQUEST',
+          documentId: state.documentId,
+          points: sampledPoints,
+          imageSize: { width: actualWidth, height: actualHeight },
+          requestId
+        }, '*');
+      });
+    }
+
+    // Check if this request is still current (not stale)
+    if (state.lastLiveSegmentRequestId !== requestId) {
+      console.log('[SegmentMode] Discarding stale live segment response');
+      return;
+    }
+
+    // Update timestamp for freshness check
+    state.lastLiveSegmentTime = Date.now();
+
+    if (response.success && (response.mask || response.mask_png)) {
+      const maskData: MaskData = response.mask || {
+        mask_png: response.mask_png!,
+        bbox: response.bbox!
+      };
+      renderPreviewMask(maskData, state);
+    } else {
+      console.warn('[SegmentMode] Live segment request failed:', response.error);
+    }
+  } catch (error) {
+    // Silent failure for live inference - don't interrupt drawing
+    console.error('[SegmentMode] Live segment request error:', error);
+  } finally {
+    // Always clear in-progress flag to allow new requests
+    state.liveSegmentInProgress = false;
+  }
+}
+
+/**
  * Render preview mask from segmentation result
  */
 export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): void {
@@ -585,6 +803,8 @@ export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): 
     height: 100%;
     pointer-events: none;
     z-index: 50;
+    opacity: 0;
+    transition: opacity 300ms ease-out;
   `;
 
   canvas.width = img.clientWidth;
@@ -612,6 +832,21 @@ export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): 
       state.container.appendChild(canvas);
     }
     state.previewMaskCanvas = canvas;
+
+    // Clear brush trail - only show the mask
+    if (state.brushCanvas) {
+      const brushCtx = state.brushCanvas.getContext('2d');
+      if (brushCtx) {
+        brushCtx.clearRect(0, 0, state.brushCanvas.width, state.brushCanvas.height);
+      }
+    }
+
+    // Fade in smoothly
+    requestAnimationFrame(() => {
+      if (canvas.style) {
+        canvas.style.opacity = '1';
+      }
+    });
   };
 
   maskImg.onerror = () => {
@@ -642,6 +877,14 @@ export async function confirmSegment(
   }
 
   state.segmentPending = true;
+  state.pendingSegmentConfirm = true;
+
+  // Capture current mask IDs before confirming (for shimmer effect)
+  state.previousMaskIds = new Set(
+    Array.from(state.container.querySelectorAll('.mask-region'))
+      .map((m: Element) => (m as HTMLElement).dataset.maskId || '')
+      .filter(id => id !== '')
+  );
 
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
   const actualWidth = img?.naturalWidth || state.imageWidth;

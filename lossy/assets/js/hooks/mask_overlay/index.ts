@@ -79,6 +79,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.brushCanvas = null;
     this.isDrawingStroke = false;
     this.lastMousePosition = null;
+    this.pendingSegmentConfirm = false;
+    this.previousMaskIds = new Set();
+    this.liveSegmentDebounceId = null;
+    this.lastLiveSegmentRequestId = null;
+    this.liveSegmentInProgress = false;
+    this.lastLiveSegmentTime = 0;
 
     // Get image dimensions
     this.imageWidth = parseInt(this.el.dataset.imageWidth || '0') || 0;
@@ -162,6 +168,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         this.shimmerPlayed = true;
       }
 
+      // Check if we're confirming a new segment
+      const shouldShimmerNewSegment = this.pendingSegmentConfirm;
+      if (shouldShimmerNewSegment) {
+        this.pendingSegmentConfirm = false;
+      }
+
       // Clear local selection
       this.selectedMaskIds = new Set();
       this.hoveredMaskId = null;
@@ -175,6 +187,24 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
         if (shouldShimmer) {
           this.triggerShimmer();
+        } else if (shouldShimmerNewSegment) {
+          // Find the newly added mask(s)
+          const currentMaskIds = new Set(
+            Array.from(this.container.querySelectorAll('.mask-region'))
+              .map((m: Element) => (m as HTMLElement).dataset.maskId || '')
+              .filter(id => id !== '')
+          );
+
+          const newMaskIds = new Set(
+            Array.from(currentMaskIds).filter(id => !this.previousMaskIds.has(id))
+          );
+
+          if (newMaskIds.size > 0) {
+            // Wait a bit for the segment mask canvas to be fully rendered
+            setTimeout(() => {
+              this.triggerShimmer(newMaskIds);
+            }, 100);
+          }
         }
       });
     });
@@ -251,6 +281,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   destroyed() {
     if (this.resizeObserver) this.resizeObserver.disconnect();
+    if (this.liveSegmentDebounceId) clearTimeout(this.liveSegmentDebounceId);
     document.removeEventListener('keydown', this.keydownHandler);
     document.removeEventListener('mousemove', this.mouseMoveHandler);
     document.removeEventListener('mouseup', this.mouseUpHandler);
@@ -299,8 +330,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     );
   },
 
-  triggerShimmer() {
-    Rendering.triggerShimmer(this.container, this.maskImageCache);
+  triggerShimmer(targetMaskIds?: Set<string>) {
+    Rendering.triggerShimmer(this.container, this.maskImageCache, targetMaskIds);
   },
 
   // ============ Drag Selection ============
@@ -391,7 +422,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   continueBrushStroke(e: MouseEvent) {
-    SegmentMode.continueBrushStroke(e, this.container, this as unknown as MaskOverlayState);
+    SegmentMode.continueBrushStroke(
+      e,
+      this.container,
+      this as unknown as MaskOverlayState,
+      () => this.requestLiveSegmentFromCurrentStroke()
+    );
   },
 
   finishBrushStroke(_e: MouseEvent) {
@@ -407,6 +443,16 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   async requestSegmentFromStrokes() {
     await SegmentMode.requestSegmentFromStrokes(
+      this as unknown as MaskOverlayState,
+      () => inferenceProvider,
+      isExtensionAvailable,
+      pendingSegmentRequests,
+      () => ++segmentRequestCounter
+    );
+  },
+
+  async requestLiveSegmentFromCurrentStroke() {
+    await SegmentMode.requestLiveSegmentFromCurrentStroke(
       this as unknown as MaskOverlayState,
       () => inferenceProvider,
       isExtensionAvailable,
