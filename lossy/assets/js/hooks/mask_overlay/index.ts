@@ -22,7 +22,6 @@ import * as Interaction from './mask-interaction';
 import * as Rendering from './mask-rendering';
 import * as DragSelection from './drag-selection';
 import * as SegmentMode from './segment-mode';
-import { debugLog } from './utils';
 
 // ============ Segment Mode Trigger Key ============
 const SEGMENT_MODE_TRIGGER_KEY = 'Meta';
@@ -213,7 +212,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
         if (this.segmentCtx.lastMaskData) {
           // Have a preview - confirm it
-          debugLog('[MaskOverlay] Confirming preview mask');
           this.pendingSegmentConfirm = true;
           this.previousMaskIds = new Set(
             Array.from(this.container.querySelectorAll('.mask-region'))
@@ -230,7 +228,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         } else if (this.segmentCtx.spotlightedMaskId && this.segmentCtx.spotlightHitType === 'pixel') {
           // Select existing mask under cursor (only if pixel-confirmed, not bbox-only)
           const maskId = this.segmentCtx.spotlightedMaskId;
-          debugLog('[MaskOverlay] Selecting pixel-confirmed spotlighted mask:', maskId);
           this.exitSegmentMode();
           this.selectedMaskIds = new Set([maskId]);
           this.updateHighlight();
@@ -238,7 +235,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
         } else {
           // Nothing to confirm (bbox-only spotlights are not trusted for selection)
-          debugLog('[MaskOverlay] Exiting segment mode (no confirmed selection)');
           this.exitSegmentMode();
         }
       }
@@ -329,7 +325,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     try {
       inferenceProvider = await providerInitPromise;
-      debugLog('[MaskOverlay] Inference provider ready:', isExtensionAvailable() ? 'extension' : 'local');
       this.ensureEmbeddings();
     } catch (error) {
       console.error('[MaskOverlay] Failed to initialize inference provider:', error);
@@ -409,9 +404,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   renderSegmentMasks() {
     const { pendingLoads, promise } = Rendering.renderSegmentMasks(
       this.container,
-      this.maskImageCache,
-      this.imageWidth,
-      this.imageHeight
+      this.maskImageCache
     );
 
     // Track readiness of the mask cache for reliable hit testing
@@ -420,7 +413,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.maskCacheReadyPromise = promise
         .then(() => {
           this.maskCacheReady = true;
-          debugLog('[MaskOverlay] Mask cache ready');
           // Notify segment mode so pixel hit testing becomes available
           if (this.segmentCtx) {
             SegmentMode.notifyMaskCacheReady(this.segmentCtx, this.getSegmentHooks());
@@ -438,7 +430,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   triggerShimmer(targetMaskIds?: Set<string>) {
-    Rendering.triggerShimmer(this.container, this.maskImageCache, targetMaskIds);
+    Rendering.triggerShimmer(this.container, targetMaskIds);
   },
 
   // ============ Mouse Handlers ============
@@ -554,7 +546,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (extensionAvailable) {
       // Extension path marks embeddings immediately
       this.embeddingsReady = true;
-      debugLog('[MaskOverlay] Extension available, embeddings ready');
       if (this.segmentCtx) {
         SegmentMode.notifyEmbeddingsReady(this.segmentCtx, this.getSegmentHooks());
       }
@@ -577,11 +568,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       }
     }
 
-    debugLog('[MaskOverlay] Computing embeddings...');
     this.embeddingsComputePromise = inferenceProvider!.computeEmbeddings(this.documentId, img)
       .then(() => {
         this.embeddingsReady = true;
-        debugLog('[MaskOverlay] Embeddings ready');
         if (this.segmentCtx) {
           SegmentMode.notifyEmbeddingsReady(this.segmentCtx, this.getSegmentHooks());
         }

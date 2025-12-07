@@ -61,14 +61,6 @@ export function createSegmentContext(): SegmentModeContext {
 
 // ============ Response Types ============
 
-export interface SegmentResponse {
-  success: boolean;
-  mask?: MaskData;
-  mask_png?: string;
-  bbox?: BoundingBox;
-  error?: string;
-}
-
 export interface MaskData {
   mask_png: string;
   bbox: BoundingBox;

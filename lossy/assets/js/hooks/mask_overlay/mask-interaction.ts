@@ -6,13 +6,7 @@
  */
 
 import type { MaskOverlayState, CachedMask } from './types';
-
-/**
- * Check if segment mode is active (works with new context-based state)
- */
-function isSegmentModeActive(state: MaskOverlayState): boolean {
-  return state.segmentCtx !== null;
-}
+import { isSegmentModeActive } from './segment-mode';
 
 /**
  * Position all mask elements based on image dimensions
@@ -80,7 +74,7 @@ export function attachMaskListeners(
     if (isSegment) {
       // For segments, check if cursor is over actual mask pixels
       mask.onmousemove = (e: MouseEvent) => {
-        if (isSegmentModeActive(state)) return;
+        if (isSegmentModeActive(state.segmentCtx)) return;
         const isOverMask = isPointOverSegmentMask(maskId, e, mask, maskImageCache);
         if (isOverMask && state.hoveredMaskId !== maskId) {
           state.hoveredMaskId = maskId;
@@ -94,7 +88,7 @@ export function attachMaskListeners(
       };
 
       mask.onmouseleave = () => {
-        if (isSegmentModeActive(state)) return;
+        if (isSegmentModeActive(state.segmentCtx)) return;
         if (state.hoveredMaskId === maskId) {
           state.hoveredMaskId = null;
           callbacks.onHoverChange(null);
@@ -104,14 +98,14 @@ export function attachMaskListeners(
     } else {
       // For text regions, use simple bounding box hover
       mask.onmouseenter = () => {
-        if (isSegmentModeActive(state)) return;
+        if (isSegmentModeActive(state.segmentCtx)) return;
         state.hoveredMaskId = maskId;
         callbacks.onHoverChange(maskId);
         callbacks.updateHighlight();
       };
 
       mask.onmouseleave = () => {
-        if (isSegmentModeActive(state)) return;
+        if (isSegmentModeActive(state.segmentCtx)) return;
         if (state.hoveredMaskId === maskId) {
           state.hoveredMaskId = null;
           callbacks.onHoverChange(null);
@@ -122,7 +116,7 @@ export function attachMaskListeners(
 
     // Click handler - for segments, also check mask pixels
     mask.onclick = (e: MouseEvent) => {
-      if (isSegmentModeActive(state)) return;
+      if (isSegmentModeActive(state.segmentCtx)) return;
 
       // For segments, only register click if over actual mask
       if (isSegment && !isPointOverSegmentMask(maskId, e, mask, maskImageCache)) {
@@ -221,7 +215,7 @@ export function createKeyboardHandler(
 
     // If there's a preview canvas (candidate mask) and not in segment mode, handle Enter/Escape
     const previewCanvas = state.segmentCtx?.previewCanvas;
-    if (previewCanvas && !isSegmentModeActive(state)) {
+    if (previewCanvas && !isSegmentModeActive(state.segmentCtx)) {
       if (e.key === 'Enter') {
         e.preventDefault();
         callbacks.onConfirmSegment();
@@ -244,7 +238,7 @@ export function createKeyboardHandler(
     }
 
     // In segment mode, only Escape exits (Command key release handles confirm)
-    if (isSegmentModeActive(state)) {
+    if (isSegmentModeActive(state.segmentCtx)) {
       // Escape exits segment mode without confirming
       if (e.key === 'Escape') {
         e.preventDefault();

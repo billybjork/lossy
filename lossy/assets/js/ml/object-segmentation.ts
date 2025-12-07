@@ -18,19 +18,17 @@ import {
   getBackend,
   createFloat32Tensor,
 } from './sessions';
+import {
+  maskToBbox,
+  maskArea,
+  gaussianBlurLogits,
+  keepComponentsContainingPoints,
+  closeMask,
+  snapMaskToImageEdges,
+} from './mask-utils';
 
 import type { Tensor } from 'onnxruntime-web';
 import type { BoundingBox, PointPrompt, SegmentMask } from './types';
-
-/**
- * Debug logging helper - only logs when DEBUG_LOSSY flag is set
- * Enable via: localStorage.setItem('DEBUG_LOSSY', 'true')
- */
-function debugLog(message: string, ...args: unknown[]): void {
-  if (typeof localStorage !== 'undefined' && localStorage.getItem('DEBUG_LOSSY') === 'true') {
-    console.log(message, ...args);
-  }
-}
 
 // SAM 2 input size (fixed)
 const SAM_INPUT_SIZE = 1024;
@@ -40,11 +38,14 @@ const SAM_INPUT_SIZE = 1024;
 const PIXEL_MEAN = [0.485, 0.456, 0.406];
 const PIXEL_STD = [0.229, 0.224, 0.225];
 
-// Mask quality thresholds for aggressive filtering (ensures clean, solid objects)
-// These thresholds filter out speckled, fragmented, or low-confidence masks
-const MIN_IOU = 0.65;         // Minimum IoU score (high confidence only)
-const MIN_STABILITY = 0.88;   // Minimum stability score (very coherent boundaries)
-const MIN_COMPACTNESS = 0.85; // Minimum compactness (solid interior, no islands/speckles)
+// Mask quality thresholds for filtering (ensures clean, solid objects)
+const MIN_IOU = 0.65;              // Minimum IoU score (high confidence only)
+const MIN_STABILITY = 0.88;        // Minimum stability score (coherent boundaries)
+const MIN_COMPACTNESS = 0.85;      // Minimum compactness (solid interior)
+
+// Logit threshold for binarization (higher = tighter edges, more confidence required)
+// 0 = 50% confidence, 2.0 = ~88% confidence, 3.0 = ~95% confidence
+const LOGIT_THRESHOLD = 2.0;
 
 // Resize info to track transformation
 interface ResizeInfo {
@@ -140,11 +141,9 @@ async function runEncoder(imageData: ImageData): Promise<{
   let highResFeats0: Float32Array | null = null;
   let highResFeats1: Float32Array | null = null;
 
-  debugLog(`[ML] Encoder output names: ${session.outputNames.join(', ')}`);
   for (const name of session.outputNames) {
     const output = results[name];
     const dims = output.dims as number[];
-    debugLog(`[ML] Encoder output '${name}': dims=${JSON.stringify(dims)}, size=${(output.data as Float32Array).length}`);
 
     if (name === 'image_embed') {
       imageEmbed = new Float32Array(output.data as Float32Array);
@@ -203,9 +202,7 @@ async function runDecoder(
     coordsData[i * 2] = transformed.x;
     coordsData[i * 2 + 1] = transformed.y;
     labelsData[i] = pt.label;
-    debugLog(`[ML] Point ${i}: original (${pt.x.toFixed(1)}, ${pt.y.toFixed(1)}) -> transformed (${transformed.x.toFixed(1)}, ${transformed.y.toFixed(1)}), label=${pt.label}`);
   });
-  debugLog(`[ML] ResizeInfo: original ${resizeInfo.originalWidth}x${resizeInfo.originalHeight}, scaleX=${resizeInfo.scaleX.toFixed(4)}, scaleY=${resizeInfo.scaleY.toFixed(4)}`);
 
   // Prepare inputs for SAM 2 decoder
   // SAM 2 expects:
@@ -251,7 +248,6 @@ async function runDecoder(
   for (const name of session.outputNames) {
     const output = results[name];
     const dims = output.dims as number[];
-    debugLog(`[ML] Decoder output '${name}': dims=${JSON.stringify(dims)}`);
     if (name === 'masks') {
       allMasks = new Float32Array(output.data as Float32Array);
       // Shape is [1, num_masks, H, W]
@@ -315,7 +311,9 @@ async function runDecoder(
     // Normalize by positive pixels to avoid penalizing larger masks
     const compactness = positivePixels > 0 ? 1 - Math.min(1, transitions / (positivePixels * 4)) : 0;
 
-    // Combined quality score: heavily weight IoU, boost by stability AND compactness
+    // Combined quality score: IoU weighted by stability and compactness
+    // Note: we skip componentShare calculation here for performance -
+    // disconnected components are filtered out in post-processing anyway
     const iouScore = scores[i];
     const qualityScore = iouScore * (1 + stability * 0.4 + compactness * 0.4) * (coverage > 0.001 ? 1 : 0.5);
 
@@ -333,7 +331,7 @@ async function runDecoder(
   // Sort by quality score descending
   candidates.sort((a, b) => b.qualityScore - a.qualityScore);
 
-  // Apply aggressive filtering using file-level threshold constants
+  // Apply filtering using file-level threshold constants
   const bestCandidate = candidates.find(c =>
     c.iouScore >= MIN_IOU &&
     c.stability >= MIN_STABILITY &&
@@ -341,11 +339,6 @@ async function runDecoder(
   ) || candidates[0];
 
   const mask = bestCandidate.maskData;
-
-  debugLog(`[ML] Candidates: ${candidates.map(c =>
-    `[${c.index}] IoU=${c.iouScore.toFixed(3)} stab=${c.stability.toFixed(3)} comp=${c.compactness.toFixed(3)} cov=${(c.coverage * 100).toFixed(1)}% Q=${c.qualityScore.toFixed(3)}`
-  ).join(' ')}`);
-  debugLog(`[ML] Selected mask ${bestCandidate.index} (IoU=${bestCandidate.iouScore.toFixed(3)}, stability=${bestCandidate.stability.toFixed(3)}, compactness=${bestCandidate.compactness.toFixed(3)})`);
 
   return { mask, score: bestCandidate.iouScore, maskDims };
 }
@@ -379,14 +372,29 @@ function bilinearInterpolate(
   return v0 * (1 - fy) + v1 * fy;
 }
 
+// Gaussian blur sigma for logit smoothing (reduces aliasing)
+// Keep small to avoid over-blurring edges
+const LOGIT_BLUR_SIGMA = 1.0;
+
 /**
- * Convert decoder mask output to binary mask at original resolution
- * Uses independent x/y scaling for SAM 2's direct resize approach
+ * Convert decoder mask output to binary mask at original resolution.
+ *
+ * IMPORTANT: SAM2 tiny outputs 256×256 masks. This is the fundamental
+ * resolution limit. Post-processing can smooth edges and remove artifacts,
+ * but cannot add detail that doesn't exist in the model output.
+ *
+ * Pipeline:
+ * 1. Light Gaussian blur in logit space (reduces stair-stepping)
+ * 2. Bilinear upsampling to original resolution
+ * 3. Keep only component(s) containing click points (eliminates islands)
+ * 4. Simple morphological cleanup (robust, predictable)
+ * 5. Snap near-frame masks flush to the image edges to remove noisy borders
  */
 function postprocessMask(
   maskData: Float32Array,
   maskDims: { width: number; height: number },
-  resizeInfo: ResizeInfo
+  resizeInfo: ResizeInfo,
+  positivePoints: Array<{ x: number; y: number }>
 ): {
   mask: Uint8Array;
   bbox: BoundingBox;
@@ -394,51 +402,51 @@ function postprocessMask(
 } {
   const { originalWidth, originalHeight } = resizeInfo;
 
-  // Mask output dimensions
+  // Mask output dimensions (256x256 from SAM2)
   const maskW = maskDims.width || 256;
   const maskH = maskDims.height || 256;
 
-  // Create binary mask at original resolution
-  const mask = new Uint8Array(originalWidth * originalHeight);
+  // Step 1: Light Gaussian blur in logit space
+  // This softens edges before upsampling, reducing stair-step artifacts
+  const blurredLogits = gaussianBlurLogits(maskData, maskW, maskH, LOGIT_BLUR_SIGMA);
 
-  let minX = originalWidth;
-  let minY = originalHeight;
-  let maxX = 0;
-  let maxY = 0;
-  let area = 0;
+  // Step 2: Upsample to original resolution using bilinear interpolation
+  let mask = new Uint8Array(originalWidth * originalHeight);
 
-  // Upsample mask from 256x256 to original resolution using bilinear interpolation
-  // in logit space, then apply binary threshold. This matches g-ronimo's approach
-  // and produces crisp edges (vs sigmoid which creates jagged/scattered artifacts).
   for (let y = 0; y < originalHeight; y++) {
     for (let x = 0; x < originalWidth; x++) {
-      // Map original image coords to 256x256 mask coords (proportional scaling)
       const srcX = (x / originalWidth) * maskW;
       const srcY = (y / originalHeight) * maskH;
 
-      const logit = bilinearInterpolate(maskData, srcX, srcY, maskW, maskW, maskH);
+      const logit = bilinearInterpolate(blurredLogits, srcX, srcY, maskW, maskW, maskH);
 
-      // Binary threshold at logit > 0 (NOT sigmoid - see comment above)
-      const alpha = logit > 0 ? 255 : 0;
+      // Binary threshold - LOGIT_THRESHOLD controls edge tightness
+      const alpha = logit > LOGIT_THRESHOLD ? 255 : 0;
       mask[y * originalWidth + x] = alpha;
-
-      if (logit > 0) {
-        area++;
-
-        if (x < minX) minX = x;
-        if (y < minY) minY = y;
-        if (x > maxX) maxX = x;
-        if (y > maxY) maxY = y;
-      }
     }
   }
 
-  const bbox: BoundingBox = {
-    x: minX,
-    y: minY,
-    w: maxX - minX + 1,
-    h: maxY - minY + 1,
-  };
+  // Step 3: Keep only component(s) containing the positive click points
+  // This eliminates floating islands and debris - user can add more points
+  // to include additional disconnected regions if needed
+  if (positivePoints.length > 0) {
+    mask = keepComponentsContainingPoints(mask, originalWidth, originalHeight, positivePoints);
+  }
+
+  // Step 4: Light morphological closing only (skip full smoothMask pipeline
+  // since keepComponentsContainingPoints already removed disconnected debris)
+  mask = closeMask(mask, originalWidth, originalHeight, 2);
+
+  // Step 5: If the mask already covers most of the frame, snap it flush to image edges
+  mask = snapMaskToImageEdges(mask, originalWidth, originalHeight, {
+    minAreaRatio: 0.45,
+    coverageThreshold: 0.65,
+    edgeMarginPx: Math.max(3, Math.round(Math.min(originalWidth, originalHeight) * 0.02)),
+  });
+
+  // Recalculate bbox and area
+  const bbox = maskToBbox(mask, originalWidth, originalHeight);
+  const area = maskArea(mask);
 
   return { mask, bbox, area };
 }
@@ -498,11 +506,17 @@ export async function segmentAtPoints(
   );
 
   const stabilityScore = calculateStabilityScore(maskData);
-  const { mask, bbox, area } = postprocessMask(maskData, maskDims, resizeInfo);
 
-  const positiveCount = points.filter(p => p.label === 1).length;
+  // Extract positive points for component filtering
+  // Only keep mask regions that contain at least one positive click point
+  const positivePoints = points
+    .filter(p => p.label === 1)
+    .map(p => ({ x: p.x, y: p.y }));
+
+  const { mask, bbox, area } = postprocessMask(maskData, maskDims, resizeInfo, positivePoints);
+
+  const positiveCount = positivePoints.length;
   const negativeCount = points.filter(p => p.label === 0).length;
-  debugLog(`[ML] SAM 2 click-to-segment with ${positiveCount} positive, ${negativeCount} negative points: score=${score.toFixed(3)}, stability=${stabilityScore.toFixed(3)}, area=${area} in ${(performance.now() - startTime).toFixed(0)}ms`);
 
   return { mask, bbox, score, stabilityScore, area };
 }

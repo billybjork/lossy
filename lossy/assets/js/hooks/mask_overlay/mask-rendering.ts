@@ -7,13 +7,7 @@
 
 import type { MaskOverlayState, CachedMask } from './types';
 import { MASK_COLORS, HOVER_COLOR } from './types';
-
-/**
- * Check if segment mode is active (works with new context-based state)
- */
-function isSegmentModeActive(state: MaskOverlayState): boolean {
-  return state.segmentCtx !== null;
-}
+import { isSegmentModeActive } from './segment-mode';
 
 /**
  * Render segment masks (type: 'object') as semi-transparent overlays
@@ -21,9 +15,7 @@ function isSegmentModeActive(state: MaskOverlayState): boolean {
  */
 export function renderSegmentMasks(
   container: HTMLElement,
-  maskImageCache: Map<string, CachedMask>,
-  _imageWidth: number,
-  _imageHeight: number
+  maskImageCache: Map<string, CachedMask>
 ): { pendingLoads: number; promise: Promise<void> } {
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
   if (!img) {
@@ -138,7 +130,7 @@ export function updateHighlight(
   const hasHover = state.hoveredMaskId !== null;
 
   // In segment mode, disable pointer events on all masks
-  if (isSegmentModeActive(state)) {
+  if (isSegmentModeActive(state.segmentCtx)) {
     masks.forEach((mask: HTMLElement) => {
       mask.style.pointerEvents = 'none';
     });
@@ -166,7 +158,7 @@ export function updateHighlight(
   }
 
   // Update cursor on container
-  if (isSegmentModeActive(state)) {
+  if (isSegmentModeActive(state.segmentCtx)) {
     container.style.cursor = 'crosshair';
   } else {
     container.style.cursor = hasHover ? 'pointer' : 'crosshair';
@@ -214,7 +206,6 @@ export function updateSegmentMaskHighlight(
  */
 export function triggerShimmer(
   container: HTMLElement,
-  _maskImageCache: Map<string, CachedMask>,
   targetMaskIds?: Set<string>
 ): void {
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
@@ -294,47 +285,47 @@ export function triggerShimmer(
           const elapsed = currentTime - startTime;
           const progress = Math.min(elapsed / duration, 1);
 
-        // Clear canvas
-        ctx.clearRect(0, 0, bboxW, bboxH);
+          // Clear canvas
+          ctx.clearRect(0, 0, bboxW, bboxH);
 
-        // Draw the mask
-        ctx.globalCompositeOperation = 'source-over';
-        ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
+          // Draw the mask
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
 
-        // Apply gradient with mask
-        ctx.globalCompositeOperation = 'source-in';
+          // Apply gradient with mask
+          ctx.globalCompositeOperation = 'source-in';
 
-        const gradientPos = -1 + (progress * 3);
-        const centerX = gradientPos * bboxW;
+          const gradientPos = -1 + (progress * 3);
+          const centerX = gradientPos * bboxW;
 
-        const angle = ((110 - 90) * Math.PI) / 180;
-        const length = Math.max(bboxW, bboxH) * 2;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
+          const angle = ((110 - 90) * Math.PI) / 180;
+          const length = Math.max(bboxW, bboxH) * 2;
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
 
-        const gradient = ctx.createLinearGradient(
-          centerX - cos * length / 2,
-          -sin * length / 2,
-          centerX + cos * length / 2,
-          sin * length / 2
-        );
-        gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-        gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0)');
-        gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
-        gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0)');
-        gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          const gradient = ctx.createLinearGradient(
+            centerX - cos * length / 2,
+            -sin * length / 2,
+            centerX + cos * length / 2,
+            sin * length / 2
+          );
+          gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+          gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0)');
+          gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
+          gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0)');
+          gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
 
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, bboxW, bboxH);
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, 0, bboxW, bboxH);
 
-        // Fade out in last 25%
-        if (progress > 0.75) {
-          shimmerCanvas.style.opacity = String(1 - ((progress - 0.75) / 0.25));
-        }
+          // Fade out in last 25%
+          if (progress > 0.75) {
+            shimmerCanvas.style.opacity = String(1 - ((progress - 0.75) / 0.25));
+          }
 
-        if (progress < 1) {
-          requestAnimationFrame(animate);
-        }
+          if (progress < 1) {
+            requestAnimationFrame(animate);
+          }
         };
 
         requestAnimationFrame(animate);
@@ -368,25 +359,75 @@ export function triggerShimmer(
 }
 
 /**
- * Generate circular offsets for drawing stroke outline
+ * Generate circular offsets for drawing stroke outline.
+ * Uses dense, sub-pixel sampling to keep edges smooth after scaling.
  */
-export function getStrokeOffsets(strokeWidth: number): Array<[number, number]> {
+function getStrokeOffsets(
+  strokeWidth: number,
+  samples: number = 24
+): Array<[number, number]> {
   const offsets: Array<[number, number]> = [];
-  for (let angle = 0; angle < Math.PI * 2; angle += Math.PI / 8) {
-    const dx = Math.round(Math.cos(angle) * strokeWidth);
-    const dy = Math.round(Math.sin(angle) * strokeWidth);
-    if (!offsets.some(([x, y]) => x === dx && y === dy)) {
+  const seen = new Set<string>();
+  const radius = Math.max(1, strokeWidth);
+  const step = (Math.PI * 2) / samples;
+
+  const addOffset = (dx: number, dy: number) => {
+    const key = `${dx.toFixed(2)},${dy.toFixed(2)}`;
+    if (!seen.has(key)) {
+      seen.add(key);
       offsets.push([dx, dy]);
     }
+  };
+
+  for (let i = 0; i < samples; i++) {
+    const angle = i * step;
+    addOffset(Math.cos(angle) * radius, Math.sin(angle) * radius);
   }
+
+  // Inner ring smooths out jagged corners on small masks
+  const innerRadius = radius * 0.6;
+  for (let i = 0; i < samples; i++) {
+    const angle = i * step;
+    addOffset(Math.cos(angle) * innerRadius, Math.sin(angle) * innerRadius);
+  }
+
+  // Ensure center pixel is represented
+  addOffset(0, 0);
+
   return offsets;
+}
+
+/**
+ * Build a scaled alpha texture for the current mask.
+ * Scales to device pixel ratio and adds a tiny feather to avoid staircase edges.
+ */
+function buildAlphaTexture(alphaData: ImageData, targetW: number, targetH: number): HTMLCanvasElement {
+  const source = document.createElement('canvas');
+  source.width = alphaData.width;
+  source.height = alphaData.height;
+  source.getContext('2d')!.putImageData(alphaData, 0, 0);
+
+  const target = document.createElement('canvas');
+  target.width = targetW;
+  target.height = targetH;
+  const ctx = target.getContext('2d')!;
+  ctx.imageSmoothingEnabled = true;
+
+  // Light feathering keeps strokes from looking pixelated when downscaled
+  const dpr = window.devicePixelRatio || 1;
+  const blurRadius = Math.min(0.65, 0.35 * dpr);
+  ctx.filter = `blur(${blurRadius}px)`;
+  ctx.drawImage(source, 0, 0, targetW, targetH);
+  ctx.filter = 'none';
+
+  return target;
 }
 
 /**
  * Draw mask with just fill, no outline (for hover state)
  * Creates an intense highlight without borders
  */
-export function applyMaskFillOnly(
+function applyMaskFillOnly(
   maskId: string,
   maskImageCache: Map<string, CachedMask>,
   fillColor: string
@@ -400,18 +441,27 @@ export function applyMaskFillOnly(
 
   const w = canvas.width;
   const h = canvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  const targetW = Math.max(1, Math.round(w * dpr));
+  const targetH = Math.max(1, Math.round(h * dpr));
+
+  // Scale mask to device pixel ratio to avoid aliasing on high-DPI screens
+  const alphaTexture = buildAlphaTexture(alphaData, targetW, targetH);
+  const fillCanvas = document.createElement('canvas');
+  fillCanvas.width = targetW;
+  fillCanvas.height = targetH;
+  const fillCtx = fillCanvas.getContext('2d')!;
+  fillCtx.imageSmoothingEnabled = true;
+  fillCtx.drawImage(alphaTexture, 0, 0);
+  fillCtx.globalCompositeOperation = 'source-in';
+  fillCtx.fillStyle = fillColor;
+  fillCtx.fillRect(0, 0, targetW, targetH);
 
   // Clear canvas and reset state
   ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = true;
   ctx.globalCompositeOperation = 'source-over';
-
-  // Draw alpha mask
-  ctx.putImageData(alphaData, 0, 0);
-
-  // Apply fill color
-  ctx.globalCompositeOperation = 'source-in';
-  ctx.fillStyle = fillColor;
-  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(fillCanvas, 0, 0, w, h);
 
   // Reset composite operation
   ctx.globalCompositeOperation = 'source-over';
@@ -421,7 +471,7 @@ export function applyMaskFillOnly(
  * Draw mask with crisp colored outline and semi-transparent fill (Meta SAM style)
  * Creates proper stroke by: dilating mask → coloring → subtracting original → adding fill
  */
-export function applyMaskWithOutline(
+function applyMaskWithOutline(
   maskId: string,
   maskImageCache: Map<string, CachedMask>,
   fillColor: string,
@@ -437,50 +487,54 @@ export function applyMaskWithOutline(
 
   const w = canvas.width;
   const h = canvas.height;
+  const dpr = window.devicePixelRatio || 1;
+  const targetW = Math.max(1, Math.round(w * dpr));
+  const targetH = Math.max(1, Math.round(h * dpr));
 
-  // Create temp canvas for the original mask shape
-  const maskCanvas = document.createElement('canvas');
-  maskCanvas.width = w;
-  maskCanvas.height = h;
-  const maskCtx = maskCanvas.getContext('2d')!;
-  maskCtx.putImageData(alphaData, 0, 0);
+  // Shared alpha texture scaled to device pixel ratio with slight feather
+  const alphaTexture = buildAlphaTexture(alphaData, targetW, targetH);
 
   // Create stroke layer: dilated mask minus original = outline only
   const strokeCanvas = document.createElement('canvas');
-  strokeCanvas.width = w;
-  strokeCanvas.height = h;
+  strokeCanvas.width = targetW;
+  strokeCanvas.height = targetH;
   const strokeCtx = strokeCanvas.getContext('2d')!;
+  strokeCtx.imageSmoothingEnabled = true;
 
-  // Draw dilated mask
-  const offsets = getStrokeOffsets(strokeWidth);
+  // Use dense offsets + a tiny blur to smooth jagged edges
+  strokeCtx.filter = `blur(${Math.min(0.8, 0.5 * dpr)}px)`;
+  const offsets = getStrokeOffsets(strokeWidth * dpr, 32);
   for (const [dx, dy] of offsets) {
-    strokeCtx.drawImage(maskCanvas, dx, dy);
+    strokeCtx.drawImage(alphaTexture, dx, dy);
   }
+  strokeCtx.filter = 'none';
 
   // Cut out the original mask to leave only the stroke
   strokeCtx.globalCompositeOperation = 'destination-out';
-  strokeCtx.drawImage(maskCanvas, 0, 0);
+  strokeCtx.drawImage(alphaTexture, 0, 0);
 
   // Apply stroke color
   strokeCtx.globalCompositeOperation = 'source-in';
   strokeCtx.fillStyle = strokeColor;
-  strokeCtx.fillRect(0, 0, w, h);
+  strokeCtx.fillRect(0, 0, targetW, targetH);
 
   // Create fill layer
   const fillCanvas = document.createElement('canvas');
-  fillCanvas.width = w;
-  fillCanvas.height = h;
+  fillCanvas.width = targetW;
+  fillCanvas.height = targetH;
   const fillCtx = fillCanvas.getContext('2d')!;
-  fillCtx.putImageData(alphaData, 0, 0);
+  fillCtx.imageSmoothingEnabled = true;
+  fillCtx.drawImage(alphaTexture, 0, 0);
   fillCtx.globalCompositeOperation = 'source-in';
   fillCtx.fillStyle = fillColor;
-  fillCtx.fillRect(0, 0, w, h);
+  fillCtx.fillRect(0, 0, targetW, targetH);
 
-  // Composite final result
+  // Composite final result back to display resolution
   ctx.clearRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = true;
   ctx.globalCompositeOperation = 'source-over';
-  ctx.drawImage(strokeCanvas, 0, 0);
-  ctx.drawImage(fillCanvas, 0, 0);
+  ctx.drawImage(strokeCanvas, 0, 0, w, h);
+  ctx.drawImage(fillCanvas, 0, 0, w, h);
 
   // Reset composite operation
   ctx.globalCompositeOperation = 'source-over';

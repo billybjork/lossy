@@ -6,7 +6,7 @@
  */
 
 import type { SegmentModeContext, SegmentPoint, MaskData, CachedMask } from './types';
-import { debugLog, getImageNaturalDimensions } from './utils';
+import { getImageNaturalDimensions } from './utils';
 
 // ============ Constants ============
 
@@ -35,8 +35,6 @@ export interface SegmentModeHooks {
  * Enter segment mode - set up visuals and start the update loop
  */
 export function enterSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
-  debugLog('[SegmentMode] Entering segment mode');
-
   // Initialize state
   ctx.active = true;
   ctx.spotlightedMaskId = null;
@@ -63,16 +61,12 @@ export function enterSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHook
 
   // Notify server
   hooks.pushEvent('enter_segment_mode', {});
-
-  debugLog('[SegmentMode] Entered segment mode, loop started');
 }
 
 /**
  * Exit segment mode - clean up everything
  */
 export function exitSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
-  debugLog('[SegmentMode] Exiting segment mode');
-
   // Stop loop first
   stopLoop(ctx);
 
@@ -101,8 +95,6 @@ export function exitSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks
 
   // Notify server
   hooks.pushEvent('exit_segment_mode', {});
-
-  debugLog('[SegmentMode] Exited segment mode');
 }
 
 // ============ Update Loop ============
@@ -178,7 +170,6 @@ function tick(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
 
   // 3. Embeddings ready?
   if (!hooks.embeddingsReady()) {
-    debugLog('[SegmentMode] Embeddings not ready, ensuring...');
     hooks.ensureEmbeddings();
     updateStatus(ctx, hooks.jsContainer, 'Preparing embeddings…', 'searching');
     ctx.needsSegment = true;
@@ -215,7 +206,6 @@ async function fireSegmentation(ctx: SegmentModeContext, hooks: SegmentModeHooks
   }
 
   updateStatus(ctx, hooks.jsContainer, 'Segmenting…', 'searching');
-  debugLog('[SegmentMode] Firing segmentation with', points.length, 'points');
 
   try {
     const result = await hooks.segment(points);
@@ -230,10 +220,9 @@ async function fireSegmentation(ctx: SegmentModeContext, hooks: SegmentModeHooks
       ctx.lastMaskData = result.maskData;
       renderPreviewMask(ctx, result.maskData, hooks);
       updateStatus(ctx, hooks.jsContainer, 'Preview ready', 'ready');
-      debugLog('[SegmentMode] Segmentation complete, rendering preview');
     }
   } catch (error) {
-    debugLog('[SegmentMode] Segment error:', error);
+    // Swallow errors and continue loop; UI status remains last known value
   } finally {
     ctx.inFlight = false;
     // If queued, fire again
@@ -387,7 +376,6 @@ export function handleSegmentClick(
   ctx.needsSegment = true;
 
   renderPointMarkers(ctx, hooks);
-  debugLog('[SegmentMode] Added point:', point.label === 1 ? 'positive' : 'negative', 'at', coords);
 
   // Fire immediately if embeddings ready and not in flight
   if (!ctx.inFlight && hooks.embeddingsReady()) {
@@ -587,7 +575,7 @@ function renderPreviewMask(
   };
 
   maskImg.onerror = () => {
-    debugLog('[SegmentMode] Failed to load preview mask');
+    // Leave status untouched; preview stays absent
   };
 
   maskImg.src = maskData.mask_png;
@@ -669,9 +657,6 @@ export function forceCleanupSegmentElements(ctx?: SegmentModeContext): void {
           // Ignore
         }
       });
-      if (orphans.length > 0) {
-        debugLog(`[SegmentMode] Force cleaned ${orphans.length} orphaned elements`);
-      }
     }
 
     // Null out context references
@@ -698,7 +683,6 @@ export function undoLastPoint(ctx: SegmentModeContext, hooks: SegmentModeHooks):
   }
 
   const removed = ctx.lockedPoints.pop();
-  debugLog('[SegmentMode] Undid point:', removed?.label === 1 ? 'positive' : 'negative');
 
   // Re-render point markers
   renderPointMarkers(ctx, hooks);
@@ -726,7 +710,6 @@ export function undoLastPoint(ctx: SegmentModeContext, hooks: SegmentModeHooks):
  */
 export function notifyEmbeddingsReady(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
   if (ctx.active && ctx.needsSegment && !ctx.inFlight) {
-    debugLog('[SegmentMode] Embeddings ready, firing segmentation');
     fireSegmentation(ctx, hooks);
   }
 }
@@ -737,7 +720,6 @@ export function notifyEmbeddingsReady(ctx: SegmentModeContext, hooks: SegmentMod
  */
 export function notifyMaskCacheReady(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
   if (ctx.active) {
-    debugLog('[SegmentMode] Mask cache ready notification, triggering tick');
     tick(ctx, hooks);
   }
 }
