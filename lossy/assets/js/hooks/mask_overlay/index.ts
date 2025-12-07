@@ -198,6 +198,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         e.preventDefault();
         this.enterSegmentMode();
       }
+
+      // Undo last point with z or Delete/Backspace while in segment mode (with Command held)
+      if (this.segmentCtx && e.metaKey && (e.key === 'z' || e.key === 'Delete' || e.key === 'Backspace')) {
+        e.preventDefault();
+        e.stopPropagation();
+        SegmentMode.undoLastPoint(this.segmentCtx, this.getSegmentHooks());
+      }
     };
 
     this.segmentModeKeyupHandler = (e: KeyboardEvent) => {
@@ -268,6 +275,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.hoveredMaskId = null;
 
       requestAnimationFrame(() => {
+        // Reset marquee artifacts after LiveView updates so the drag rect can't be removed by patches
+        DragSelection.resetDragState(this.container, this as unknown as MaskOverlayState);
+
         this.positionMasks();
         this.renderSegmentMasks();
         this.attachMaskListeners();
@@ -352,7 +362,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     document.removeEventListener('mousemove', this.mouseMoveHandler);
     document.removeEventListener('mouseup', this.mouseUpHandler);
 
-    if (this.dragRect) this.dragRect.remove();
+    if (this.dragRect) {
+      this.dragRect.remove();
+      this.dragRect = null;
+    }
   },
 
   // ============ Delegated Methods ============

@@ -686,6 +686,38 @@ export function forceCleanupSegmentElements(ctx?: SegmentModeContext): void {
   }
 }
 
+// ============ Undo ============
+
+/**
+ * Undo the last locked point.
+ * Returns true if a point was removed, false if there were no points.
+ */
+export function undoLastPoint(ctx: SegmentModeContext, hooks: SegmentModeHooks): boolean {
+  if (!ctx.active || ctx.lockedPoints.length === 0) {
+    return false;
+  }
+
+  const removed = ctx.lockedPoints.pop();
+  debugLog('[SegmentMode] Undid point:', removed?.label === 1 ? 'positive' : 'negative');
+
+  // Re-render point markers
+  renderPointMarkers(ctx, hooks);
+
+  if (ctx.lockedPoints.length === 0) {
+    // No more points - clear preview and let loop handle spotlight mode
+    clearPreview(ctx);
+    ctx.needsSegment = true;
+  } else {
+    // Still have points - re-segment
+    ctx.needsSegment = true;
+    if (!ctx.inFlight && hooks.embeddingsReady()) {
+      fireSegmentation(ctx, hooks);
+    }
+  }
+
+  return true;
+}
+
 // ============ Readiness Notifications ============
 
 /**

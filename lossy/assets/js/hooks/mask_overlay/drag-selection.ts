@@ -7,6 +7,28 @@
 
 import type { MaskOverlayState, DragRect } from './types';
 
+function getMarqueeHost(container: HTMLElement): HTMLElement {
+  const jsContainer = document.getElementById('js-overlay-container');
+  if (jsContainer && container.contains(jsContainer)) {
+    return jsContainer;
+  }
+
+  return container;
+}
+
+function ensureDragRect(container: HTMLElement, current: HTMLDivElement | null): HTMLDivElement {
+  const host = getMarqueeHost(container);
+
+  if (current && current.isConnected) {
+    if (current.parentElement !== host) {
+      host.appendChild(current);
+    }
+    return current;
+  }
+
+  return createDragRect(host);
+}
+
 /**
  * Check if segment mode is active (works with new context-based state)
  */
@@ -17,7 +39,7 @@ function isSegmentModeActive(state: MaskOverlayState): boolean {
 /**
  * Create the rubber band selection rectangle element
  */
-export function createDragRect(container: HTMLElement): HTMLDivElement {
+export function createDragRect(host: HTMLElement): HTMLDivElement {
   const rect = document.createElement('div');
   rect.className = 'drag-selection-rect';
   rect.style.cssText = `
@@ -29,7 +51,7 @@ export function createDragRect(container: HTMLElement): HTMLDivElement {
     z-index: 1000;
     box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 10px rgba(59, 130, 246, 0.3);
   `;
-  container.appendChild(rect);
+  host.appendChild(rect);
   return rect;
 }
 
@@ -65,17 +87,14 @@ export function startDrag(
   // DEFENSIVE: Clean up any orphaned segment mode DOM elements that might block interaction
   cleanupOrphanedSegmentElements();
 
+  state.dragRect = ensureDragRect(container, state.dragRect);
+
   const containerRect = container.getBoundingClientRect();
   state.dragStart = {
     x: event.clientX - containerRect.left,
     y: event.clientY - containerRect.top
   };
   state.dragShift = event.shiftKey;
-
-  // Create rubber band element if needed
-  if (!state.dragRect) {
-    state.dragRect = createDragRect(container);
-  }
 }
 
 /**
@@ -109,6 +128,8 @@ export function updateDrag(
   if (distance < 5 && !state.isDragging) return;
 
   state.isDragging = true;
+
+  state.dragRect = ensureDragRect(container, state.dragRect);
 
   // Calculate rectangle bounds
   const left = Math.min(state.dragStart.x, currentX);
@@ -182,9 +203,8 @@ export function endDrag(
   state.dragStart = null;
   state.dragShift = false;
   state.dragIntersectingIds = new Set();
-  if (state.dragRect) {
-    state.dragRect.style.display = 'none';
-  }
+  state.dragRect = ensureDragRect(container, state.dragRect);
+  state.dragRect.style.display = 'none';
 }
 
 /**
@@ -269,4 +289,13 @@ function cleanupOrphanedSegmentElements(): void {
     console.warn(`[DragSelection] Cleaning up ${orphans.length} orphaned segment mode elements`);
     orphans.forEach(el => el.remove());
   }
+}
+
+export function resetDragState(container: HTMLElement, state: MaskOverlayState): void {
+  state.isDragging = false;
+  state.dragStart = null;
+  state.dragShift = false;
+  state.dragIntersectingIds = new Set();
+  state.dragRect = ensureDragRect(container, state.dragRect);
+  state.dragRect.style.display = 'none';
 }
