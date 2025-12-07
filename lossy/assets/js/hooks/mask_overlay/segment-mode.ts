@@ -20,7 +20,8 @@ export async function enterSegmentMode(
   isExtensionAvailable: () => boolean,
   callbacks: {
     updateHighlight: () => void,
-    pushEvent: (event: string, payload: unknown) => void
+    pushEvent: (event: string, payload: unknown) => void,
+    onEmbeddingsReady?: () => void
   }
 ): Promise<void> {
   state.segmentMode = true;
@@ -69,6 +70,7 @@ export async function enterSegmentMode(
     // Extension handles its own embeddings - mark as ready
     state.embeddingsReady = true;
     debugLog('[SegmentMode] Extension available, embeddings ready');
+    callbacks.onEmbeddingsReady?.();
   } else if (inferenceProvider && !state.embeddingsReady) {
     // Check if auto-segmentation is in progress - if so, embeddings are being computed
     // and we should NOT try to compute them again (would cause ONNX memory corruption)
@@ -85,6 +87,7 @@ export async function enterSegmentMode(
           await inferenceProvider.computeEmbeddings(state.documentId, img);
           state.embeddingsReady = true;
           debugLog('[SegmentMode] Embeddings ready');
+          callbacks.onEmbeddingsReady?.();
         } catch (error) {
           console.error('[SegmentMode] Failed to compute embeddings:', error);
         }
@@ -92,6 +95,7 @@ export async function enterSegmentMode(
     }
   } else if (inferenceProvider && state.embeddingsReady) {
     debugLog('[SegmentMode] Embeddings already computed');
+    callbacks.onEmbeddingsReady?.();
   }
 }
 

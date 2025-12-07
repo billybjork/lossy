@@ -184,6 +184,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         // Immediately check for existing mask under cursor (doesn't need embeddings)
         if (this.lastMousePosition) {
           this.spotlightMaskAtCursor();
+
+          // If no existing mask found, trigger live segmentation
+          // (will run immediately if embeddings ready, or queued via onEmbeddingsReady callback)
+          if (!this.spotlightedMaskId) {
+            this.updateAtCursor();
+          }
         }
       }
     };
@@ -571,7 +577,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       isExtensionAvailable,
       {
         updateHighlight: () => this.updateHighlight(),
-        pushEvent: (event, payload) => this.pushEvent(event, payload)
+        pushEvent: (event, payload) => this.pushEvent(event, payload),
+        onEmbeddingsReady: () => {
+          // Trigger segmentation at cursor if not over an existing mask
+          if (this.segmentMode && !this.spotlightedMaskId) {
+            this.updateAtCursor();
+          }
+        }
       }
     );
   },
