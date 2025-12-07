@@ -181,15 +181,14 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         // Start entering segment mode (may be async for embeddings, but we don't wait)
         this.enterSegmentMode();
 
-        // Immediately check for existing mask under cursor (doesn't need embeddings)
+        // Check for mask at cursor after DOM updates complete
+        // updateAtCursor handles both spotlight (existing masks) and segmentation
         if (this.lastMousePosition) {
-          this.spotlightMaskAtCursor();
-
-          // If no existing mask found, trigger live segmentation
-          // (will run immediately if embeddings ready, or queued via onEmbeddingsReady callback)
-          if (!this.spotlightedMaskId) {
-            this.updateAtCursor();
-          }
+          requestAnimationFrame(() => {
+            if (this.segmentMode) {
+              this.updateAtCursor();
+            }
+          });
         }
       }
     };
@@ -579,8 +578,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         updateHighlight: () => this.updateHighlight(),
         pushEvent: (event, payload) => this.pushEvent(event, payload),
         onEmbeddingsReady: () => {
-          // Trigger segmentation at cursor if not over an existing mask
-          if (this.segmentMode && !this.spotlightedMaskId) {
+          // Re-check cursor position now that embeddings are ready
+          // updateAtCursor handles both spotlight (existing masks) and segmentation
+          if (this.segmentMode) {
             this.updateAtCursor();
           }
         }
@@ -593,21 +593,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       updateHighlight: () => this.updateHighlight(),
       pushEvent: (event, payload) => this.pushEvent(event, payload)
     });
-  },
-
-  // Check for existing mask under cursor immediately (no segmentation, no embeddings needed)
-  spotlightMaskAtCursor() {
-    if (!this.lastMousePosition) return;
-
-    const cursorX = this.lastMousePosition.x + this.container.getBoundingClientRect().left;
-    const cursorY = this.lastMousePosition.y + this.container.getBoundingClientRect().top;
-
-    const existingMaskId = this.findMaskUnderCursor(cursorX, cursorY);
-    if (existingMaskId) {
-      debugLog('[MaskOverlay] Immediate spotlight on enter:', existingMaskId);
-      this.spotlightedMaskId = existingMaskId;
-      this.updateHighlight();
-    }
   },
 
   // Update spotlight/segment at current cursor position
