@@ -380,9 +380,15 @@ export async function confirmSegment(
     exitSegmentMode: () => void
   }
 ): Promise<void> {
-  if (state.segmentPoints.length === 0) return;
+  // Always exit segment mode, even on early returns
+  if (state.segmentPoints.length === 0) {
+    debugLog('[SegmentMode] No segment points, exiting');
+    callbacks.exitSegmentMode();
+    return;
+  }
   if (!state.documentId) {
     console.warn('[SegmentMode] No document ID');
+    callbacks.exitSegmentMode();
     return;
   }
 

@@ -194,12 +194,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       if (isSegmentModeTrigger(e) && this.segmentMode) {
         e.preventDefault();
 
-        // Confirm if we have a preview or locked points
+        // Confirm if we have a preview, locked points, or spotlighted existing mask
         const hasPreview = this.previewMaskCanvas && this.lastMaskData;
         const hasLockedPoints = this.lockedSegmentPoints.length > 0;
+        const hasSpotlightedMask = this.spotlightedMaskId !== null;
 
         if (hasPreview || hasLockedPoints) {
-          // Track current masks for shimmer effect
+          // New mask from segmentation
           this.pendingSegmentConfirm = true;
           this.previousMaskIds = new Set(
             Array.from(this.container.querySelectorAll('.mask-region'))
@@ -213,6 +214,17 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           }
 
           await this.confirmSegment();
+        } else if (hasSpotlightedMask) {
+          // Select the existing spotlighted mask
+          const maskId = this.spotlightedMaskId!;
+          debugLog('[MaskOverlay] Selecting spotlighted mask:', maskId);
+
+          this.exitSegmentMode();
+
+          // Select the mask
+          this.selectedMaskIds = new Set([maskId]);
+          this.updateHighlight();
+          this.pushEvent("select_region", { id: maskId, shift: false });
         } else {
           this.exitSegmentMode();
         }
