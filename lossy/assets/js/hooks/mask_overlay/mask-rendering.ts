@@ -7,7 +7,7 @@
 
 import type { MaskOverlayState, CachedMask } from './types';
 import { MASK_COLORS, HOVER_COLOR } from './types';
-import { isSegmentModeActive } from './segment-mode';
+import { isSmartSelectActive } from './smart-select-mode';
 
 /**
  * Render segment masks (type: 'object') as semi-transparent overlays
@@ -25,6 +25,21 @@ export function renderSegmentMasks(
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
   const loadPromises: Promise<void>[] = [];
 
+  // Track mask ids present in the DOM so we can prune stale cache entries
+  const domMaskIds = new Set<string>();
+  masks.forEach((mask: HTMLElement) => {
+    const maskId = mask.dataset.maskId || '';
+    if (maskId) domMaskIds.add(maskId);
+  });
+
+  // Remove cached canvases for masks that were deleted
+  maskImageCache.forEach((cached, maskId) => {
+    if (!domMaskIds.has(maskId)) {
+      cached.canvas.remove();
+      maskImageCache.delete(maskId);
+    }
+  });
+
   // Track color index assignment for new masks
   let nextColorIndex = maskImageCache.size;
 
@@ -32,24 +47,30 @@ export function renderSegmentMasks(
     const maskType = mask.dataset.maskType;
     const maskUrl = mask.dataset.maskUrl;
     const maskId = mask.dataset.maskId || '';
-
-    // Render canvas overlays for object/manual segments with mask URLs
-    if ((maskType !== 'object' && maskType !== 'manual') || !maskUrl) return;
-
-    // Check if already rendered
-    if (maskImageCache.has(maskId)) return;
-
-    // Assign a color index for this mask
-    const colorIndex = nextColorIndex % MASK_COLORS.length;
-    nextColorIndex++;
-
-    // Get bbox coordinates
     const bboxX = parseFloat(mask.dataset.bboxX || '0') || 0;
     const bboxY = parseFloat(mask.dataset.bboxY || '0') || 0;
     const bboxW = parseFloat(mask.dataset.bboxW || '0') || 0;
     const bboxH = parseFloat(mask.dataset.bboxH || '0') || 0;
 
-    if (bboxW <= 0 || bboxH <= 0) return;
+    // Render canvas overlays for object/manual segments with mask URLs
+    if ((maskType !== 'object' && maskType !== 'manual') || !maskUrl) return;
+    if (!maskId || bboxW <= 0 || bboxH <= 0) return;
+
+    // If already cached, ensure canvas is re-attached after LiveView patching
+    const cached = maskImageCache.get(maskId);
+    if (cached) {
+      cached.bbox = { x: bboxX, y: bboxY, w: bboxW, h: bboxH };
+
+      if (!mask.contains(cached.canvas)) {
+        mask.appendChild(cached.canvas);
+      }
+
+      return;
+    }
+
+    // Assign a color index for this mask
+    const colorIndex = nextColorIndex % MASK_COLORS.length;
+    nextColorIndex++;
 
     // Load the mask image
     const maskImg = new Image();
@@ -129,8 +150,8 @@ export function updateHighlight(
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
   const hasHover = state.hoveredMaskId !== null;
 
-  // In segment mode, disable pointer events on all masks
-  if (isSegmentModeActive(state.segmentCtx)) {
+  // In Smart Select, disable pointer events on all masks
+  if (isSmartSelectActive(state.smartSelectCtx)) {
     masks.forEach((mask: HTMLElement) => {
       mask.style.pointerEvents = 'none';
     });
@@ -158,7 +179,7 @@ export function updateHighlight(
   }
 
   // Update cursor on container
-  if (isSegmentModeActive(state.segmentCtx)) {
+  if (isSmartSelectActive(state.smartSelectCtx)) {
     container.style.cursor = 'crosshair';
   } else {
     container.style.cursor = hasHover ? 'pointer' : 'crosshair';

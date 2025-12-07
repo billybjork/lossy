@@ -6,7 +6,7 @@
  */
 
 import type { MaskOverlayState, CachedMask } from './types';
-import { isSegmentModeActive } from './segment-mode';
+import { isSmartSelectActive } from './smart-select-mode';
 
 /**
  * Position all mask elements based on image dimensions
@@ -74,7 +74,7 @@ export function attachMaskListeners(
     if (isSegment) {
       // For segments, check if cursor is over actual mask pixels
       mask.onmousemove = (e: MouseEvent) => {
-        if (isSegmentModeActive(state.segmentCtx)) return;
+        if (isSmartSelectActive(state.smartSelectCtx)) return;
         const isOverMask = isPointOverSegmentMask(maskId, e, mask, maskImageCache);
         if (isOverMask && state.hoveredMaskId !== maskId) {
           state.hoveredMaskId = maskId;
@@ -88,7 +88,7 @@ export function attachMaskListeners(
       };
 
       mask.onmouseleave = () => {
-        if (isSegmentModeActive(state.segmentCtx)) return;
+        if (isSmartSelectActive(state.smartSelectCtx)) return;
         if (state.hoveredMaskId === maskId) {
           state.hoveredMaskId = null;
           callbacks.onHoverChange(null);
@@ -98,14 +98,14 @@ export function attachMaskListeners(
     } else {
       // For text regions, use simple bounding box hover
       mask.onmouseenter = () => {
-        if (isSegmentModeActive(state.segmentCtx)) return;
+        if (isSmartSelectActive(state.smartSelectCtx)) return;
         state.hoveredMaskId = maskId;
         callbacks.onHoverChange(maskId);
         callbacks.updateHighlight();
       };
 
       mask.onmouseleave = () => {
-        if (isSegmentModeActive(state.segmentCtx)) return;
+        if (isSmartSelectActive(state.smartSelectCtx)) return;
         if (state.hoveredMaskId === maskId) {
           state.hoveredMaskId = null;
           callbacks.onHoverChange(null);
@@ -116,7 +116,7 @@ export function attachMaskListeners(
 
     // Click handler - for segments, also check mask pixels
     mask.onclick = (e: MouseEvent) => {
-      if (isSegmentModeActive(state.segmentCtx)) return;
+      if (isSmartSelectActive(state.smartSelectCtx)) return;
 
       // For segments, only register click if over actual mask
       if (isSegment && !isPointOverSegmentMask(maskId, e, mask, maskImageCache)) {
@@ -213,9 +213,9 @@ export function createKeyboardHandler(
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
-    // If there's a preview canvas (candidate mask) and not in segment mode, handle Enter/Escape
-    const previewCanvas = state.segmentCtx?.previewCanvas;
-    if (previewCanvas && !isSegmentModeActive(state.segmentCtx)) {
+    // If there's a preview canvas (candidate mask) and not in Smart Select, handle Enter/Escape
+    const previewCanvas = state.smartSelectCtx?.previewCanvas;
+    if (previewCanvas && !isSmartSelectActive(state.smartSelectCtx)) {
       if (e.key === 'Enter') {
         e.preventDefault();
         callbacks.onConfirmSegment();
@@ -228,25 +228,25 @@ export function createKeyboardHandler(
         if (previewCanvas) {
           previewCanvas.remove();
         }
-        if (state.segmentCtx) {
-          state.segmentCtx.previewCanvas = null;
-          state.segmentCtx.lastMaskData = null;
+        if (state.smartSelectCtx) {
+          state.smartSelectCtx.previewCanvas = null;
+          state.smartSelectCtx.lastMaskData = null;
         }
         callbacks.updateHighlight();
         return;
       }
     }
 
-    // In segment mode, only Escape exits (Command key release handles confirm)
-    if (isSegmentModeActive(state.segmentCtx)) {
-      // Escape exits segment mode without confirming
+    // In Smart Select, only Escape exits (Command key release handles confirm)
+    if (isSmartSelectActive(state.smartSelectCtx)) {
+      // Escape exits Smart Select without confirming
       if (e.key === 'Escape') {
         e.preventDefault();
-        callbacks.onDeselect(); // This will trigger exitSegmentMode via the hook
+        callbacks.onDeselect(); // This will trigger exitSmartSelect via the hook
         return;
       }
 
-      return; // Don't process other keys in segment mode
+      return; // Don't process other keys in Smart Select
     }
 
     // Enter = inpaint selected

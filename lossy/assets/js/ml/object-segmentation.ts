@@ -267,7 +267,22 @@ async function runDecoder(
   // Calculate quality metrics for each candidate mask
   // AGGRESSIVE high-confidence segmentation: only accept clean, solid objects
   const maskSize = maskDims.width * maskDims.height;
-  const candidates = [];
+
+  // Precompute positive points in model (1024x1024) space for coverage checks
+  const positivePointsModelSpace = points
+    .filter(p => p.label === 1)
+    .map(p => transformCoords(p, resizeInfo));
+
+  const candidates: Array<{
+    index: number;
+    iouScore: number;
+    stability: number;
+    compactness: number;
+    coverage: number;
+    qualityScore: number;
+    maskData: Float32Array;
+    coversAllPositives: boolean;
+  }> = [];
 
   for (let i = 0; i < numMasks; i++) {
     const offset = i * maskSize;
@@ -317,6 +332,16 @@ async function runDecoder(
     const iouScore = scores[i];
     const qualityScore = iouScore * (1 + stability * 0.4 + compactness * 0.4) * (coverage > 0.001 ? 1 : 0.5);
 
+    // Ensure the candidate actually covers all positive prompt points.
+    // Use a light logit threshold to avoid rejecting good masks on border clicks.
+    const coversAllPositives = positivePointsModelSpace.length === 0 || positivePointsModelSpace.every(pt => {
+      const mx = Math.round((pt.x / SAM_INPUT_SIZE) * maskDims.width);
+      const my = Math.round((pt.y / SAM_INPUT_SIZE) * maskDims.height);
+      const clampedX = Math.max(0, Math.min(maskDims.width - 1, mx));
+      const clampedY = Math.max(0, Math.min(maskDims.height - 1, my));
+      return maskData[clampedY * maskDims.width + clampedX] > 0;
+    });
+
     candidates.push({
       index: i,
       iouScore,
@@ -324,19 +349,26 @@ async function runDecoder(
       compactness,
       coverage,
       qualityScore,
-      maskData
+      maskData,
+      coversAllPositives
     });
   }
 
   // Sort by quality score descending
   candidates.sort((a, b) => b.qualityScore - a.qualityScore);
 
-  // Apply filtering using file-level threshold constants
-  const bestCandidate = candidates.find(c =>
-    c.iouScore >= MIN_IOU &&
-    c.stability >= MIN_STABILITY &&
-    c.compactness >= MIN_COMPACTNESS
-  ) || candidates[0];
+  // Apply filtering using file-level threshold constants, preferring masks that honor all positives
+  const pickBestCandidate = (pool: typeof candidates) =>
+    pool.find(c =>
+      c.iouScore >= MIN_IOU &&
+      c.stability >= MIN_STABILITY &&
+      c.compactness >= MIN_COMPACTNESS
+    ) || pool[0];
+
+  const positiveSafeCandidates = candidates.filter(c => c.coversAllPositives);
+  const bestCandidate =
+    (positiveSafeCandidates.length > 0 ? pickBestCandidate(positiveSafeCandidates) : null) ||
+    pickBestCandidate(candidates);
 
   const mask = bestCandidate.maskData;
 

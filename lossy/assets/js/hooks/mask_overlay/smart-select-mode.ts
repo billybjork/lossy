@@ -1,11 +1,11 @@
 /**
- * Segment Mode Controller - Simplified
+ * Smart Select Controller - Simplified
  *
- * Simple segment mode with Command-key activation.
+ * Command-key Smart Select with point-based refinement.
  * Uses straightforward inFlight/needsSegment queue pattern instead of complex state machine.
  */
 
-import type { SegmentModeContext, SegmentPoint, MaskData, CachedMask } from './types';
+import type { SmartSelectContext, SegmentPoint, MaskData, CachedMask } from './types';
 import { getImageNaturalDimensions } from './utils';
 
 // ============ Constants ============
@@ -14,7 +14,7 @@ const LOOP_INTERVAL_MS = 100;  // Update loop interval
 
 // ============ Hooks Interface ============
 
-export interface SegmentModeHooks {
+export interface SmartSelectHooks {
   container: HTMLElement;
   jsContainer: HTMLElement | null;
   maskCache: Map<string, CachedMask>;
@@ -32,9 +32,9 @@ export interface SegmentModeHooks {
 // ============ Core Entry/Exit ============
 
 /**
- * Enter segment mode - set up visuals and start the update loop
+ * Enter Smart Select - set up visuals and start the update loop
  */
-export function enterSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+export function enterSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   // Initialize state
   ctx.active = true;
   ctx.spotlightedMaskId = null;
@@ -45,7 +45,7 @@ export function enterSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHook
   ctx.needsSegment = false;
 
   // Visual setup
-  hooks.container.classList.add('segment-mode');
+  hooks.container.classList.add('smart-select-mode');
   hooks.container.style.cursor = 'crosshair';
 
   // Create DOM elements
@@ -60,13 +60,13 @@ export function enterSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHook
   hooks.ensureEmbeddings();
 
   // Notify server
-  hooks.pushEvent('enter_segment_mode', {});
+  hooks.pushEvent('enter_smart_select', {});
 }
 
 /**
- * Exit segment mode - clean up everything
+ * Exit Smart Select - clean up everything
  */
-export function exitSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   // Stop loop first
   stopLoop(ctx);
 
@@ -80,7 +80,7 @@ export function exitSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks
   ctx.needsSegment = false;
 
   // Clean up DOM
-  hooks.container.classList.remove('segment-mode');
+  hooks.container.classList.remove('smart-select-mode');
   hooks.container.style.cursor = '';
   removeSpotlightOverlay(ctx);
   removePointMarkers(ctx);
@@ -88,13 +88,13 @@ export function exitSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks
   removeStatus(ctx);
 
   // Force cleanup any stragglers
-  forceCleanupSegmentElements(ctx);
+  forceCleanupSmartSelectElements(ctx);
 
   // Restore normal highlights
   hooks.updateHighlight();
 
   // Notify server
-  hooks.pushEvent('exit_segment_mode', {});
+  hooks.pushEvent('exit_smart_select', {});
 }
 
 // ============ Update Loop ============
@@ -102,7 +102,7 @@ export function exitSegmentMode(ctx: SegmentModeContext, hooks: SegmentModeHooks
 /**
  * Start the continuous update loop.
  */
-function startLoop(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+function startLoop(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (ctx.loopIntervalId !== null) return;
 
   // Run immediately on entry
@@ -120,7 +120,7 @@ function startLoop(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
 /**
  * Stop the update loop
  */
-function stopLoop(ctx: SegmentModeContext): void {
+function stopLoop(ctx: SmartSelectContext): void {
   if (ctx.loopIntervalId !== null) {
     clearInterval(ctx.loopIntervalId);
     ctx.loopIntervalId = null;
@@ -129,14 +129,14 @@ function stopLoop(ctx: SegmentModeContext): void {
 
 /**
  * Core tick function - called by loop every 100ms.
- * Simple logic: spotlight pixel hits, segment everything else.
+ * Simple logic: spotlight pixel hits, segment when nothing is already under the cursor.
  */
-function tick(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (!ctx.active) return;
 
   // No cursor yet - show waiting message
   if (!ctx.lastMouse) {
-    updateStatus(ctx, hooks.jsContainer, 'Move cursor to segment', 'searching');
+    updateStatus(ctx, hooks.jsContainer, 'Move cursor to select', 'searching');
     return;
   }
 
@@ -192,7 +192,7 @@ function tick(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
  * - Run segmentation
  * - On complete: set inFlight=false, re-fire if needsSegment
  */
-async function fireSegmentation(ctx: SegmentModeContext, hooks: SegmentModeHooks): Promise<void> {
+async function fireSegmentation(ctx: SmartSelectContext, hooks: SmartSelectHooks): Promise<void> {
   if (ctx.inFlight) return;
   if (!ctx.active) return;
 
@@ -205,7 +205,7 @@ async function fireSegmentation(ctx: SegmentModeContext, hooks: SegmentModeHooks
     return;
   }
 
-  updateStatus(ctx, hooks.jsContainer, 'Segmenting…', 'searching');
+  updateStatus(ctx, hooks.jsContainer, 'Finding region…', 'searching');
 
   try {
     const result = await hooks.segment(points);
@@ -235,7 +235,7 @@ async function fireSegmentation(ctx: SegmentModeContext, hooks: SegmentModeHooks
 /**
  * Build points array from locked points + cursor
  */
-function buildPoints(ctx: SegmentModeContext, hooks: SegmentModeHooks): SegmentPoint[] {
+function buildPoints(ctx: SmartSelectContext, hooks: SmartSelectHooks): SegmentPoint[] {
   const points: SegmentPoint[] = [...ctx.lockedPoints];
 
   // Add cursor point if no locked points or if we want live preview
@@ -265,7 +265,7 @@ interface MaskHit {
  */
 function findMaskUnderCursor(
   cursorPos: { x: number; y: number },
-  hooks: SegmentModeHooks
+  hooks: SmartSelectHooks
 ): MaskHit | null {
   const containerRect = hooks.container.getBoundingClientRect();
   const clientX = cursorPos.x + containerRect.left;
@@ -348,12 +348,12 @@ function isPointOverMaskPixel(
 // ============ Point Handling ============
 
 /**
- * Handle click in segment mode - adds a locked point
+ * Handle click in Smart Select - adds a locked point
  */
-export function handleSegmentClick(
-  ctx: SegmentModeContext,
+export function handleSmartSelectClick(
+  ctx: SmartSelectContext,
   event: MouseEvent,
-  hooks: SegmentModeHooks
+  hooks: SmartSelectHooks
 ): void {
   if (!ctx.active) return;
 
@@ -386,7 +386,7 @@ export function handleSegmentClick(
 /**
  * Update cursor position for the loop to use
  */
-export function updateCursorPosition(ctx: SegmentModeContext, x: number, y: number): void {
+export function updateCursorPosition(ctx: SmartSelectContext, x: number, y: number): void {
   ctx.lastMouse = { x, y };
 }
 
@@ -397,7 +397,7 @@ export function updateCursorPosition(ctx: SegmentModeContext, x: number, y: numb
  */
 function getImageCoordinates(
   pos: { x: number; y: number } | null,
-  hooks: SegmentModeHooks
+  hooks: SmartSelectHooks
 ): { x: number; y: number } | null {
   if (!pos) return null;
 
@@ -423,11 +423,11 @@ function getImageCoordinates(
 /**
  * Create the dark spotlight overlay
  */
-function createSpotlightOverlay(ctx: SegmentModeContext, jsContainer: HTMLElement | null): void {
+function createSpotlightOverlay(ctx: SmartSelectContext, jsContainer: HTMLElement | null): void {
   if (!jsContainer || ctx.spotlightOverlay) return;
 
   const overlay = document.createElement('div');
-  overlay.className = 'segment-spotlight-overlay';
+  overlay.className = 'smart-select-spotlight-overlay';
   overlay.style.cssText = `
     position: absolute;
     inset: 0;
@@ -453,7 +453,7 @@ function createSpotlightOverlay(ctx: SegmentModeContext, jsContainer: HTMLElemen
 /**
  * Remove spotlight overlay
  */
-function removeSpotlightOverlay(ctx: SegmentModeContext): void {
+function removeSpotlightOverlay(ctx: SmartSelectContext): void {
   if (ctx.spotlightOverlay) {
     ctx.spotlightOverlay.remove();
     ctx.spotlightOverlay = null;
@@ -463,11 +463,11 @@ function removeSpotlightOverlay(ctx: SegmentModeContext): void {
 /**
  * Create point markers container
  */
-function createPointMarkersContainer(ctx: SegmentModeContext, jsContainer: HTMLElement | null): void {
+function createPointMarkersContainer(ctx: SmartSelectContext, jsContainer: HTMLElement | null): void {
   if (!jsContainer || ctx.pointMarkersContainer) return;
 
   const container = document.createElement('div');
-  container.className = 'segment-point-markers';
+  container.className = 'smart-select-point-markers';
   container.style.cssText = `
     position: absolute;
     top: 0;
@@ -485,7 +485,7 @@ function createPointMarkersContainer(ctx: SegmentModeContext, jsContainer: HTMLE
 /**
  * Remove point markers
  */
-function removePointMarkers(ctx: SegmentModeContext): void {
+function removePointMarkers(ctx: SmartSelectContext): void {
   if (ctx.pointMarkersContainer) {
     ctx.pointMarkersContainer.remove();
     ctx.pointMarkersContainer = null;
@@ -495,7 +495,7 @@ function removePointMarkers(ctx: SegmentModeContext): void {
 /**
  * Render visual markers for locked points
  */
-function renderPointMarkers(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+function renderPointMarkers(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (!ctx.pointMarkersContainer) return;
 
   ctx.pointMarkersContainer.innerHTML = '';
@@ -516,7 +516,7 @@ function renderPointMarkers(ctx: SegmentModeContext, hooks: SegmentModeHooks): v
     const displayY = (point.y / naturalHeight) * displayHeight;
 
     const marker = document.createElement('div');
-    marker.className = `segment-point-marker ${point.label === 1 ? 'positive' : 'negative'}`;
+    marker.className = `smart-select-point-marker ${point.label === 1 ? 'positive' : 'negative'}`;
     marker.style.left = `${displayX}px`;
     marker.style.top = `${displayY}px`;
     ctx.pointMarkersContainer.appendChild(marker);
@@ -527,9 +527,9 @@ function renderPointMarkers(ctx: SegmentModeContext, hooks: SegmentModeHooks): v
  * Render preview mask (spotlight effect showing image through mask)
  */
 function renderPreviewMask(
-  ctx: SegmentModeContext,
+  ctx: SmartSelectContext,
   maskData: MaskData,
-  hooks: SegmentModeHooks
+  hooks: SmartSelectHooks
 ): void {
   // Store for confirmation
   ctx.lastMaskData = maskData;
@@ -542,7 +542,7 @@ function renderPreviewMask(
   if (!img || !jsContainer) return;
 
   const canvas = document.createElement('canvas');
-  canvas.className = 'segment-preview-mask';
+  canvas.className = 'smart-select-preview-mask';
   canvas.style.cssText = `
     position: absolute;
     top: 0;
@@ -584,7 +584,7 @@ function renderPreviewMask(
 /**
  * Remove preview mask
  */
-function removePreviewMask(ctx: SegmentModeContext): void {
+function removePreviewMask(ctx: SmartSelectContext): void {
   if (ctx.previewCanvas) {
     ctx.previewCanvas.remove();
     ctx.previewCanvas = null;
@@ -594,7 +594,7 @@ function removePreviewMask(ctx: SegmentModeContext): void {
 /**
  * Clear preview (when switching to spotlight mode)
  */
-function clearPreview(ctx: SegmentModeContext): void {
+function clearPreview(ctx: SmartSelectContext): void {
   removePreviewMask(ctx);
   ctx.lastMaskData = null;
 }
@@ -603,7 +603,7 @@ function clearPreview(ctx: SegmentModeContext): void {
  * Update status badge
  */
 function updateStatus(
-  ctx: SegmentModeContext,
+  ctx: SmartSelectContext,
   jsContainer: HTMLElement | null,
   text: string,
   mode: 'searching' | 'ready'
@@ -613,10 +613,10 @@ function updateStatus(
   let badge = ctx.statusEl;
   if (!badge) {
     badge = document.createElement('div');
-    badge.className = 'segment-status-indicator';
+    badge.className = 'smart-select-status-indicator';
     badge.innerHTML = `
-      <div class="segment-status-dot"></div>
-      <div class="segment-status-text"></div>
+      <div class="smart-select-status-dot"></div>
+      <div class="smart-select-status-text"></div>
     `;
     badge.style.pointerEvents = 'none';
     jsContainer.appendChild(badge);
@@ -624,7 +624,7 @@ function updateStatus(
   }
 
   badge.dataset.state = mode;
-  const textNode = badge.querySelector('.segment-status-text');
+  const textNode = badge.querySelector('.smart-select-status-text');
   if (textNode) {
     textNode.textContent = text;
   }
@@ -633,7 +633,7 @@ function updateStatus(
 /**
  * Remove status badge
  */
-function removeStatus(ctx: SegmentModeContext): void {
+function removeStatus(ctx: SmartSelectContext): void {
   if (ctx.statusEl) {
     ctx.statusEl.remove();
     ctx.statusEl = null;
@@ -641,14 +641,14 @@ function removeStatus(ctx: SegmentModeContext): void {
 }
 
 /**
- * Force cleanup of any orphaned segment mode elements
+ * Force cleanup of any orphaned Smart Select elements
  */
-export function forceCleanupSegmentElements(ctx?: SegmentModeContext): void {
+export function forceCleanupSmartSelectElements(ctx?: SmartSelectContext): void {
   try {
     const jsContainer = document.getElementById('js-overlay-container');
     if (jsContainer) {
       const orphans = jsContainer.querySelectorAll(
-        '.segment-point-markers, .segment-preview-mask, .segment-spotlight-overlay, .segment-status-indicator'
+        '.smart-select-point-markers, .smart-select-preview-mask, .smart-select-spotlight-overlay, .smart-select-status-indicator'
       );
       orphans.forEach(el => {
         try {
@@ -667,7 +667,7 @@ export function forceCleanupSegmentElements(ctx?: SegmentModeContext): void {
       ctx.statusEl = null;
     }
   } catch (error) {
-    console.error('[SegmentMode] Error in force cleanup:', error);
+    console.error('[SmartSelect] Error in force cleanup:', error);
   }
 }
 
@@ -677,7 +677,7 @@ export function forceCleanupSegmentElements(ctx?: SegmentModeContext): void {
  * Undo the last locked point.
  * Returns true if a point was removed, false if there were no points.
  */
-export function undoLastPoint(ctx: SegmentModeContext, hooks: SegmentModeHooks): boolean {
+export function undoLastPoint(ctx: SmartSelectContext, hooks: SmartSelectHooks): boolean {
   if (!ctx.active || ctx.lockedPoints.length === 0) {
     return false;
   }
@@ -705,20 +705,20 @@ export function undoLastPoint(ctx: SegmentModeContext, hooks: SegmentModeHooks):
 // ============ Readiness Notifications ============
 
 /**
- * Notify segment mode that embeddings are now ready.
+ * Notify Smart Select that embeddings are now ready.
  * Fires segmentation immediately if needed.
  */
-export function notifyEmbeddingsReady(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+export function notifyEmbeddingsReady(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (ctx.active && ctx.needsSegment && !ctx.inFlight) {
     fireSegmentation(ctx, hooks);
   }
 }
 
 /**
- * Notify segment mode that mask cache is now ready.
+ * Notify Smart Select that mask cache is now ready.
  * Triggers immediate tick so pixel hit testing becomes available.
  */
-export function notifyMaskCacheReady(ctx: SegmentModeContext, hooks: SegmentModeHooks): void {
+export function notifyMaskCacheReady(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (ctx.active) {
     tick(ctx, hooks);
   }
@@ -729,13 +729,13 @@ export function notifyMaskCacheReady(ctx: SegmentModeContext, hooks: SegmentMode
 /**
  * Get the currently spotlighted mask ID (for highlight rendering)
  */
-export function getSpotlightedMaskId(ctx: SegmentModeContext | null): string | null {
+export function getSpotlightedMaskId(ctx: SmartSelectContext | null): string | null {
   return ctx?.spotlightedMaskId ?? null;
 }
 
 /**
- * Check if segment mode is active
+ * Check if Smart Select is active
  */
-export function isSegmentModeActive(ctx: SegmentModeContext | null): boolean {
+export function isSmartSelectActive(ctx: SmartSelectContext | null): boolean {
   return ctx !== null && ctx.active;
 }

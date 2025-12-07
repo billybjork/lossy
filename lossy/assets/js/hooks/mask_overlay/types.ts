@@ -7,13 +7,13 @@
 
 import type { BoundingBox } from '../../ml/types';
 
-// ============ Segment Mode State ============
+// ============ Smart Select State ============
 
 /**
- * Segment mode context - simplified state for segment mode.
+ * Smart Select context - simplified state for Smart Select.
  * Uses simple boolean flags instead of complex state machine.
  */
-export interface SegmentModeContext {
+export interface SmartSelectContext {
   // Simple on/off (replaces complex state machine)
   active: boolean;
   // Current cursor position in container coordinates
@@ -39,9 +39,9 @@ export interface SegmentModeContext {
 }
 
 /**
- * Create a fresh segment mode context
+ * Create a fresh Smart Select context
  */
-export function createSegmentContext(): SegmentModeContext {
+export function createSmartSelectContext(): SmartSelectContext {
   return {
     active: false,
     lastMouse: null,
@@ -80,7 +80,7 @@ export interface DragRect {
   bottom: number;
 }
 
-// ============ Segment Mode Types ============
+// ============ Segment Types ============
 
 export interface SegmentPoint {
   x: number;
@@ -102,7 +102,7 @@ export interface CachedMask {
 
 /**
  * MaskOverlay hook state.
- * Segment mode state is now consolidated in SegmentModeContext.
+ * Smart Select state is consolidated in SmartSelectContext.
  */
 export interface MaskOverlayState {
   container: HTMLElement;
@@ -121,8 +121,8 @@ export interface MaskOverlayState {
   dragShift: boolean;
   dragIntersectingIds: Set<string>;
 
-  // Segment mode context
-  segmentCtx: SegmentModeContext | null;
+  // Smart Select context
+  smartSelectCtx: SmartSelectContext | null;
 
   // Core document data
   documentId: string;
@@ -132,7 +132,7 @@ export interface MaskOverlayState {
   imageHeight: number;
   imageReadyPromise: Promise<void> | null;
 
-  // Mouse position tracking (for segment mode)
+  // Mouse position tracking (for Smart Select)
   lastMousePosition: { x: number; y: number } | null;
   shiftKeyHeld: boolean;
 
@@ -147,8 +147,8 @@ export interface MaskOverlayState {
   mouseUpHandler: (e: MouseEvent) => void;
   containerClickHandler: (e: MouseEvent) => void;
   keydownHandler: (e: KeyboardEvent) => void;
-  segmentModeKeydownHandler: (e: KeyboardEvent) => void;
-  segmentModeKeyupHandler: (e: KeyboardEvent) => void;
+  smartSelectKeydownHandler: (e: KeyboardEvent) => void;
+  smartSelectKeyupHandler: (e: KeyboardEvent) => void;
   shiftKeyHandler: (e: KeyboardEvent) => void;
 }
 

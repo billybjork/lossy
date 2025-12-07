@@ -90,6 +90,7 @@
           >
             <%= for mask <- @masks do %>
               <div
+                id={"mask-#{mask.id}"}
                 data-mask-id={mask.id}
                 data-mask-type={mask.type}
                 data-mask-url={mask.mask_url}

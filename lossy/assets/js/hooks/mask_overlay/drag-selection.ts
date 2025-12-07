@@ -6,7 +6,7 @@
  */
 
 import type { MaskOverlayState, DragRect } from './types';
-import { isSegmentModeActive } from './segment-mode';
+import { isSmartSelectActive } from './smart-select-mode';
 
 function getMarqueeHost(container: HTMLElement): HTMLElement {
   const jsContainer = document.getElementById('js-overlay-container');
@@ -60,14 +60,14 @@ export function startDrag(
 ): void {
   if (event.button !== 0) return;  // Left click only
 
-  // In segment mode, don't handle drag (brush strokes instead)
-  if (isSegmentModeActive(state.segmentCtx)) return;
+  // In Smart Select, don't handle drag (brush strokes instead)
+  if (isSmartSelectActive(state.smartSelectCtx)) return;
 
-  // DEFENSIVE: If segment mode artifacts exist but segment mode is off, clean them up
+  // DEFENSIVE: If Smart Select artifacts exist but the mode is off, clean them up
   // This prevents stuck state from breaking marquee
-  if (!isSegmentModeActive(state.segmentCtx) && container.classList.contains('segment-mode')) {
-    console.warn('[DragSelection] Detected stuck segment-mode class, cleaning up');
-    container.classList.remove('segment-mode');
+  if (!isSmartSelectActive(state.smartSelectCtx) && container.classList.contains('smart-select-mode')) {
+    console.warn('[DragSelection] Detected stuck smart-select-mode class, cleaning up');
+    container.classList.remove('smart-select-mode');
   }
 
   // Don't start drag on interactive elements (buttons, inputs, links, etc.)
@@ -78,8 +78,8 @@ export function startDrag(
     return;
   }
 
-  // DEFENSIVE: Clean up any orphaned segment mode DOM elements that might block interaction
-  cleanupOrphanedSegmentElements();
+  // DEFENSIVE: Clean up any orphaned Smart Select DOM elements that might block interaction
+  cleanupOrphanedSmartSelectElements();
 
   state.dragRect = ensureDragRect(container, state.dragRect);
 
@@ -104,8 +104,8 @@ export function updateDrag(
     previewDragSelection: (ids: string[]) => void
   }
 ): void {
-  // In segment mode, don't handle drag
-  if (isSegmentModeActive(state.segmentCtx)) return;
+  // In Smart Select, don't handle drag
+  if (isSmartSelectActive(state.smartSelectCtx)) return;
 
   if (!state.dragStart) return;
 
@@ -159,8 +159,8 @@ export function endDrag(
     updateHighlight: () => void
   }
 ): void {
-  // In segment mode, don't handle drag
-  if (isSegmentModeActive(state.segmentCtx)) return;
+  // In Smart Select, don't handle drag
+  if (isSmartSelectActive(state.smartSelectCtx)) return;
 
   if (!state.dragStart) return;
 
@@ -268,19 +268,19 @@ export function previewDragSelection(
 }
 
 /**
- * Clean up orphaned segment mode DOM elements
- * This is a defensive mechanism to ensure marquee works even if segment mode cleanup failed
+ * Clean up orphaned Smart Select DOM elements
+ * This is a defensive mechanism to ensure marquee works even if Smart Select cleanup failed
  */
-function cleanupOrphanedSegmentElements(): void {
+function cleanupOrphanedSmartSelectElements(): void {
   const jsContainer = document.getElementById('js-overlay-container');
   if (!jsContainer) return;
 
-  // Remove any orphaned segment mode elements (all possible segment mode artifacts)
+  // Remove any orphaned Smart Select elements (all possible artifacts)
   const orphans = jsContainer.querySelectorAll(
-    '.segment-point-markers, .segment-preview-mask, .segment-spotlight-overlay'
+    '.smart-select-point-markers, .smart-select-preview-mask, .smart-select-spotlight-overlay, .smart-select-status-indicator'
   );
   if (orphans.length > 0) {
-    console.warn(`[DragSelection] Cleaning up ${orphans.length} orphaned segment mode elements`);
+    console.warn(`[DragSelection] Cleaning up ${orphans.length} orphaned Smart Select elements`);
     orphans.forEach(el => el.remove());
   }
 }

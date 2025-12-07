@@ -10,24 +10,24 @@
  * - Drag-to-select (marquee selection)
  * - Keyboard shortcuts (Enter, Escape, Cmd+Z)
  * - Semi-transparent overlay rendering for object segments
- * - Command-key segment mode with point-based selection
+ * - Command-key Smart Select with point-based selection
  * - Local ML inference when extension is not available
  */
 
 import type { Hook } from 'phoenix_live_view';
 import { getInferenceProvider, isExtensionAvailable, type InferenceProvider } from '../../ml/inference-provider';
-import type { MaskOverlayState, SegmentModeContext, SegmentPoint, MaskData } from './types';
-import { createSegmentContext } from './types';
+import type { MaskOverlayState, SegmentPoint, MaskData } from './types';
+import { createSmartSelectContext } from './types';
 import * as Interaction from './mask-interaction';
 import * as Rendering from './mask-rendering';
 import * as DragSelection from './drag-selection';
-import * as SegmentMode from './segment-mode';
+import * as SmartSelectMode from './smart-select-mode';
 
-// ============ Segment Mode Trigger Key ============
-const SEGMENT_MODE_TRIGGER_KEY = 'Meta';
+// ============ Smart Select Trigger Key ============
+const SMART_SELECT_TRIGGER_KEY = 'Meta';
 
-function isSegmentModeTrigger(e: KeyboardEvent): boolean {
-  return e.key === SEGMENT_MODE_TRIGGER_KEY;
+function isSmartSelectTrigger(e: KeyboardEvent): boolean {
+  return e.key === SMART_SELECT_TRIGGER_KEY;
 }
 
 // ============ Module-Level State ============
@@ -72,8 +72,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.dragShift = false;
     this.dragIntersectingIds = new Set();
 
-    // Segment mode context (replaces scattered segment mode state)
-    this.segmentCtx = null;
+    // Smart Select context (centralizes selection state)
+    this.smartSelectCtx = null;
 
     // Core data
     this.documentId = this.el.dataset.documentId || '';
@@ -131,16 +131,16 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     document.addEventListener('mousemove', this.mouseMoveHandler);
     document.addEventListener('mouseup', this.mouseUpHandler);
 
-    // Track mouse position for segment mode
+    // Track mouse position for Smart Select
     this.container.addEventListener('mousemove', (e: MouseEvent) => {
       const rect = this.container.getBoundingClientRect();
       this.lastMousePosition = {
         x: e.clientX - rect.left,
         y: e.clientY - rect.top
       };
-      // Update segment mode context if active
-      if (this.segmentCtx) {
-        SegmentMode.updateCursorPosition(this.segmentCtx, this.lastMousePosition.x, this.lastMousePosition.y);
+      // Update Smart Select context if active
+      if (this.smartSelectCtx) {
+        SmartSelectMode.updateCursorPosition(this.smartSelectCtx, this.lastMousePosition.x, this.lastMousePosition.y);
       }
     });
     this.container.addEventListener('mouseenter', (e: MouseEvent) => {
@@ -149,14 +149,14 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         x: e.clientX - rect.left,
         y: e.clientY - rect.top
       };
-      if (this.segmentCtx) {
-        SegmentMode.updateCursorPosition(this.segmentCtx, this.lastMousePosition.x, this.lastMousePosition.y);
+      if (this.smartSelectCtx) {
+        SmartSelectMode.updateCursorPosition(this.smartSelectCtx, this.lastMousePosition.x, this.lastMousePosition.y);
       }
     });
 
-    // Container click handler for segment mode (capture phase)
+    // Container click handler for Smart Select (capture phase)
     this.containerClickHandler = (e: MouseEvent) => {
-      if (this.segmentCtx) {
+      if (this.smartSelectCtx) {
         e.stopPropagation();
       }
     };
@@ -166,8 +166,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.keydownHandler = Interaction.createKeyboardHandler(this as unknown as MaskOverlayState, {
       onInpaint: () => this.pushEvent("inpaint_selected", {}),
       onDeselect: () => {
-        if (this.segmentCtx) {
-          this.exitSegmentMode();
+        if (this.smartSelectCtx) {
+          this.exitSmartSelectMode();
         } else {
           this.selectedMaskIds = new Set();
           this.hoveredMaskId = null;
@@ -188,29 +188,29 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     });
     document.addEventListener('keydown', this.keydownHandler);
 
-    // Segment mode key handlers (Command/Meta key hold)
-    this.segmentModeKeydownHandler = (e: KeyboardEvent) => {
+    // Smart Select key handlers (Command/Meta key hold)
+    this.smartSelectKeydownHandler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
-      if (isSegmentModeTrigger(e) && !this.segmentCtx) {
+      if (isSmartSelectTrigger(e) && !this.smartSelectCtx) {
         e.preventDefault();
-        this.enterSegmentMode();
+        this.enterSmartSelectMode();
       }
 
-      // Undo last point with z or Delete/Backspace while in segment mode (with Command held)
-      if (this.segmentCtx && e.metaKey && (e.key === 'z' || e.key === 'Delete' || e.key === 'Backspace')) {
+      // Undo last point with z or Delete/Backspace while in Smart Select (with Command held)
+      if (this.smartSelectCtx && e.metaKey && (e.key === 'z' || e.key === 'Delete' || e.key === 'Backspace')) {
         e.preventDefault();
         e.stopPropagation();
-        SegmentMode.undoLastPoint(this.segmentCtx, this.getSegmentHooks());
+        SmartSelectMode.undoLastPoint(this.smartSelectCtx, this.getSmartSelectHooks());
       }
     };
 
-    this.segmentModeKeyupHandler = (e: KeyboardEvent) => {
-      if (isSegmentModeTrigger(e) && this.segmentCtx) {
+    this.smartSelectKeyupHandler = (e: KeyboardEvent) => {
+      if (isSmartSelectTrigger(e) && this.smartSelectCtx) {
         e.preventDefault();
 
-        if (this.segmentCtx.lastMaskData) {
+        if (this.smartSelectCtx.lastMaskData) {
           // Have a preview - confirm it
           this.pendingSegmentConfirm = true;
           this.previousMaskIds = new Set(
@@ -220,28 +220,28 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           );
 
           this.pushEvent("confirm_segment", {
-            mask_png: this.segmentCtx.lastMaskData.mask_png,
-            bbox: this.segmentCtx.lastMaskData.bbox
+            mask_png: this.smartSelectCtx.lastMaskData.mask_png,
+            bbox: this.smartSelectCtx.lastMaskData.bbox
           });
-          this.exitSegmentMode();
+          this.exitSmartSelectMode();
 
-        } else if (this.segmentCtx.spotlightedMaskId && this.segmentCtx.spotlightHitType === 'pixel') {
+        } else if (this.smartSelectCtx.spotlightedMaskId && this.smartSelectCtx.spotlightHitType === 'pixel') {
           // Select existing mask under cursor (only if pixel-confirmed, not bbox-only)
-          const maskId = this.segmentCtx.spotlightedMaskId;
-          this.exitSegmentMode();
+          const maskId = this.smartSelectCtx.spotlightedMaskId;
+          this.exitSmartSelectMode();
           this.selectedMaskIds = new Set([maskId]);
           this.updateHighlight();
           this.pushEvent("select_region", { id: maskId, shift: false });
 
         } else {
           // Nothing to confirm (bbox-only spotlights are not trusted for selection)
-          this.exitSegmentMode();
+          this.exitSmartSelectMode();
         }
       }
     };
 
-    document.addEventListener('keydown', this.segmentModeKeydownHandler);
-    document.addEventListener('keyup', this.segmentModeKeyupHandler);
+    document.addEventListener('keydown', this.smartSelectKeydownHandler);
+    document.addEventListener('keyup', this.smartSelectKeyupHandler);
 
     // Track Shift key for negative point preview
     this.shiftKeyHandler = (e: KeyboardEvent) => {
@@ -338,19 +338,19 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   destroyed() {
-    if (this.segmentCtx) {
+    if (this.smartSelectCtx) {
       // Ensure loops/timers are stopped and DOM is cleaned
-      SegmentMode.exitSegmentMode(this.segmentCtx, this.getSegmentHooks());
-      this.segmentCtx = null;
+      SmartSelectMode.exitSmartSelect(this.smartSelectCtx, this.getSmartSelectHooks());
+      this.smartSelectCtx = null;
     } else {
-      SegmentMode.forceCleanupSegmentElements();
+      SmartSelectMode.forceCleanupSmartSelectElements();
     }
 
     if (this.resizeObserver) this.resizeObserver.disconnect();
 
     document.removeEventListener('keydown', this.keydownHandler);
-    document.removeEventListener('keydown', this.segmentModeKeydownHandler);
-    document.removeEventListener('keyup', this.segmentModeKeyupHandler);
+    document.removeEventListener('keydown', this.smartSelectKeydownHandler);
+    document.removeEventListener('keyup', this.smartSelectKeyupHandler);
     document.removeEventListener('keydown', this.shiftKeyHandler);
     document.removeEventListener('keyup', this.shiftKeyHandler);
     document.removeEventListener('mousedown', this.mouseDownHandler);
@@ -380,11 +380,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   updateHighlight() {
-    const spotlightedMaskId = SegmentMode.getSpotlightedMaskId(this.segmentCtx);
-    const isSegmentMode = SegmentMode.isSegmentModeActive(this.segmentCtx);
+    const spotlightedMaskId = SmartSelectMode.getSpotlightedMaskId(this.smartSelectCtx);
+    const isSmartSelectMode = SmartSelectMode.isSmartSelectActive(this.smartSelectCtx);
 
     Rendering.updateHighlight(this.container, this as unknown as MaskOverlayState, () => {
-      if (isSegmentMode && spotlightedMaskId && this.maskCacheReady) {
+      if (isSmartSelectMode && spotlightedMaskId && this.maskCacheReady) {
         Rendering.updateSegmentMaskSpotlight(this.maskImageCache, spotlightedMaskId);
       } else {
         this.updateSegmentMaskHighlight();
@@ -413,9 +413,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.maskCacheReadyPromise = promise
         .then(() => {
           this.maskCacheReady = true;
-          // Notify segment mode so pixel hit testing becomes available
-          if (this.segmentCtx) {
-            SegmentMode.notifyMaskCacheReady(this.segmentCtx, this.getSegmentHooks());
+          // Notify Smart Select so pixel hit testing becomes available
+          if (this.smartSelectCtx) {
+            SmartSelectMode.notifyMaskCacheReady(this.smartSelectCtx, this.getSmartSelectHooks());
           }
         })
         .catch(() => {
@@ -436,9 +436,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   // ============ Mouse Handlers ============
 
   handleMouseDown(e: MouseEvent) {
-    if (this.segmentCtx) {
-      // Click adds a locked point in segment mode
-      SegmentMode.handleSegmentClick(this.segmentCtx, e, this.getSegmentHooks());
+    if (this.smartSelectCtx) {
+      // Click adds a locked point in Smart Select
+      SmartSelectMode.handleSmartSelectClick(this.smartSelectCtx, e, this.getSmartSelectHooks());
       return;
     }
 
@@ -446,7 +446,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   handleMouseMove(e: MouseEvent) {
-    if (this.segmentCtx) {
+    if (this.smartSelectCtx) {
       // Cursor position is updated via container mousemove listener
       return;
     }
@@ -467,7 +467,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   handleMouseUp(e: MouseEvent) {
-    if (this.segmentCtx) {
+    if (this.smartSelectCtx) {
       return;
     }
 
@@ -481,9 +481,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     }
   },
 
-  // ============ Segment Mode ============
+  // ============ Smart Select ============
 
-  getSegmentHooks(): SegmentMode.SegmentModeHooks {
+  getSmartSelectHooks(): SmartSelectMode.SmartSelectHooks {
     return {
       container: this.container,
       jsContainer: document.getElementById('js-overlay-container'),
@@ -500,28 +500,28 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     };
   },
 
-  enterSegmentMode() {
+  enterSmartSelectMode() {
     // Create fresh context
-    this.segmentCtx = createSegmentContext();
+    this.smartSelectCtx = createSmartSelectContext();
 
     // Initialize cursor position if we have it
     if (this.lastMousePosition) {
-      SegmentMode.updateCursorPosition(this.segmentCtx, this.lastMousePosition.x, this.lastMousePosition.y);
+      SmartSelectMode.updateCursorPosition(this.smartSelectCtx, this.lastMousePosition.x, this.lastMousePosition.y);
     }
 
     // Clear any mask selection
     this.selectedMaskIds = new Set();
     this.hoveredMaskId = null;
 
-    // Enter segment mode
-    SegmentMode.enterSegmentMode(this.segmentCtx, this.getSegmentHooks());
+    // Enter Smart Select
+    SmartSelectMode.enterSmartSelect(this.smartSelectCtx, this.getSmartSelectHooks());
   },
 
-  exitSegmentMode() {
-    if (!this.segmentCtx) return;
+  exitSmartSelectMode() {
+    if (!this.smartSelectCtx) return;
 
-    SegmentMode.exitSegmentMode(this.segmentCtx, this.getSegmentHooks());
-    this.segmentCtx = null;
+    SmartSelectMode.exitSmartSelect(this.smartSelectCtx, this.getSmartSelectHooks());
+    this.smartSelectCtx = null;
   },
 
   async ensureEmbeddings() {
@@ -546,8 +546,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (extensionAvailable) {
       // Extension path marks embeddings immediately
       this.embeddingsReady = true;
-      if (this.segmentCtx) {
-        SegmentMode.notifyEmbeddingsReady(this.segmentCtx, this.getSegmentHooks());
+      if (this.smartSelectCtx) {
+        SmartSelectMode.notifyEmbeddingsReady(this.smartSelectCtx, this.getSmartSelectHooks());
       }
       return;
     }
@@ -571,8 +571,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.embeddingsComputePromise = inferenceProvider!.computeEmbeddings(this.documentId, img)
       .then(() => {
         this.embeddingsReady = true;
-        if (this.segmentCtx) {
-          SegmentMode.notifyEmbeddingsReady(this.segmentCtx, this.getSegmentHooks());
+        if (this.smartSelectCtx) {
+          SmartSelectMode.notifyEmbeddingsReady(this.smartSelectCtx, this.getSmartSelectHooks());
         }
       })
       .catch((error) => {
@@ -644,7 +644,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   confirmSegmentFromPreview() {
-    if (!this.segmentCtx || !this.segmentCtx.lastMaskData) return;
+    if (!this.smartSelectCtx || !this.smartSelectCtx.lastMaskData) return;
 
     this.pendingSegmentConfirm = true;
     const previewMaskElements = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
@@ -655,11 +655,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     );
 
     this.pushEvent("confirm_segment", {
-      mask_png: this.segmentCtx.lastMaskData.mask_png,
-      bbox: this.segmentCtx.lastMaskData.bbox
+      mask_png: this.smartSelectCtx.lastMaskData.mask_png,
+      bbox: this.smartSelectCtx.lastMaskData.bbox
     });
 
-    // Clean up segment mode
-    this.exitSegmentMode();
+    // Clean up Smart Select
+    this.exitSmartSelectMode();
   }
 };

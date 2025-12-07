@@ -40,7 +40,7 @@ defmodule LossyWeb.EditLive do
           |> assign(export_path: nil, export_filename: nil, exporting: false)
           |> assign(masks: masks)
           |> assign(fresh_arrival: fresh_arrival)
-          |> assign(segment_mode: false)
+          |> assign(smart_select_mode: false)
           |> maybe_push_masks(masks, connected?(socket))
 
         {:ok, socket}
@@ -171,15 +171,15 @@ defmodule LossyWeb.EditLive do
     {:noreply, socket}
   end
 
-  # Segment mode handlers
+  # Smart Select handlers
   @impl true
-  def handle_event("enter_segment_mode", _params, socket) do
-    {:noreply, assign(socket, segment_mode: true)}
+  def handle_event("enter_smart_select", _params, socket) do
+    {:noreply, assign(socket, smart_select_mode: true)}
   end
 
   @impl true
-  def handle_event("exit_segment_mode", _params, socket) do
-    {:noreply, assign(socket, segment_mode: false)}
+  def handle_event("exit_smart_select", _params, socket) do
+    {:noreply, assign(socket, smart_select_mode: false)}
   end
 
   @impl true
@@ -190,12 +190,12 @@ defmodule LossyWeb.EditLive do
     case Documents.add_manual_region(document, mask_png, bbox) do
       {:ok, _updated_document} ->
         # Document update will be broadcast via PubSub
-        {:noreply, assign(socket, segment_mode: false)}
+        {:noreply, assign(socket, smart_select_mode: false)}
 
       {:error, reason} ->
         {:noreply,
          socket
-         |> assign(segment_mode: false)
+         |> assign(smart_select_mode: false)
          |> put_flash(:error, "Failed to save segment: #{inspect(reason)}")}
     end
   end
