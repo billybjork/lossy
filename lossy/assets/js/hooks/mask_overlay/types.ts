@@ -70,8 +70,6 @@ export interface MaskOverlayState {
   dragIntersectingIds: Set<string>;
   // Segment mode: true when Command key is held
   segmentMode: boolean;
-  awaitingMaskConfirmation: boolean;
-  segmentPoints: SegmentPoint[];
   previewMaskCanvas: HTMLCanvasElement | null;
   lastMaskData: MaskData | null;
   pointMarkersContainer: HTMLDivElement | null;

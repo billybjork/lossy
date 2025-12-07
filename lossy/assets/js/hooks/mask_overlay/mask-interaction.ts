@@ -227,7 +227,6 @@ export function createKeyboardHandler(
           state.previewMaskCanvas.remove();
           state.previewMaskCanvas = null;
         }
-        state.segmentPoints = [];
         state.lastMaskData = null;
         callbacks.updateHighlight();
         return;

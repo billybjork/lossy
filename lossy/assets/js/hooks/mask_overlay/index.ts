@@ -70,8 +70,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.dragShift = false;
     this.dragIntersectingIds = new Set();
     this.segmentMode = false;
-    this.awaitingMaskConfirmation = false;
-    this.segmentPoints = [];
     this.previewMaskCanvas = null;
     this.lastMaskData = null;
     this.pointMarkersContainer = null;
@@ -179,28 +177,24 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
       if (isSegmentModeTrigger(e) && !this.segmentMode) {
         e.preventDefault();
-        await this.enterSegmentMode();
 
-        // Immediately update at cursor position
-        requestAnimationFrame(() => {
-          if (this.segmentMode && this.lastMousePosition) {
-            this.updateAtCursor();
-          }
-        });
+        // Start entering segment mode (may be async for embeddings, but we don't wait)
+        this.enterSegmentMode();
+
+        // Immediately check for existing mask under cursor (doesn't need embeddings)
+        if (this.lastMousePosition) {
+          this.spotlightMaskAtCursor();
+        }
       }
     };
 
-    this.segmentModeKeyupHandler = async (e: KeyboardEvent) => {
+    this.segmentModeKeyupHandler = (e: KeyboardEvent) => {
       if (isSegmentModeTrigger(e) && this.segmentMode) {
         e.preventDefault();
 
-        // Confirm if we have a preview, locked points, or spotlighted existing mask
-        const hasPreview = this.previewMaskCanvas && this.lastMaskData;
-        const hasLockedPoints = this.lockedSegmentPoints.length > 0;
-        const hasSpotlightedMask = this.spotlightedMaskId !== null;
-
-        if (hasPreview || hasLockedPoints) {
-          // New mask from segmentation
+        if (this.lastMaskData) {
+          // Have a preview - confirm it directly (no re-request!)
+          debugLog('[MaskOverlay] Confirming preview mask');
           this.pendingSegmentConfirm = true;
           this.previousMaskIds = new Set(
             Array.from(this.container.querySelectorAll('.mask-region'))
@@ -208,24 +202,23 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
               .filter(id => id !== '')
           );
 
-          // Use locked points for final confirm
-          if (hasLockedPoints) {
-            this.segmentPoints = [...this.lockedSegmentPoints];
-          }
-
-          await this.confirmSegment();
-        } else if (hasSpotlightedMask) {
-          // Select the existing spotlighted mask
-          const maskId = this.spotlightedMaskId!;
-          debugLog('[MaskOverlay] Selecting spotlighted mask:', maskId);
-
+          this.pushEvent("confirm_segment", {
+            mask_png: this.lastMaskData.mask_png,
+            bbox: this.lastMaskData.bbox
+          });
           this.exitSegmentMode();
 
-          // Select the mask
+        } else if (this.spotlightedMaskId) {
+          // Select existing mask under cursor
+          const maskId = this.spotlightedMaskId;
+          debugLog('[MaskOverlay] Selecting spotlighted mask:', maskId);
+          this.exitSegmentMode();
           this.selectedMaskIds = new Set([maskId]);
           this.updateHighlight();
           this.pushEvent("select_region", { id: maskId, shift: false });
+
         } else {
+          // Nothing to confirm
           this.exitSegmentMode();
         }
       }
@@ -261,17 +254,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       const shouldShimmerNewSegment = this.pendingSegmentConfirm;
       if (shouldShimmerNewSegment) {
         this.pendingSegmentConfirm = false;
-      }
-
-      if (this.awaitingMaskConfirmation) {
-        this.awaitingMaskConfirmation = false;
-        if (this.previewMaskCanvas) {
-          this.previewMaskCanvas.remove();
-          this.previewMaskCanvas = null;
-        }
-        if (this.pointMarkersContainer) {
-          this.pointMarkersContainer.innerHTML = '';
-        }
       }
 
       this.selectedMaskIds = new Set();
@@ -601,6 +583,21 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     });
   },
 
+  // Check for existing mask under cursor immediately (no segmentation, no embeddings needed)
+  spotlightMaskAtCursor() {
+    if (!this.lastMousePosition) return;
+
+    const cursorX = this.lastMousePosition.x + this.container.getBoundingClientRect().left;
+    const cursorY = this.lastMousePosition.y + this.container.getBoundingClientRect().top;
+
+    const existingMaskId = this.findMaskUnderCursor(cursorX, cursorY);
+    if (existingMaskId) {
+      debugLog('[MaskOverlay] Immediate spotlight on enter:', existingMaskId);
+      this.spotlightedMaskId = existingMaskId;
+      this.updateHighlight();
+    }
+  },
+
   // Update spotlight/segment at current cursor position
   updateAtCursor() {
     if (!this.segmentMode) {
@@ -660,9 +657,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
       const cursorLabel = this.shiftKeyHeld ? 0 : 1;
       const cursorPoint = { x: coords.x, y: coords.y, label: cursorLabel };
-      this.segmentPoints = [...this.lockedSegmentPoints, cursorPoint];
+      const points = [...this.lockedSegmentPoints, cursorPoint];
 
-      await this.requestSegmentFromPoints();
+      await this.requestSegmentFromPoints(points);
     }, 50);
   },
 
@@ -677,12 +674,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     }
 
     this.spotlightedMaskId = null;
-    this.segmentPoints = [...this.lockedSegmentPoints];
-    this.requestSegmentFromPoints();
+    this.requestSegmentFromPoints([...this.lockedSegmentPoints]);
   },
 
-  async requestSegmentFromPoints() {
-    if (!this.documentId || this.segmentPoints.length === 0) return;
+  async requestSegmentFromPoints(points: { x: number; y: number; label: number }[]) {
+    if (!this.documentId || points.length === 0) return;
 
     const requestId = `seg_hover_${++segmentRequestCounter}_${Date.now()}`;
     this.lastLiveSegmentRequestId = requestId;
@@ -698,7 +694,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       if (provider && !isExtensionAvailable()) {
         const result = await provider.segmentAtPoints(
           this.documentId,
-          this.segmentPoints as any,
+          points as any,
           { width: actualWidth, height: actualHeight }
         );
         response = {
@@ -721,7 +717,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           window.postMessage({
             type: 'LOSSY_SEGMENT_REQUEST',
             documentId: this.documentId,
-            points: this.segmentPoints,
+            points: points,
             imageSize: { width: actualWidth, height: actualHeight },
             requestId
           }, '*');
@@ -748,24 +744,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     }
   },
 
-  async confirmSegment() {
-    await SegmentMode.confirmSegment(
-      this as unknown as MaskOverlayState,
-      () => inferenceProvider,
-      isExtensionAvailable,
-      pendingSegmentRequests,
-      () => ++segmentRequestCounter,
-      {
-        pushEvent: (event, payload) => this.pushEvent(event, payload),
-        exitSegmentMode: () => this.exitSegmentMode()
-      }
-    );
-  },
-
-  async confirmSegmentFromPreview() {
+  confirmSegmentFromPreview() {
     if (!this.previewMaskCanvas || !this.lastMaskData) return;
 
-    this.awaitingMaskConfirmation = true;
     this.pendingSegmentConfirm = true;
     const previewMaskElements = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
     this.previousMaskIds = new Set(
@@ -778,6 +759,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       mask_png: this.lastMaskData.mask_png,
       bbox: this.lastMaskData.bbox
     });
+
+    // Clean up segment mode immediately (same as Command release)
+    this.exitSegmentMode();
   },
 
   findMaskUnderCursor(clientX: number, clientY: number): string | null {

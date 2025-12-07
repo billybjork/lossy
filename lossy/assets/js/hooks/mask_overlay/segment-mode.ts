@@ -5,8 +5,7 @@
  * Integrates with SAM (Segment Anything Model) for real-time mask generation.
  */
 
-import type { MaskOverlayState, SegmentPoint, MaskData, SegmentResponse } from './types';
-import type { PointPrompt } from '../../ml/types';
+import type { MaskOverlayState, SegmentPoint, MaskData } from './types';
 import type { InferenceProvider } from '../../ml/inference-provider';
 import { getImageNaturalDimensions, debugLog } from './utils';
 
@@ -25,7 +24,6 @@ export async function enterSegmentMode(
   }
 ): Promise<void> {
   state.segmentMode = true;
-  state.segmentPoints = [];
   state.segmentPending = false;
   state.lockedSegmentPoints = [];
 
@@ -114,7 +112,6 @@ export function exitSegmentMode(
   try {
     // Set state first to prevent race conditions
     state.segmentMode = false;
-    state.segmentPoints = [];
     state.segmentPending = false;
     state.lockedSegmentPoints = [];
     state.spotlightedMaskId = null;
@@ -364,102 +361,4 @@ export function removeSpotlightOverlay(state: MaskOverlayState): void {
     state.spotlightOverlay = null;
   }
   state.spotlightedMaskId = null;
-}
-
-/**
- * Confirm segment and send to server
- */
-export async function confirmSegment(
-  state: MaskOverlayState,
-  getInferenceProvider: () => InferenceProvider | null,
-  isExtensionAvailable: () => boolean,
-  pendingSegmentRequests: Map<string, (result: SegmentResponse) => void>,
-  getSegmentRequestCounter: () => number,
-  callbacks: {
-    pushEvent: (event: string, payload: unknown) => void,
-    exitSegmentMode: () => void
-  }
-): Promise<void> {
-  // Always exit segment mode, even on early returns
-  if (state.segmentPoints.length === 0) {
-    debugLog('[SegmentMode] No segment points, exiting');
-    callbacks.exitSegmentMode();
-    return;
-  }
-  if (!state.documentId) {
-    console.warn('[SegmentMode] No document ID');
-    callbacks.exitSegmentMode();
-    return;
-  }
-
-  state.segmentPending = true;
-  state.pendingSegmentConfirm = true;
-
-  // Capture current mask IDs before confirming (for shimmer effect)
-  state.previousMaskIds = new Set(
-    Array.from(state.container.querySelectorAll('.mask-region'))
-      .map((m: Element) => (m as HTMLElement).dataset.maskId || '')
-      .filter(id => id !== '')
-  );
-
-  const img = document.getElementById('editor-image') as HTMLImageElement | null;
-  const actualWidth = img?.naturalWidth || state.imageWidth;
-  const actualHeight = img?.naturalHeight || state.imageHeight;
-
-  try {
-    let response: SegmentResponse;
-    const inferenceProvider = getInferenceProvider();
-
-    if (inferenceProvider && !isExtensionAvailable()) {
-      const result = await inferenceProvider.segmentAtPoints(
-        state.documentId,
-        state.segmentPoints as PointPrompt[],
-        { width: actualWidth, height: actualHeight }
-      );
-      response = {
-        success: true,
-        mask_png: result.mask_png,
-        bbox: result.bbox
-      };
-    } else {
-      const requestId = `seg_confirm_${getSegmentRequestCounter()}`;
-      response = await new Promise<SegmentResponse>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          pendingSegmentRequests.delete(requestId);
-          reject(new Error('Segment request timeout'));
-        }, 10000);
-
-        pendingSegmentRequests.set(requestId, (result: SegmentResponse) => {
-          clearTimeout(timeout);
-          resolve(result);
-        });
-
-        window.postMessage({
-          type: 'LOSSY_SEGMENT_REQUEST',
-          documentId: state.documentId,
-          points: state.segmentPoints,
-          imageSize: { width: actualWidth, height: actualHeight },
-          requestId
-        }, '*');
-      });
-    }
-
-    const maskPng = response.mask?.mask_png || response.mask_png;
-    const bbox = response.mask?.bbox || response.bbox;
-    if (response.success && maskPng) {
-      callbacks.pushEvent("confirm_segment", {
-        mask_png: maskPng,
-        bbox: bbox
-      });
-
-      debugLog('[SegmentMode] Segment confirmed');
-    } else {
-      console.error('[SegmentMode] Failed to get final mask:', response.error);
-    }
-  } catch (error) {
-    console.error('[SegmentMode] Confirm segment error:', error);
-  } finally {
-    state.segmentPending = false;
-    callbacks.exitSegmentMode();
-  }
 }
