@@ -39,6 +39,8 @@ export function enterSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHook
   ctx.active = true;
   ctx.spotlightedMaskId = null;
   ctx.spotlightHitType = null;
+  ctx.spotlightMaskType = null;
+  ctx.textCutoutEl = null;
   ctx.lockedPoints = [];
   ctx.lastMaskData = null;
   ctx.inFlight = false;
@@ -51,6 +53,7 @@ export function enterSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHook
   // Create DOM elements
   createSpotlightOverlay(ctx, hooks.jsContainer);
   createPointMarkersContainer(ctx, hooks.jsContainer);
+  resetSpotlightOverlay(ctx);
   updateStatus(ctx, hooks.jsContainer, 'Scanning…', 'searching');
 
   // Start the continuous update loop
@@ -74,6 +77,7 @@ export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks
   ctx.active = false;
   ctx.spotlightedMaskId = null;
   ctx.spotlightHitType = null;
+  ctx.spotlightMaskType = null;
   ctx.lockedPoints = [];
   ctx.lastMaskData = null;
   ctx.inFlight = false;
@@ -86,6 +90,10 @@ export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks
   removePointMarkers(ctx);
   removePreviewMask(ctx);
   removeStatus(ctx);
+  if (ctx.textCutoutEl) {
+    ctx.textCutoutEl.remove();
+    ctx.textCutoutEl = null;
+  }
 
   // Force cleanup any stragglers
   forceCleanupSmartSelectElements(ctx);
@@ -144,10 +152,12 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (ctx.lockedPoints.length === 0) {
     // 1. Pixel hit? Spotlight and done.
     const hit = findMaskUnderCursor(ctx.lastMouse, hooks);
-    if (hit?.type === 'pixel') {
+    if (hit?.hitType === 'pixel') {
       ctx.spotlightedMaskId = hit.maskId;
       ctx.spotlightHitType = 'pixel';
+      ctx.spotlightMaskType = hit.maskType;
       clearPreview(ctx);
+      resetSpotlightOverlay(ctx);
       hooks.updateHighlight();
       updateStatus(ctx, hooks.jsContainer, 'Spotlighting…', 'ready');
       return;
@@ -155,17 +165,29 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
 
     // 2. Bbox or empty - update spotlight state
     ctx.spotlightedMaskId = hit?.maskId ?? null;
-    ctx.spotlightHitType = hit?.type ?? null;
+    ctx.spotlightHitType = hit?.hitType ?? null;
+    ctx.spotlightMaskType = hit?.maskType ?? null;
     if (hit) {
       hooks.updateHighlight();
+
+      if (hit.maskType === 'text') {
+        clearPreview(ctx);
+        updateStatus(ctx, hooks.jsContainer, 'Text region ready', 'ready');
+        return;
+      }
+
+      resetSpotlightOverlay(ctx);
     }
   } else {
     // Clear spotlight when in multi-point mode
     if (ctx.spotlightedMaskId !== null) {
       ctx.spotlightedMaskId = null;
       ctx.spotlightHitType = null;
+      ctx.spotlightMaskType = null;
       hooks.updateHighlight();
     }
+
+    resetSpotlightOverlay(ctx);
   }
 
   // 3. Embeddings ready?
@@ -257,7 +279,8 @@ function buildPoints(ctx: SmartSelectContext, hooks: SmartSelectHooks): SegmentP
 
 interface MaskHit {
   maskId: string;
-  type: 'pixel' | 'bbox';
+  hitType: 'pixel' | 'bbox';
+  maskType: 'text' | 'object' | 'manual';
 }
 
 /**
@@ -285,23 +308,25 @@ function findMaskUnderCursor(
     const maskId = mask.dataset.maskId || '';
     const maskType = mask.dataset.maskType;
 
+    const kind = maskType === 'object' || maskType === 'manual' ? (maskType as 'object' | 'manual') : 'text';
+
     // Text regions: bbox is sufficient
-    if (maskType !== 'object' && maskType !== 'manual') {
-      return { maskId, type: 'bbox' };
+    if (kind === 'text') {
+      return { maskId, hitType: 'bbox', maskType: kind };
     }
 
     // Object/manual: try pixel hit if cache ready
     if (hooks.maskCacheReady() && hooks.maskCache.has(maskId)) {
       const isPixelHit = isPointOverMaskPixel(maskId, clientX, clientY, mask, hooks.maskCache);
       if (isPixelHit) {
-        return { maskId, type: 'pixel' };
+        return { maskId, hitType: 'pixel', maskType: kind };
       }
       // In bbox but not on pixel - continue checking other masks
       continue;
     }
 
     // Cache not ready - return bbox hit
-    return { maskId, type: 'bbox' };
+    return { maskId, hitType: 'bbox', maskType: kind };
   }
 
   return null;
@@ -373,6 +398,7 @@ export function handleSmartSelectClick(
   ctx.lockedPoints.push(point);
   ctx.spotlightedMaskId = null;
   ctx.spotlightHitType = null;
+  ctx.spotlightMaskType = null;
   ctx.needsSegment = true;
 
   renderPointMarkers(ctx, hooks);
@@ -459,6 +485,18 @@ function removeSpotlightOverlay(ctx: SmartSelectContext): void {
     ctx.spotlightOverlay = null;
   }
 }
+
+function resetSpotlightOverlay(ctx: SmartSelectContext): void {
+  if (ctx.spotlightOverlay) {
+    ctx.spotlightOverlay.style.opacity = '1';
+    ctx.spotlightOverlay.style.background = 'rgba(0, 0, 0, 0.75)';
+  }
+}
+
+function setOverlayTransparent(ctx: SmartSelectContext): void {
+  // Deprecated: keep overlay visible; text spotlight uses cutout instead.
+}
+
 
 /**
  * Create point markers container

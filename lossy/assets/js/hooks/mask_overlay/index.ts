@@ -66,6 +66,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.maskCacheReadyPromise = null;
     this.pageLoadTime = Date.now();
     this.shimmerPlayed = false;
+    this.textDetectionAttempted = false;
+    this.textDetectionPromise = null;
     this.isDragging = false;
     this.dragStart = null;
     this.dragRect = null;
@@ -225,8 +227,14 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           });
           this.exitSmartSelectMode();
 
-        } else if (this.smartSelectCtx.spotlightedMaskId && this.smartSelectCtx.spotlightHitType === 'pixel') {
-          // Select existing mask under cursor (only if pixel-confirmed, not bbox-only)
+        } else if (
+          this.smartSelectCtx.spotlightedMaskId &&
+          (
+            this.smartSelectCtx.spotlightHitType === 'pixel' ||
+            (this.smartSelectCtx.spotlightMaskType === 'text' && this.smartSelectCtx.spotlightHitType === 'bbox')
+          )
+        ) {
+          // Select existing mask under cursor
           const maskId = this.smartSelectCtx.spotlightedMaskId;
           this.exitSmartSelectMode();
           this.selectedMaskIds = new Set([maskId]);
@@ -326,6 +334,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     try {
       inferenceProvider = await providerInitPromise;
       this.ensureEmbeddings();
+      this.ensureTextDetection();
     } catch (error) {
       console.error('[MaskOverlay] Failed to initialize inference provider:', error);
     }
@@ -381,9 +390,21 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   updateHighlight() {
     const spotlightedMaskId = SmartSelectMode.getSpotlightedMaskId(this.smartSelectCtx);
+    const spotlightMaskType = this.smartSelectCtx?.spotlightMaskType ?? null;
     const isSmartSelectMode = SmartSelectMode.isSmartSelectActive(this.smartSelectCtx);
+    const ctx = this.smartSelectCtx;
+
+    if (ctx && ctx.textCutoutEl && !(isSmartSelectMode && spotlightMaskType === 'text' && spotlightedMaskId)) {
+      ctx.textCutoutEl.remove();
+      ctx.textCutoutEl = null;
+    }
 
     Rendering.updateHighlight(this.container, this as unknown as MaskOverlayState, () => {
+      if (isSmartSelectMode && spotlightMaskType === 'text' && spotlightedMaskId) {
+        this.applyTextSpotlight(spotlightedMaskId);
+        return;
+      }
+
       if (isSmartSelectMode && spotlightedMaskId && this.maskCacheReady) {
         Rendering.updateSegmentMaskSpotlight(this.maskImageCache, spotlightedMaskId);
       } else {
@@ -399,6 +420,82 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.hoveredMaskId,
       this.dragIntersectingIds
     );
+  },
+
+  applyTextSpotlight(spotlightedMaskId: string) {
+    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+    const ctx = this.smartSelectCtx;
+    const jsContainer = document.getElementById('js-overlay-container');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+
+    masks.forEach((mask: HTMLElement) => {
+      const maskType = mask.dataset.maskType;
+      const isText = maskType !== 'object' && maskType !== 'manual';
+
+      if (!isText) {
+        mask.classList.remove('mask-hovered', 'mask-dimmed', 'mask-selected');
+        mask.classList.add('mask-idle');
+        mask.style.removeProperty('z-index');
+        mask.style.removeProperty('background');
+        mask.style.removeProperty('box-shadow');
+        return;
+      }
+
+      const isSpotlight = mask.dataset.maskId === spotlightedMaskId;
+      mask.classList.remove('mask-selected', 'mask-idle');
+
+      if (isSpotlight) {
+        mask.classList.remove('mask-dimmed');
+        mask.classList.add('mask-hovered');
+        mask.style.zIndex = '50';
+        mask.style.background = 'transparent';
+        mask.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px rgba(0, 0, 0, 0.35)';
+
+        if (ctx && jsContainer && img) {
+          if (!ctx.textCutoutEl) {
+            const cutout = document.createElement('div');
+            cutout.className = 'text-spotlight-cutout';
+            cutout.style.position = 'absolute';
+            cutout.style.pointerEvents = 'none';
+            cutout.style.zIndex = '48';
+            cutout.style.borderRadius = '2px';
+            jsContainer.appendChild(cutout);
+            ctx.textCutoutEl = cutout;
+          }
+
+          const cutout = ctx.textCutoutEl;
+          const left = mask.offsetLeft;
+          const top = mask.offsetTop;
+          const width = mask.offsetWidth;
+          const height = mask.offsetHeight;
+
+          const imgWidth = img.clientWidth;
+          const imgHeight = img.clientHeight;
+
+          cutout.style.left = `${left}px`;
+          cutout.style.top = `${top}px`;
+          cutout.style.width = `${width}px`;
+          cutout.style.height = `${height}px`;
+          cutout.style.backgroundImage = `url(${img.currentSrc || img.src})`;
+          cutout.style.backgroundRepeat = 'no-repeat';
+          cutout.style.backgroundSize = `${imgWidth}px ${imgHeight}px`;
+          cutout.style.backgroundPosition = `-${left}px -${top}px`;
+        }
+      } else {
+        mask.classList.remove('mask-hovered');
+        mask.classList.add('mask-dimmed');
+        mask.style.removeProperty('z-index');
+        mask.style.removeProperty('background');
+        mask.style.removeProperty('box-shadow');
+      }
+    });
+
+    if (ctx && (!spotlightedMaskId || ctx.spotlightMaskType !== 'text')) {
+      if (ctx.textCutoutEl) {
+        ctx.textCutoutEl.remove();
+        ctx.textCutoutEl = null;
+      }
+    }
   },
 
   renderSegmentMasks() {
@@ -583,6 +680,65 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       });
 
     await this.embeddingsComputePromise;
+  },
+
+  async ensureTextDetection() {
+    if (this.textDetectionAttempted) return;
+    if (this.textDetectionPromise) {
+      await this.textDetectionPromise;
+      return;
+    }
+
+    const hasTextMasks = Array.from(this.container.querySelectorAll('.mask-region')).some((mask: Element) => {
+      const type = (mask as HTMLElement).dataset.maskType;
+      return type !== 'object' && type !== 'manual';
+    });
+
+    if (hasTextMasks) {
+      this.textDetectionAttempted = true;
+      return;
+    }
+
+    // Ensure provider is ready
+    if (!providerInitPromise) {
+      providerInitPromise = getInferenceProvider();
+    }
+
+    if (!inferenceProvider) {
+      try {
+        inferenceProvider = await providerInitPromise;
+      } catch (error) {
+        console.error('[MaskOverlay] Failed to init provider for text detection:', error);
+        return;
+      }
+    }
+
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (!img) return;
+
+    if (!img.complete) {
+      if (this.imageReadyPromise) {
+        await this.imageReadyPromise;
+      } else {
+        await new Promise<void>((resolve) => img.addEventListener('load', () => resolve(), { once: true }));
+      }
+    }
+
+    this.textDetectionAttempted = true;
+    this.textDetectionPromise = inferenceProvider.detectText(img)
+      .then((regions) => {
+        if (regions && regions.length > 0) {
+          this.pushEvent("detected_text_regions", { regions });
+        }
+      })
+      .catch((error) => {
+        console.error('[MaskOverlay] Text detection error:', error);
+      })
+      .finally(() => {
+        this.textDetectionPromise = null;
+      });
+
+    await this.textDetectionPromise;
   },
 
   async requestSegmentFromPoints(points: SegmentPoint[]): Promise<{ success: boolean; maskData?: MaskData }> {

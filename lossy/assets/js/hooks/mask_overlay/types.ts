@@ -23,6 +23,8 @@ export interface SmartSelectContext {
   // Currently spotlighted existing mask (if any)
   spotlightedMaskId: string | null;
   spotlightHitType: 'pixel' | 'bbox' | null;
+  spotlightMaskType: 'text' | 'object' | 'manual' | null;
+  textCutoutEl: HTMLDivElement | null;
   // Preview mask data ready for confirmation
   lastMaskData: MaskData | null;
   // Is a segmentation request currently running?
@@ -48,6 +50,8 @@ export function createSmartSelectContext(): SmartSelectContext {
     lockedPoints: [],
     spotlightedMaskId: null,
     spotlightHitType: null,
+    spotlightMaskType: null,
+    textCutoutEl: null,
     lastMaskData: null,
     inFlight: false,
     needsSegment: false,
@@ -113,6 +117,8 @@ export interface MaskOverlayState {
   maskCacheReadyPromise: Promise<void> | null;
   pageLoadTime: number;
   shimmerPlayed: boolean;
+  textDetectionAttempted: boolean;
+  textDetectionPromise: Promise<void> | null;
 
   // Drag selection
   isDragging: boolean;
