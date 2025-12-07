@@ -27,6 +27,7 @@ export async function enterSegmentMode(
   state.segmentMode = true;
   state.segmentPending = false;
   state.lockedSegmentPoints = [];
+  state.spotlightedMaskId = null;  // Reset spotlight state on enter
 
   // Clear any mask selection
   state.selectedMaskIds = new Set();
@@ -195,6 +196,7 @@ export function forceCleanupSegmentElements(state?: MaskOverlayState): void {
       state.previewMaskCanvas = null;
       state.spotlightOverlay = null;
       state.lastMaskData = null;
+      state.spotlightedMaskId = null;
     }
   } catch (error) {
     console.error('[SegmentMode] Error in force cleanup:', error);
