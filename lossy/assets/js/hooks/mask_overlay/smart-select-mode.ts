@@ -589,24 +589,48 @@ function renderPreviewMask(
     height: 100%;
     pointer-events: none;
     z-index: 50;
+    transition: filter 0.35s ease-out, opacity 0.25s ease-out;
   `;
 
-  canvas.width = img.clientWidth;
-  canvas.height = img.clientHeight;
-
+  const dpr = window.devicePixelRatio || 1;
+  const displayWidth = img.clientWidth;
+  const displayHeight = img.clientHeight;
+  canvas.width = Math.max(1, Math.round(displayWidth * dpr));
+  canvas.height = Math.max(1, Math.round(displayHeight * dpr));
   const canvasCtx = canvas.getContext('2d')!;
+  canvasCtx.scale(dpr, dpr);
+  canvasCtx.imageSmoothingEnabled = true;
+  canvasCtx.imageSmoothingQuality = 'high';
 
   // Load mask PNG
   const maskImg = new Image();
   maskImg.onload = () => {
     if (!ctx.active) return;
 
+    // Build a lightly feathered mask to smooth edges
+    const maskCanvas = document.createElement('canvas');
+    maskCanvas.width = canvas.width;
+    maskCanvas.height = canvas.height;
+    const maskCtx = maskCanvas.getContext('2d')!;
+    maskCtx.imageSmoothingEnabled = true;
+    maskCtx.imageSmoothingQuality = 'high';
+    maskCtx.filter = `blur(${Math.min(0.8, 0.45 * dpr)}px)`;
+    maskCtx.drawImage(maskImg, 0, 0, maskCanvas.width, maskCanvas.height);
+    maskCtx.filter = 'none';
+
     // Draw source image
-    canvasCtx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    canvasCtx.drawImage(img, 0, 0, displayWidth, displayHeight);
 
     // Use mask as alpha channel to create cutout effect
     canvasCtx.globalCompositeOperation = 'destination-in';
-    canvasCtx.drawImage(maskImg, 0, 0, canvas.width, canvas.height);
+    canvasCtx.drawImage(maskCanvas, 0, 0, displayWidth, displayHeight);
+    canvasCtx.globalCompositeOperation = 'source-over';
+
+    // Subtle glow to mirror spotlight effect on existing masks
+    canvas.style.filter = `
+      drop-shadow(0 0 4px rgba(255, 255, 255, 0.5))
+      drop-shadow(0 0 12px rgba(255, 255, 255, 0.35))
+    `;
 
     jsContainer.appendChild(canvas);
     ctx.previewCanvas = canvas;

@@ -393,6 +393,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     const spotlightMaskType = this.smartSelectCtx?.spotlightMaskType ?? null;
     const isSmartSelectMode = SmartSelectMode.isSmartSelectActive(this.smartSelectCtx);
     const ctx = this.smartSelectCtx;
+    const hasPreviewMask = isSmartSelectMode && Boolean(ctx?.lastMaskData);
 
     if (ctx && ctx.textCutoutEl && !(isSmartSelectMode && spotlightMaskType === 'text' && spotlightedMaskId)) {
       ctx.textCutoutEl.remove();
@@ -400,6 +401,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     }
 
     Rendering.updateHighlight(this.container, this as unknown as MaskOverlayState, () => {
+      if (hasPreviewMask && this.maskCacheReady) {
+        Rendering.updateSegmentMaskSpotlight(this.maskImageCache, null);
+        return;
+      }
+
       if (isSmartSelectMode && spotlightMaskType === 'text' && spotlightedMaskId) {
         this.applyTextSpotlight(spotlightedMaskId);
         return;
@@ -448,8 +454,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         mask.classList.remove('mask-dimmed');
         mask.classList.add('mask-hovered');
         mask.style.zIndex = '50';
-        mask.style.background = 'transparent';
-        mask.style.boxShadow = '0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px rgba(0, 0, 0, 0.35)';
+        mask.style.background = 'rgba(255, 255, 255, 0.08)';
+        mask.style.boxShadow = '0 0 4px rgba(255, 255, 255, 0.5), 0 0 12px rgba(255, 255, 255, 0.3)';
+        mask.style.filter = 'drop-shadow(0 0 4px rgba(255, 255, 255, 0.5)) drop-shadow(0 0 12px rgba(255, 255, 255, 0.3))';
 
         if (ctx && jsContainer && img) {
           if (!ctx.textCutoutEl) {
@@ -487,6 +494,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         mask.style.removeProperty('z-index');
         mask.style.removeProperty('background');
         mask.style.removeProperty('box-shadow');
+        mask.style.removeProperty('filter');
       }
     });
 

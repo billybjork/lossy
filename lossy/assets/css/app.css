@@ -411,6 +411,23 @@ figure {
   cursor: crosshair !important;  /* Force crosshair cursor in Smart Select */
 }
 
+.smart-select-mode .mask-region:not([data-mask-type="object"]):not([data-mask-type="manual"]).mask-hovered {
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    0 0 12px 2px rgba(255, 255, 255, 0.45),
+    0 0 26px 8px rgba(255, 255, 255, 0.25);
+  outline: 1px solid rgba(255, 255, 255, 0.25);
+  border-radius: 10px;
+  transition: box-shadow var(--transition-normal), background-color var(--transition-normal), outline-color var(--transition-normal);
+}
+
+.smart-select-mode .mask-region:not([data-mask-type="object"]):not([data-mask-type="manual"]).mask-dimmed {
+  opacity: 0.22;
+  box-shadow: none;
+  outline: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.06);
+}
+
 /* =============================================================================
    Spotlight Effect
    Cinematic dark backdrop with radial gradient + spotlight glows on masks
