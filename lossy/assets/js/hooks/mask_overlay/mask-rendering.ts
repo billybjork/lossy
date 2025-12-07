@@ -17,11 +17,14 @@ export function renderSegmentMasks(
   maskImageCache: Map<string, CachedMask>,
   _imageWidth: number,
   _imageHeight: number
-): void {
+): { pendingLoads: number; promise: Promise<void> } {
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
-  if (!img) return;
+  if (!img) {
+    return { pendingLoads: 0, promise: Promise.resolve() };
+  }
 
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+  const loadPromises: Promise<void>[] = [];
 
   // Track color index assignment for new masks
   let nextColorIndex = maskImageCache.size;
@@ -53,54 +56,66 @@ export function renderSegmentMasks(
     const maskImg = new Image();
     maskImg.crossOrigin = 'anonymous';
 
-    maskImg.onload = () => {
-      // Create canvas sized to the bbox
-      const canvas = document.createElement('canvas');
-      canvas.className = 'segment-mask-canvas';
-      canvas.dataset.maskId = maskId;
-      canvas.width = bboxW;
-      canvas.height = bboxH;
+    const loadPromise = new Promise<void>((resolve) => {
+      maskImg.onload = () => {
+        // Create canvas sized to the bbox
+        const canvas = document.createElement('canvas');
+        canvas.className = 'segment-mask-canvas';
+        canvas.dataset.maskId = maskId;
+        canvas.width = bboxW;
+        canvas.height = bboxH;
 
-      const ctx = canvas.getContext('2d')!;
+        const ctx = canvas.getContext('2d')!;
 
-      // Enable high-quality image smoothing
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
+        // Enable high-quality image smoothing
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
 
-      // Draw only the bbox portion of the mask
-      ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
+        // Draw only the bbox portion of the mask
+        ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
 
-      // Extract alpha data before applying any fill
-      const alphaData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        // Extract alpha data before applying any fill
+        const alphaData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-      // Style the canvas
-      canvas.style.position = 'absolute';
-      canvas.style.pointerEvents = 'none';
-      canvas.style.opacity = '0';
-      canvas.style.transition = 'opacity 0.15s';
-      canvas.style.left = '0';
-      canvas.style.top = '0';
-      canvas.style.width = '100%';
-      canvas.style.height = '100%';
+        // Style the canvas
+        canvas.style.position = 'absolute';
+        canvas.style.pointerEvents = 'none';
+        canvas.style.opacity = '0';
+        canvas.style.transition = 'opacity 0.15s';
+        canvas.style.left = '0';
+        canvas.style.top = '0';
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
 
-      // Insert canvas inside the mask div
-      mask.appendChild(canvas);
+        // Insert canvas inside the mask div
+        mask.appendChild(canvas);
 
-      // Cache canvas, alpha data, color assignment, and bbox
-      maskImageCache.set(maskId, {
-        canvas,
-        alphaData,
-        colorIndex,
-        bbox: { x: bboxX, y: bboxY, w: bboxW, h: bboxH }
-      });
-    };
+        // Cache canvas, alpha data, color assignment, and bbox
+        maskImageCache.set(maskId, {
+          canvas,
+          alphaData,
+          colorIndex,
+          bbox: { x: bboxX, y: bboxY, w: bboxW, h: bboxH }
+        });
 
-    maskImg.onerror = () => {
-      console.warn('[MaskRendering] Failed to load mask image:', maskUrl);
-    };
+        resolve();
+      };
+
+      maskImg.onerror = () => {
+        console.warn('[MaskRendering] Failed to load mask image:', maskUrl);
+        resolve();
+      };
+    });
+
+    loadPromises.push(loadPromise);
 
     maskImg.src = maskUrl;
   });
+
+  const pendingLoads = loadPromises.length;
+  const promise = pendingLoads > 0 ? Promise.all(loadPromises).then(() => { /* no-op */ }) : Promise.resolve();
+
+  return { pendingLoads, promise };
 }
 
 /**
@@ -557,4 +572,3 @@ function applyImageCutout(
   // Reset composite operation
   ctx.globalCompositeOperation = 'source-over';
 }
-

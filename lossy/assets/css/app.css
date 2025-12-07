@@ -451,6 +451,77 @@ figure {
   background: rgb(239, 68, 68);
 }
 
+/* Segment status badge (live feedback while searching/ready) */
+.segment-status-indicator {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  background: rgba(12, 16, 24, 0.72);
+  color: var(--color-white);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(10px);
+  font-size: 0.8125rem;
+  letter-spacing: 0.01em;
+  z-index: 120;
+  transition: transform var(--transition-fast), opacity var(--transition-fast), background-color var(--transition-normal), border-color var(--transition-normal), box-shadow var(--transition-normal);
+}
+
+.segment-status-indicator[data-state="ready"] {
+  background: rgba(14, 80, 45, 0.65);
+  border-color: rgba(16, 185, 129, 0.4);
+  box-shadow: 0 10px 24px rgba(16, 185, 129, 0.25);
+}
+
+.segment-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--color-blue-500);
+  position: relative;
+  box-shadow: 0 0 0 6px rgba(96, 165, 250, 0.14);
+}
+
+.segment-status-indicator[data-state="ready"] .segment-status-dot {
+  background: var(--color-green-500);
+  box-shadow: 0 0 0 6px rgba(34, 197, 94, 0.16);
+}
+
+.segment-status-dot::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  border: 1px solid rgba(96, 165, 250, 0.45);
+  animation: segment-status-pulse 1.4s ease-out infinite;
+}
+
+.segment-status-indicator[data-state="ready"] .segment-status-dot::after {
+  border-color: rgba(34, 197, 94, 0.45);
+  animation-duration: 1.8s;
+}
+
+.segment-status-text {
+  white-space: nowrap;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+@keyframes segment-status-pulse {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.9;
+  }
+  100% {
+    transform: scale(1.45);
+    opacity: 0;
+  }
+}
+
 /* =============================================================================
    Arrival Animation (fresh capture from extension)
 

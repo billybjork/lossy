@@ -28,6 +28,7 @@ export async function enterSegmentMode(
   state.segmentPending = false;
   state.lockedSegmentPoints = [];
   state.spotlightedMaskId = null;  // Reset spotlight state on enter
+  updateSegmentStatus(state, 'Segment mode • scanning', 'searching');
 
   // Clear any mask selection
   state.selectedMaskIds = new Set();
@@ -120,6 +121,7 @@ export function exitSegmentMode(
     state.segmentPending = false;
     state.lockedSegmentPoints = [];
     state.spotlightedMaskId = null;
+    state.spotlightedMaskHit = undefined;
 
     // Clear live segment state
     if (state.liveSegmentDebounceId !== null) {
@@ -150,6 +152,8 @@ export function exitSegmentMode(
     // Restore cursor style
     container.style.cursor = '';
 
+    removeSegmentStatus(state);
+
     // Force cleanup any remaining segment mode elements (belt and suspenders)
     forceCleanupSegmentElements(state);
 
@@ -176,7 +180,7 @@ export function forceCleanupSegmentElements(state?: MaskOverlayState): void {
     const jsContainer = document.getElementById('js-overlay-container');
     if (jsContainer) {
       const segmentElements = jsContainer.querySelectorAll(
-        '.segment-point-markers, .segment-preview-mask, .segment-spotlight-overlay'
+        '.segment-point-markers, .segment-preview-mask, .segment-spotlight-overlay, .segment-status-indicator'
       );
       segmentElements.forEach(el => {
         try {
@@ -197,6 +201,8 @@ export function forceCleanupSegmentElements(state?: MaskOverlayState): void {
       state.spotlightOverlay = null;
       state.lastMaskData = null;
       state.spotlightedMaskId = null;
+      state.spotlightedMaskHit = undefined;
+      state.segmentStatusEl = null;
     }
   } catch (error) {
     console.error('[SegmentMode] Error in force cleanup:', error);
@@ -281,6 +287,7 @@ export function renderPreviewMask(maskData: MaskData, state: MaskOverlayState): 
       jsContainer.appendChild(canvas);
     }
     state.previewMaskCanvas = canvas;
+    updateSegmentStatus(state, 'Preview ready', 'ready');
   };
 
   maskImg.onerror = () => {
@@ -367,4 +374,46 @@ export function removeSpotlightOverlay(state: MaskOverlayState): void {
     state.spotlightOverlay = null;
   }
   state.spotlightedMaskId = null;
+}
+
+/**
+ * Render/update a small status badge while in segment mode
+ * Provides immediate feedback that the overlay is searching/ready
+ */
+export function updateSegmentStatus(
+  state: MaskOverlayState,
+  text: string,
+  mode: 'searching' | 'ready' = 'searching'
+): void {
+  const jsContainer = document.getElementById('js-overlay-container');
+  if (!jsContainer) return;
+
+  let badge = state.segmentStatusEl;
+  if (!badge) {
+    badge = document.createElement('div');
+    badge.className = 'segment-status-indicator';
+    badge.innerHTML = `
+      <div class="segment-status-dot"></div>
+      <div class="segment-status-text"></div>
+    `;
+    badge.style.pointerEvents = 'none';
+    jsContainer.appendChild(badge);
+    state.segmentStatusEl = badge as HTMLDivElement;
+  }
+
+  badge.dataset.state = mode;
+  const textNode = badge.querySelector('.segment-status-text');
+  if (textNode) {
+    textNode.textContent = text;
+  }
+}
+
+/**
+ * Remove the segment status badge
+ */
+export function removeSegmentStatus(state: MaskOverlayState): void {
+  if (state.segmentStatusEl) {
+    state.segmentStatusEl.remove();
+    state.segmentStatusEl = null;
+  }
 }

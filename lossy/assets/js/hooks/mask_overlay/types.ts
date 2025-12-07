@@ -61,6 +61,8 @@ export interface MaskOverlayState {
   hoveredMaskId: string | null;
   selectedMaskIds: Set<string>;
   maskImageCache: Map<string, CachedMask>;
+  maskCacheReady: boolean;
+  maskCacheReadyPromise: Promise<void> | null;
   pageLoadTime: number;
   shimmerPlayed: boolean;
   isDragging: boolean;
@@ -76,12 +78,16 @@ export interface MaskOverlayState {
   segmentPending: boolean;
   // Spotlight overlay (dark background)
   spotlightOverlay: HTMLDivElement | null;
+  // Status badge for segment mode feedback
+  segmentStatusEl: HTMLDivElement | null;
   // Currently spotlighted existing mask (if any)
   spotlightedMaskId: string | null;
+  spotlightedMaskHit?: 'pixel' | 'bbox';
   documentId: string;
   embeddingsReady: boolean;
   imageWidth: number;
   imageHeight: number;
+  imageReadyPromise: Promise<void> | null;
   resizeObserver: ResizeObserver | null;
   mouseDownHandler: (e: MouseEvent) => void;
   mouseMoveHandler: (e: MouseEvent) => void;
@@ -107,6 +113,10 @@ export interface MaskOverlayState {
   lockedSegmentPoints: SegmentPoint[];
   // Track if Shift key is held (for negative point preview)
   shiftKeyHeld: boolean;
+  // Retry handle for delayed spotlight checks
+  atCursorRetryId: number | null;
+  // Continuous reassessment loop during segment mode
+  segmentUpdateIntervalId: number | null;
 }
 
 // ============ Color Constants ============

@@ -62,6 +62,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.hoveredMaskId = null;
     this.selectedMaskIds = new Set();
     this.maskImageCache = new Map();
+    this.maskCacheReady = false;
+    this.maskCacheReadyPromise = null;
     this.pageLoadTime = Date.now();
     this.shimmerPlayed = false;
     this.isDragging = false;
@@ -76,6 +78,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.segmentPending = false;
     this.spotlightOverlay = null;
     this.spotlightedMaskId = null;
+    this.spotlightedMaskHit = undefined;
     this.documentId = this.el.dataset.documentId || '';
     this.embeddingsReady = false;
     this.lastMousePosition = null;
@@ -88,6 +91,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.precomputedSegments = [];
     this.lockedSegmentPoints = [];
     this.shiftKeyHeld = false;
+    this.segmentStatusEl = null;
+    this.atCursorRetryId = null;
+    this.imageReadyPromise = null;
+    this.segmentUpdateIntervalId = null;
 
     // Get image dimensions
     this.imageWidth = parseInt(this.el.dataset.imageWidth || '0') || 0;
@@ -99,6 +106,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     // Position masks once image is loaded
     const img = document.getElementById('editor-image') as HTMLImageElement | null;
     if (img) {
+      this.imageReadyPromise = img.complete
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            img.addEventListener('load', () => resolve(), { once: true });
+          });
+
       if (img.complete) {
         this.positionMasks();
         this.renderSegmentMasks();
@@ -106,7 +119,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         img.addEventListener('load', () => {
           this.positionMasks();
           this.renderSegmentMasks();
-        });
+        }, { once: true });
       }
 
       // Reposition on resize
@@ -129,6 +142,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     // Track mouse position for segment mode
     this.container.addEventListener('mousemove', (e: MouseEvent) => {
+      const rect = this.container.getBoundingClientRect();
+      this.lastMousePosition = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top
+      };
+    });
+    this.container.addEventListener('mouseenter', (e: MouseEvent) => {
       const rect = this.container.getBoundingClientRect();
       this.lastMousePosition = {
         x: e.clientX - rect.left,
@@ -456,6 +476,15 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (this.pointMarkersContainer) this.pointMarkersContainer.remove();
     if (this.previewMaskCanvas) this.previewMaskCanvas.remove();
     if (this.spotlightOverlay) this.spotlightOverlay.remove();
+    if (this.segmentStatusEl) this.segmentStatusEl.remove();
+    if (this.atCursorRetryId !== null) {
+      clearTimeout(this.atCursorRetryId);
+      this.atCursorRetryId = null;
+    }
+    if (this.segmentUpdateIntervalId !== null) {
+      clearInterval(this.segmentUpdateIntervalId);
+      this.segmentUpdateIntervalId = null;
+    }
   },
 
   // ============ Delegated Methods ============
@@ -476,7 +505,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   updateHighlight() {
     Rendering.updateHighlight(this.container, this as unknown as MaskOverlayState, () => {
-      if (this.segmentMode && this.spotlightedMaskId) {
+      if (this.segmentMode && this.spotlightedMaskId && this.maskCacheReady) {
         Rendering.updateSegmentMaskSpotlight(this.maskImageCache, this.spotlightedMaskId);
       } else {
         this.updateSegmentMaskHighlight();
@@ -494,16 +523,86 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   renderSegmentMasks() {
-    Rendering.renderSegmentMasks(
+    const { pendingLoads, promise } = Rendering.renderSegmentMasks(
       this.container,
       this.maskImageCache,
       this.imageWidth,
       this.imageHeight
     );
+
+    // Track readiness of the mask cache for reliable hit testing
+    if (pendingLoads > 0) {
+      this.maskCacheReady = false;
+      this.maskCacheReadyPromise = promise
+        .then(() => {
+          this.maskCacheReady = true;
+          debugLog('[MaskOverlay] Mask cache ready');
+          if (this.segmentMode) {
+            SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Spotlighting masks', 'ready');
+            this.updateAtCursor();
+          }
+        })
+        .catch(() => {
+          this.maskCacheReady = true;
+        });
+    } else {
+      this.maskCacheReady = true;
+      this.maskCacheReadyPromise = Promise.resolve();
+    }
+
+    return this.maskCacheReadyPromise;
   },
 
   triggerShimmer(targetMaskIds?: Set<string>) {
     Rendering.triggerShimmer(this.container, this.maskImageCache, targetMaskIds);
+  },
+
+  async waitForImageReady() {
+    if (this.imageReadyPromise) {
+      await this.imageReadyPromise;
+      return;
+    }
+
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (!img) return;
+
+    this.imageReadyPromise = img.complete
+      ? Promise.resolve()
+      : new Promise<void>((resolve) => img.addEventListener('load', () => resolve(), { once: true }));
+
+    await this.imageReadyPromise;
+  },
+
+  async waitForMaskCacheReady() {
+    if (this.maskCacheReady) return;
+
+    if (!this.maskCacheReadyPromise) {
+      this.renderSegmentMasks();
+    }
+
+    try {
+      await this.maskCacheReadyPromise;
+    } catch (error) {
+      console.warn('[MaskOverlay] Mask cache readiness failed:', error);
+    }
+  },
+
+  async ensureSegmentModeReadiness() {
+    await this.waitForImageReady();
+    await this.waitForMaskCacheReady();
+  },
+
+  scheduleUpdateAtCursorRetry(reason: string, delay = 80) {
+    if (!this.segmentMode) return;
+    if (this.atCursorRetryId !== null) return;
+
+    debugLog('[MaskOverlay] Scheduling updateAtCursor retry:', reason);
+    this.atCursorRetryId = window.setTimeout(() => {
+      this.atCursorRetryId = null;
+      if (this.segmentMode) {
+        this.updateAtCursor();
+      }
+    }, delay);
   },
 
   // ============ Mouse Handlers ============
@@ -569,6 +668,27 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   // ============ Segment Mode ============
 
   async enterSegmentMode() {
+    // Warm up mask cache/image readiness in parallel so spotlighting never races loads
+    this.ensureSegmentModeReadiness().then(() => {
+      if (this.segmentMode) {
+        SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Spotlighting masks', 'ready');
+        this.updateAtCursor();
+      }
+    });
+
+    // Continually reassess the cursor position while segment mode is active,
+    // so late-arriving masks/cache/embeddings still trigger spotlight/segmentation
+    if (this.segmentUpdateIntervalId === null) {
+      this.segmentUpdateIntervalId = window.setInterval(() => {
+        if (this.segmentMode) {
+          this.updateAtCursor();
+        }
+      }, 120);
+    }
+
+    // Immediate attempt on entry
+    this.updateAtCursor();
+
     await SegmentMode.enterSegmentMode(
       this.container,
       this as unknown as MaskOverlayState,
@@ -580,7 +700,14 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         onEmbeddingsReady: () => {
           // Re-check cursor position now that embeddings are ready
           // updateAtCursor handles both spotlight (existing masks) and segmentation
-          if (this.segmentMode) {
+          if (!this.segmentMode) return;
+
+          SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Spotlighting masks', 'ready');
+
+          if (this.lockedSegmentPoints.length > 0) {
+            // If the user already clicked points while we were waiting, honor them immediately
+            this.segmentWithAllPoints();
+          } else {
             this.updateAtCursor();
           }
         }
@@ -589,6 +716,15 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   exitSegmentMode() {
+    SegmentMode.removeSegmentStatus(this as unknown as MaskOverlayState);
+    if (this.atCursorRetryId !== null) {
+      clearTimeout(this.atCursorRetryId);
+      this.atCursorRetryId = null;
+    }
+    if (this.segmentUpdateIntervalId !== null) {
+      clearInterval(this.segmentUpdateIntervalId);
+      this.segmentUpdateIntervalId = null;
+    }
     SegmentMode.exitSegmentMode(this.container, this as unknown as MaskOverlayState, {
       updateHighlight: () => this.updateHighlight(),
       pushEvent: (event, payload) => this.pushEvent(event, payload)
@@ -596,43 +732,88 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   // Update spotlight/segment at current cursor position
-  updateAtCursor() {
+  async updateAtCursor() {
     if (!this.segmentMode) {
       debugLog('[MaskOverlay] updateAtCursor: not in segment mode');
       return;
     }
+    await this.waitForImageReady();
+    if (!this.segmentMode) return;
+
+    if (this.atCursorRetryId !== null) {
+      clearTimeout(this.atCursorRetryId);
+      this.atCursorRetryId = null;
+    }
+
     if (!this.lastMousePosition) {
       debugLog('[MaskOverlay] updateAtCursor: no lastMousePosition');
+      this.scheduleUpdateAtCursorRetry('missing cursor position');
       return;
     }
 
-    const cursorX = this.lastMousePosition.x + this.container.getBoundingClientRect().left;
-    const cursorY = this.lastMousePosition.y + this.container.getBoundingClientRect().top;
+    const masks = this.container.querySelectorAll('.mask-region');
+    const hasMasks = masks.length > 0;
+    if (!hasMasks) {
+      debugLog('[MaskOverlay] updateAtCursor: no masks in DOM yet');
+      SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Scanning image…', 'searching');
+      this.scheduleUpdateAtCursorRetry('no masks rendered', 120);
+      if (this.spotlightedMaskId) {
+        this.spotlightedMaskId = null;
+        this.updateHighlight();
+      }
+    }
+
+    if (hasMasks && !this.maskCacheReady) {
+      SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Preparing masks…', 'searching');
+      this.waitForMaskCacheReady().then(() => {
+        if (this.segmentMode) {
+          this.updateAtCursor();
+        }
+      });
+      this.scheduleUpdateAtCursorRetry('mask cache warming');
+      // While warming cache, continue with bbox-only spotlighting but allow segmentation fallthrough
+    }
+
+    const containerRect = this.container.getBoundingClientRect();
+    const cursorX = this.lastMousePosition.x + containerRect.left;
+    const cursorY = this.lastMousePosition.y + containerRect.top;
 
     debugLog('[MaskOverlay] updateAtCursor: cursor at', cursorX, cursorY);
+    if (this.maskCacheReady || !hasMasks) {
+      SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Spotlighting masks', 'ready');
+    }
 
     // Check if cursor is over an existing mask (doesn't require embeddings)
-    if (this.lockedSegmentPoints.length === 0) {
-      const existingMaskId = this.findMaskUnderCursor(cursorX, cursorY);
-      debugLog('[MaskOverlay] findMaskUnderCursor returned:', existingMaskId);
-      if (existingMaskId !== this.spotlightedMaskId) {
-        debugLog('[MaskOverlay] Setting spotlightedMaskId to:', existingMaskId);
+    if (hasMasks && this.lockedSegmentPoints.length === 0) {
+      const maskHit = this.findMaskUnderCursor(cursorX, cursorY);
+      const existingMaskId = maskHit?.maskId || null;
+      debugLog('[MaskOverlay] findMaskUnderCursor returned:', existingMaskId, 'hit:', maskHit?.hit);
+      if (existingMaskId !== this.spotlightedMaskId || maskHit?.hit !== this.spotlightedMaskHit) {
+        debugLog('[MaskOverlay] Setting spotlightedMaskId to:', existingMaskId, 'hit:', maskHit?.hit);
         this.spotlightedMaskId = existingMaskId;
+        this.spotlightedMaskHit = maskHit?.hit;
         this.updateHighlight();
       }
 
-      if (existingMaskId) {
+      if (existingMaskId && maskHit?.hit === 'pixel') {
         // Clear preview when over existing mask
         if (this.previewMaskCanvas) {
           this.previewMaskCanvas.remove();
           this.previewMaskCanvas = null;
         }
         return;
+      } else if (existingMaskId && maskHit?.hit === 'bbox') {
+        // Keep spotlight but also attempt live segmentation to refine to pixel-perfect spotlight
+        SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Refining mask…', 'searching');
       }
     }
 
     // Live segmentation requires embeddings
-    if (!this.embeddingsReady) return;
+    if (!this.embeddingsReady) {
+      SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Preparing embeddings…', 'searching');
+      this.scheduleUpdateAtCursorRetry('embeddings not ready', 140);
+      return;
+    }
 
     // Debounce segmentation requests
     if (this.liveSegmentDebounceId !== null) {
@@ -641,6 +822,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     this.liveSegmentDebounceId = window.setTimeout(async () => {
       this.liveSegmentDebounceId = null;
+
+      if (!this.segmentMode) return;
 
       // Segment at cursor (with locked points if any)
       const coords = SegmentMode.getImageCoordinates(
@@ -651,6 +834,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       );
 
       if (!coords) return;
+
+      SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Segmenting selection…', 'searching');
 
       const cursorLabel = this.shiftKeyHeld ? 0 : 1;
       const cursorPoint = { x: coords.x, y: coords.y, label: cursorLabel };
@@ -663,7 +848,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   // Segment using all locked points (immediate, no debounce)
   segmentWithAllPoints() {
     if (!this.segmentMode || this.lockedSegmentPoints.length === 0) return;
-    if (!this.embeddingsReady) return;
+    if (!this.embeddingsReady) {
+      SegmentMode.updateSegmentStatus(this as unknown as MaskOverlayState, 'Preparing embeddings…', 'searching');
+      this.scheduleUpdateAtCursorRetry('embeddings not ready for locked points', 120);
+      return;
+    }
 
     if (this.liveSegmentDebounceId !== null) {
       clearTimeout(this.liveSegmentDebounceId);
@@ -761,11 +950,17 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.exitSegmentMode();
   },
 
-  findMaskUnderCursor(clientX: number, clientY: number): string | null {
+  findMaskUnderCursor(clientX: number, clientY: number): { maskId: string; hit: 'pixel' | 'bbox' } | null {
     const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+    if (masks.length === 0) {
+      debugLog('[MaskOverlay] findMaskUnderCursor: no masks found in DOM');
+      return null;
+    }
     debugLog('[MaskOverlay] findMaskUnderCursor: checking', masks.length, 'masks');
 
-    for (const mask of Array.from(masks)) {
+    let bboxFallback: { maskId: string; hit: 'bbox' } | null = null;
+
+    for (const mask of Array.from(masks).reverse()) {
       const maskId = mask.dataset.maskId || '';
       const maskType = mask.dataset.maskType;
       const rect = mask.getBoundingClientRect();
@@ -783,7 +978,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           if (!inCache) {
             // If not in cache yet, use bbox-level hit testing
             debugLog('[MaskOverlay] Using bbox hit (not in cache yet)');
-            return maskId;
+            return { maskId, hit: 'bbox' };
           }
 
           const event = { clientX, clientY } as MouseEvent;
@@ -791,13 +986,17 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
             maskId, event, mask, this.maskImageCache
           );
           debugLog('[MaskOverlay] Pixel hit test result:', isOver);
-          if (isOver) return maskId;
+          if (isOver) return { maskId, hit: 'pixel' };
+          if (!bboxFallback) {
+            bboxFallback = { maskId, hit: 'bbox' };
+            debugLog('[MaskOverlay] Pixel miss; falling back to bbox for mask:', maskId);
+          }
         } else {
-          return maskId;
+          return { maskId, hit: 'bbox' };
         }
       }
     }
 
-    return null;
+    return bboxFallback;
   }
 };
