@@ -5,7 +5,59 @@
  * Includes state management, mask data structures, and visual styling constants.
  */
 
-import type { BoundingBox, AutoSegmentMaskResult } from '../../ml/types';
+import type { BoundingBox } from '../../ml/types';
+
+// ============ Segment Mode State ============
+
+/**
+ * Segment mode context - simplified state for segment mode.
+ * Uses simple boolean flags instead of complex state machine.
+ */
+export interface SegmentModeContext {
+  // Simple on/off (replaces complex state machine)
+  active: boolean;
+  // Current cursor position in container coordinates
+  lastMouse: { x: number; y: number } | null;
+  // Locked points from clicks (for multi-point segmentation)
+  lockedPoints: SegmentPoint[];
+  // Currently spotlighted existing mask (if any)
+  spotlightedMaskId: string | null;
+  spotlightHitType: 'pixel' | 'bbox' | null;
+  // Preview mask data ready for confirmation
+  lastMaskData: MaskData | null;
+  // Is a segmentation request currently running?
+  inFlight: boolean;
+  // Should we segment when inFlight clears?
+  needsSegment: boolean;
+  // Timer handle for update loop
+  loopIntervalId: number | null;
+  // DOM refs
+  spotlightOverlay: HTMLDivElement | null;
+  pointMarkersContainer: HTMLDivElement | null;
+  previewCanvas: HTMLCanvasElement | null;
+  statusEl: HTMLDivElement | null;
+}
+
+/**
+ * Create a fresh segment mode context
+ */
+export function createSegmentContext(): SegmentModeContext {
+  return {
+    active: false,
+    lastMouse: null,
+    lockedPoints: [],
+    spotlightedMaskId: null,
+    spotlightHitType: null,
+    lastMaskData: null,
+    inFlight: false,
+    needsSegment: false,
+    loopIntervalId: null,
+    spotlightOverlay: null,
+    pointMarkersContainer: null,
+    previewCanvas: null,
+    statusEl: null,
+  };
+}
 
 // ============ Response Types ============
 
@@ -56,6 +108,10 @@ export interface CachedMask {
 
 // ============ Hook State ============
 
+/**
+ * MaskOverlay hook state.
+ * Segment mode state is now consolidated in SegmentModeContext.
+ */
 export interface MaskOverlayState {
   container: HTMLElement;
   hoveredMaskId: string | null;
@@ -65,29 +121,34 @@ export interface MaskOverlayState {
   maskCacheReadyPromise: Promise<void> | null;
   pageLoadTime: number;
   shimmerPlayed: boolean;
+
+  // Drag selection
   isDragging: boolean;
   dragStart: DragStart | null;
   dragRect: HTMLDivElement | null;
   dragShift: boolean;
   dragIntersectingIds: Set<string>;
-  // Segment mode: true when Command key is held
-  segmentMode: boolean;
-  previewMaskCanvas: HTMLCanvasElement | null;
-  lastMaskData: MaskData | null;
-  pointMarkersContainer: HTMLDivElement | null;
-  segmentPending: boolean;
-  // Spotlight overlay (dark background)
-  spotlightOverlay: HTMLDivElement | null;
-  // Status badge for segment mode feedback
-  segmentStatusEl: HTMLDivElement | null;
-  // Currently spotlighted existing mask (if any)
-  spotlightedMaskId: string | null;
-  spotlightedMaskHit?: 'pixel' | 'bbox';
+
+  // Segment mode context
+  segmentCtx: SegmentModeContext | null;
+
+  // Core document data
   documentId: string;
   embeddingsReady: boolean;
+  embeddingsComputePromise: Promise<void> | null;
   imageWidth: number;
   imageHeight: number;
   imageReadyPromise: Promise<void> | null;
+
+  // Mouse position tracking (for segment mode)
+  lastMousePosition: { x: number; y: number } | null;
+  shiftKeyHeld: boolean;
+
+  // Segment confirmation tracking
+  pendingSegmentConfirm: boolean;
+  previousMaskIds: Set<string>;
+
+  // DOM/event handlers
   resizeObserver: ResizeObserver | null;
   mouseDownHandler: (e: MouseEvent) => void;
   mouseMoveHandler: (e: MouseEvent) => void;
@@ -97,26 +158,6 @@ export interface MaskOverlayState {
   segmentModeKeydownHandler: (e: KeyboardEvent) => void;
   segmentModeKeyupHandler: (e: KeyboardEvent) => void;
   shiftKeyHandler: (e: KeyboardEvent) => void;
-  // Track mouse position for segment mode
-  lastMousePosition: { x: number; y: number } | null;
-  // Track when we're confirming a new segment to shimmer it
-  pendingSegmentConfirm: boolean;
-  previousMaskIds: Set<string>;
-  // Live segmentation debounce and staleness detection
-  liveSegmentDebounceId: number | null;
-  lastLiveSegmentRequestId: string | null;
-  // Auto-segmentation state
-  autoSegmentInProgress: boolean;
-  autoSegmentProgress: number;
-  precomputedSegments: AutoSegmentMaskResult[];
-  // Multi-point segment mode: locked/committed points from clicks
-  lockedSegmentPoints: SegmentPoint[];
-  // Track if Shift key is held (for negative point preview)
-  shiftKeyHeld: boolean;
-  // Retry handle for delayed spotlight checks
-  atCursorRetryId: number | null;
-  // Continuous reassessment loop during segment mode
-  segmentUpdateIntervalId: number | null;
 }
 
 // ============ Color Constants ============

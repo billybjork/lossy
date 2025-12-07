@@ -8,6 +8,13 @@
 import type { MaskOverlayState, DragRect } from './types';
 
 /**
+ * Check if segment mode is active (works with new context-based state)
+ */
+function isSegmentModeActive(state: MaskOverlayState): boolean {
+  return state.segmentCtx !== null;
+}
+
+/**
  * Create the rubber band selection rectangle element
  */
 export function createDragRect(container: HTMLElement): HTMLDivElement {
@@ -38,11 +45,11 @@ export function startDrag(
   if (event.button !== 0) return;  // Left click only
 
   // In segment mode, don't handle drag (brush strokes instead)
-  if (state.segmentMode) return;
+  if (isSegmentModeActive(state)) return;
 
   // DEFENSIVE: If segment mode artifacts exist but segment mode is off, clean them up
   // This prevents stuck state from breaking marquee
-  if (!state.segmentMode && container.classList.contains('segment-mode')) {
+  if (!isSegmentModeActive(state) && container.classList.contains('segment-mode')) {
     console.warn('[DragSelection] Detected stuck segment-mode class, cleaning up');
     container.classList.remove('segment-mode');
   }
@@ -85,7 +92,7 @@ export function updateDrag(
   }
 ): void {
   // In segment mode, don't handle drag
-  if (state.segmentMode) return;
+  if (isSegmentModeActive(state)) return;
 
   if (!state.dragStart) return;
 
@@ -138,7 +145,7 @@ export function endDrag(
   }
 ): void {
   // In segment mode, don't handle drag
-  if (state.segmentMode) return;
+  if (isSegmentModeActive(state)) return;
 
   if (!state.dragStart) return;
 

@@ -9,6 +9,13 @@ import type { MaskOverlayState, CachedMask } from './types';
 import { MASK_COLORS, HOVER_COLOR } from './types';
 
 /**
+ * Check if segment mode is active (works with new context-based state)
+ */
+function isSegmentModeActive(state: MaskOverlayState): boolean {
+  return state.segmentCtx !== null;
+}
+
+/**
  * Render segment masks (type: 'object') as semi-transparent overlays
  * Creates canvas elements for each mask and caches them for performance
  */
@@ -131,7 +138,7 @@ export function updateHighlight(
   const hasHover = state.hoveredMaskId !== null;
 
   // In segment mode, disable pointer events on all masks
-  if (state.segmentMode) {
+  if (isSegmentModeActive(state)) {
     masks.forEach((mask: HTMLElement) => {
       mask.style.pointerEvents = 'none';
     });
@@ -159,7 +166,7 @@ export function updateHighlight(
   }
 
   // Update cursor on container
-  if (state.segmentMode) {
+  if (isSegmentModeActive(state)) {
     container.style.cursor = 'crosshair';
   } else {
     container.style.cursor = hasHover ? 'pointer' : 'crosshair';
