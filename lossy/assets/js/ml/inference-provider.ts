@@ -5,8 +5,14 @@
  * This allows the app to work with or without the extension installed.
  */
 
-import { inferenceClient, type TextDetectionResult, type SegmentResult } from './inference-client';
-import type { DetectedRegion, PointPrompt } from './types';
+import {
+  inferenceClient,
+  type TextDetectionResult,
+  type SegmentResult,
+  type AutoSegmentBatchResult,
+  type AutoSegmentCompleteResult,
+} from './inference-client';
+import type { DetectedRegion, PointPrompt, AutoSegmentConfig } from './types';
 
 /**
  * Interface for inference providers
@@ -30,6 +36,20 @@ export interface InferenceProvider {
     points: PointPrompt[],
     imageSize: { width: number; height: number }
   ): Promise<SegmentResult>;
+
+  /**
+   * Run automatic segmentation with streaming batch results
+   * Pre-computes high-confidence object segments using grid-based sampling
+   */
+  autoSegment(
+    documentId: string,
+    imageElement: HTMLImageElement,
+    callbacks: {
+      onBatch: (batch: AutoSegmentBatchResult) => void;
+      onComplete: (result: AutoSegmentCompleteResult) => void;
+    },
+    config?: Partial<AutoSegmentConfig>
+  ): Promise<void>;
 
   /**
    * Clear cached embeddings for a document
@@ -158,6 +178,20 @@ class ExtensionProvider implements InferenceProvider {
       documentId,
     }, '*');
   }
+
+  async autoSegment(
+    _documentId: string,
+    _imageElement: HTMLImageElement,
+    _callbacks: {
+      onBatch: (batch: AutoSegmentBatchResult) => void;
+      onComplete: (result: AutoSegmentCompleteResult) => void;
+    },
+    _config?: Partial<AutoSegmentConfig>
+  ): Promise<void> {
+    // Extension-based auto-segmentation not supported
+    // Fall through to local provider
+    throw new Error('Auto-segmentation not available via extension');
+  }
 }
 
 /**
@@ -185,6 +219,19 @@ class LocalProvider implements InferenceProvider {
     imageSize: { width: number; height: number }
   ): Promise<SegmentResult> {
     return inferenceClient.segmentAtPoints(documentId, points, imageSize);
+  }
+
+  async autoSegment(
+    documentId: string,
+    imageElement: HTMLImageElement,
+    callbacks: {
+      onBatch: (batch: AutoSegmentBatchResult) => void;
+      onComplete: (result: AutoSegmentCompleteResult) => void;
+    },
+    config?: Partial<AutoSegmentConfig>
+  ): Promise<void> {
+    const imageData = await imageElementToImageData(imageElement);
+    await inferenceClient.autoSegment(documentId, imageData, callbacks, config);
   }
 
   clearEmbeddings(documentId: string): void {
@@ -243,3 +290,7 @@ export async function getInferenceProvider(): Promise<InferenceProvider> {
 export function clearProviderCache(): void {
   cachedProvider = null;
 }
+
+// Re-export types for convenience
+export type { AutoSegmentBatchResult, AutoSegmentCompleteResult } from './inference-client';
+export type { AutoSegmentConfig } from './types';

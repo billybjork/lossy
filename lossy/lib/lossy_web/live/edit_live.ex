@@ -200,6 +200,34 @@ defmodule LossyWeb.EditLive do
     end
   end
 
+  # Auto-segmentation batch handler - receives masks progressively as they're computed
+  @impl true
+  def handle_event("auto_segment_batch", %{"masks" => masks} = _params, socket) do
+    document = socket.assigns.document
+
+    # Store each high-confidence auto-segment
+    {:ok, _regions} = Documents.create_detected_regions_from_auto_segments(document, masks)
+
+    # Document update will be broadcast via PubSub
+    {:noreply, socket}
+  end
+
+  # Auto-segmentation complete notification
+  @impl true
+  def handle_event(
+        "auto_segment_complete",
+        %{"total_masks" => total, "inference_time_ms" => time},
+        socket
+      ) do
+    require Logger
+
+    Logger.info(
+      "[EditLive] Auto-segmentation complete: #{total} masks in #{Float.round(time / 1000, 1)}s"
+    )
+
+    {:noreply, socket}
+  end
+
   @impl true
   def handle_event("export", _params, socket) do
     socket = assign(socket, exporting: true)

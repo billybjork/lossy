@@ -421,6 +421,67 @@ defmodule Lossy.Documents do
   end
 
   @doc """
+  Creates detected regions from auto-segmentation results.
+  Similar to create_detected_regions_from_segments but adds auto_generated flag.
+  """
+  def create_detected_regions_from_auto_segments(%Document{} = document, auto_segments)
+      when is_list(auto_segments) do
+    Logger.info("Creating detected regions from auto-segmentation",
+      document_id: document.id,
+      segment_count: length(auto_segments)
+    )
+
+    base_path = mask_base_path(document)
+    File.mkdir_p!(base_path)
+
+    now = NaiveDateTime.utc_now() |> NaiveDateTime.truncate(:second)
+
+    # Get existing region count for z_index offset
+    existing_count =
+      DetectedRegion
+      |> where([r], r.document_id == ^document.id)
+      |> Repo.aggregate(:count)
+
+    regions_data =
+      auto_segments
+      |> Enum.with_index(existing_count + 1)
+      |> Enum.map(&build_auto_segment_region(&1, document.id, base_path, now))
+      |> Enum.filter(& &1.mask_path)
+
+    insert_segment_regions(regions_data, document)
+  end
+
+  # Auto-segment z_index offset (between text and manual regions)
+  @auto_segment_z_index_offset 1500
+
+  defp build_auto_segment_region({region_data, index}, document_id, base_path, now) do
+    mask_png = get_field(region_data, :mask_png)
+    # Use unique timestamp to avoid collisions
+    unique_index = "auto_#{System.system_time(:microsecond)}_#{index}"
+    mask_path = save_mask_png(mask_png, base_path, unique_index)
+
+    %{
+      id: Ecto.UUID.generate(),
+      document_id: document_id,
+      type: :object,
+      bbox: normalize_bbox(get_field(region_data, :bbox)),
+      mask_path: mask_path,
+      polygon: [],
+      confidence: get_field(region_data, :score) || 1.0,
+      metadata: %{
+        area: get_field(region_data, :area) || 0,
+        stability_score: get_field(region_data, :stability_score),
+        centroid: get_field(region_data, :centroid),
+        auto_generated: true
+      },
+      z_index: @auto_segment_z_index_offset + index,
+      status: :detected,
+      inserted_at: now,
+      updated_at: now
+    }
+  end
+
+  @doc """
   Add a manual region from click-to-segment.
   Takes a base64-encoded mask PNG and bbox, creates a new region with type :manual.
   """

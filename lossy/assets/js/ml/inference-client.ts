@@ -11,6 +11,8 @@ import type {
   DetectedRegion,
   PointPrompt,
   BoundingBox,
+  AutoSegmentConfig,
+  AutoSegmentMaskResult,
 } from './types';
 
 export interface TextDetectionResult {
@@ -27,9 +29,27 @@ export interface SegmentResult {
   area: number;
 }
 
+export interface AutoSegmentBatchResult {
+  masks: AutoSegmentMaskResult[];
+  progress: number;
+  batchIndex: number;
+  totalBatches: number;
+}
+
+export interface AutoSegmentCompleteResult {
+  totalMasks: number;
+  inferenceTimeMs: number;
+}
+
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: unknown) => void;
+}
+
+interface PendingAutoSegment {
+  onBatch: (batch: AutoSegmentBatchResult) => void;
+  onComplete: (result: AutoSegmentCompleteResult) => void;
+  onError: (error: Error) => void;
 }
 
 /**
@@ -38,6 +58,7 @@ interface PendingRequest {
 class InferenceClient {
   private worker: Worker | null = null;
   private pending = new Map<string, PendingRequest>();
+  private pendingAutoSegments = new Map<string, PendingAutoSegment>();
   private initPromise: Promise<void> | null = null;
   private messageIdCounter = 0;
   private onProgress: ((stage: string, progress: number) => void) | null = null;
@@ -93,11 +114,48 @@ class InferenceClient {
       return;
     }
 
+    // Handle AUTO_SEGMENT_BATCH (streaming response)
+    if (response.type === 'AUTO_SEGMENT_BATCH') {
+      const pendingAutoSeg = this.pendingAutoSegments.get(response.id);
+      if (pendingAutoSeg) {
+        pendingAutoSeg.onBatch({
+          masks: response.masks,
+          progress: response.progress,
+          batchIndex: response.batchIndex,
+          totalBatches: response.totalBatches,
+        });
+      }
+      return;
+    }
+
+    // Handle AUTO_SEGMENT_COMPLETE (final response for streaming)
+    if (response.type === 'AUTO_SEGMENT_COMPLETE') {
+      const pendingAutoSeg = this.pendingAutoSegments.get(response.id);
+      if (pendingAutoSeg) {
+        this.pendingAutoSegments.delete(response.id);
+        pendingAutoSeg.onComplete({
+          totalMasks: response.totalMasks,
+          inferenceTimeMs: response.inferenceTimeMs,
+        });
+      }
+      return;
+    }
+
     // Extract ID from response
     const id = 'id' in response ? response.id : null;
     if (!id) {
       console.warn('[InferenceClient] Received message without ID:', response);
       return;
+    }
+
+    // Check if this is an error for an auto-segment request
+    if (response.type === 'ERROR') {
+      const pendingAutoSeg = this.pendingAutoSegments.get(id);
+      if (pendingAutoSeg) {
+        this.pendingAutoSegments.delete(id);
+        pendingAutoSeg.onError(new Error(response.error));
+        return;
+      }
     }
 
     const pending = this.pending.get(id);
@@ -253,6 +311,50 @@ class InferenceClient {
   }
 
   /**
+   * Run automatic segmentation with streaming batch results
+   * Computes embeddings if not already cached, then runs grid-based segmentation
+   */
+  async autoSegment(
+    documentId: string,
+    imageData: ImageData,
+    callbacks: {
+      onBatch: (batch: AutoSegmentBatchResult) => void;
+      onComplete: (result: AutoSegmentCompleteResult) => void;
+    },
+    config?: Partial<AutoSegmentConfig>
+  ): Promise<void> {
+    await this.init();
+
+    if (!this.worker) {
+      throw new Error('Worker not initialized');
+    }
+
+    const id = this.generateId();
+
+    return new Promise((resolve, reject) => {
+      // Register streaming callbacks
+      this.pendingAutoSegments.set(id, {
+        onBatch: callbacks.onBatch,
+        onComplete: (result) => {
+          callbacks.onComplete(result);
+          resolve();
+        },
+        onError: reject,
+      });
+
+      // Send message to worker
+      const message: WorkerMessage = {
+        type: 'AUTO_SEGMENT',
+        id,
+        documentId,
+        imageData,
+        config,
+      };
+      this.worker!.postMessage(message);
+    });
+  }
+
+  /**
    * Clear cached embeddings for a document
    */
   clearEmbeddings(documentId: string): void {
@@ -274,10 +376,14 @@ class InferenceClient {
       this.worker = null;
       this.initPromise = null;
       this.pending.clear();
+      this.pendingAutoSegments.clear();
       console.log('[InferenceClient] Worker terminated');
     }
   }
 }
+
+// Re-export types for convenience
+export type { AutoSegmentConfig, AutoSegmentMaskResult } from './types';
 
 // Export singleton instance
 export const inferenceClient = new InferenceClient();

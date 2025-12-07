@@ -10,6 +10,7 @@
 
 import { detectTextRegions } from './text-detection';
 import { getImageEmbeddings, segmentAtPoints, type Sam2Embeddings } from './object-segmentation';
+import { generateAutoSegments, DEFAULT_AUTO_SEGMENT_CONFIG, type AutoSegmentConfig } from './auto-segment-generator';
 import { maskToPngAsync } from './mask-utils';
 import { getBackend, isWebGPUAvailable } from './sessions';
 import type {
@@ -19,8 +20,11 @@ import type {
   WorkerResponseTextDetected,
   WorkerResponseEmbeddingsReady,
   WorkerResponseSegmentResult,
+  WorkerResponseAutoSegmentBatch,
+  WorkerResponseAutoSegmentComplete,
   WorkerResponseError,
   WorkerResponseProgress,
+  AutoSegmentMaskResult,
 } from './types';
 
 // Embedding cache: documentId -> Sam2Embeddings (includes image_embed + high_res_feats)
@@ -181,6 +185,80 @@ async function handleSegmentAtPoints(
 }
 
 /**
+ * Handle AUTO_SEGMENT message
+ * Runs automatic segmentation with progressive batch delivery
+ */
+async function handleAutoSegment(
+  id: string,
+  documentId: string,
+  imageData: ImageData,
+  config?: Partial<AutoSegmentConfig>
+): Promise<void> {
+  const startTime = performance.now();
+  console.log(`[Worker] Starting auto-segmentation for document ${documentId}...`);
+  sendProgress('auto_segment_start', 0);
+
+  // Merge with default config
+  const fullConfig: AutoSegmentConfig = { ...DEFAULT_AUTO_SEGMENT_CONFIG, ...config };
+
+  // First compute embeddings if not cached
+  let embeddings = embeddingCache.get(documentId);
+  if (!embeddings) {
+    console.log(`[Worker] Computing embeddings for auto-segmentation...`);
+    sendProgress('computing_embeddings', 0);
+    const result = await getImageEmbeddings(imageData);
+    embeddings = result.embeddings;
+    embeddingCache.set(documentId, embeddings);
+    console.log(`[Worker] Embeddings computed and cached for auto-segmentation`);
+  }
+
+  const imageSize = { width: imageData.width, height: imageData.height };
+  let totalMasks = 0;
+
+  // Stream batches back to main thread
+  for await (const batch of generateAutoSegments(embeddings, imageSize, fullConfig, (progress) => {
+    sendProgress('auto_segmenting', progress);
+  })) {
+    // Convert to result format (strip pointPrompt as it's internal)
+    const masks: AutoSegmentMaskResult[] = batch.masks.map(m => ({
+      mask_png: m.mask_png,
+      bbox: m.bbox,
+      score: m.score,
+      stabilityScore: m.stabilityScore,
+      area: m.area,
+      centroid: m.centroid,
+    }));
+
+    totalMasks += masks.length;
+
+    // Send batch to main thread
+    const batchResponse: WorkerResponseAutoSegmentBatch = {
+      type: 'AUTO_SEGMENT_BATCH',
+      id,
+      documentId,
+      masks,
+      progress: batch.progress,
+      batchIndex: batch.batchIndex,
+      totalBatches: batch.totalBatches,
+    };
+    sendResponse(batchResponse);
+  }
+
+  // Send completion message
+  const inferenceTimeMs = performance.now() - startTime;
+  const completeResponse: WorkerResponseAutoSegmentComplete = {
+    type: 'AUTO_SEGMENT_COMPLETE',
+    id,
+    documentId,
+    totalMasks,
+    inferenceTimeMs,
+  };
+  sendResponse(completeResponse);
+
+  console.log(`[Worker] Auto-segmentation complete: ${totalMasks} masks in ${inferenceTimeMs.toFixed(0)}ms`);
+}
+
+/**
  * Handle CLEAR_EMBEDDINGS message
  */
 function handleClearEmbeddings(documentId: string): void {
@@ -216,6 +294,15 @@ self.onmessage = async (event: MessageEvent<WorkerMessage>) => {
           message.documentId,
           message.points,
           message.imageSize
+        );
+        break;
+
+      case 'AUTO_SEGMENT':
+        await handleAutoSegment(
+          message.id,
+          message.documentId,
+          message.imageData,
+          message.config
         );
         break;
 

@@ -254,8 +254,10 @@ function cleanupOrphanedSegmentElements(): void {
   const jsContainer = document.getElementById('js-overlay-container');
   if (!jsContainer) return;
 
-  // Remove any orphaned segment mode elements
-  const orphans = jsContainer.querySelectorAll('.brush-cursor, .segment-point-markers, .brush-stroke-canvas, .segment-preview-mask');
+  // Remove any orphaned segment mode elements (all possible segment mode artifacts)
+  const orphans = jsContainer.querySelectorAll(
+    '.segment-point-markers, .segment-preview-mask, .segment-spotlight-overlay'
+  );
   if (orphans.length > 0) {
     console.warn(`[DragSelection] Cleaning up ${orphans.length} orphaned segment mode elements`);
     orphans.forEach(el => el.remove());

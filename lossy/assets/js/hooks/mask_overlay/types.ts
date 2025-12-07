@@ -5,7 +5,7 @@
  * Includes state management, mask data structures, and visual styling constants.
  */
 
-import type { BoundingBox } from '../../ml/types';
+import type { BoundingBox, AutoSegmentMaskResult } from '../../ml/types';
 
 // ============ Response Types ============
 
@@ -44,20 +44,14 @@ export interface SegmentPoint {
   label: number;
 }
 
-export interface BrushStroke {
-  id: string;
-  rawPoints: Array<{x: number; y: number}>;
-  sampledPoints: SegmentPoint[];
-  label: number;  // 1 = positive, 0 = negative
-  brushSize: number;
-}
-
 // ============ Rendering Types ============
 
 export interface CachedMask {
   canvas: HTMLCanvasElement;
   alphaData: ImageData;
   colorIndex: number;
+  // Bounding box in image coordinates (for spotlight cutout)
+  bbox: { x: number; y: number; w: number; h: number };
 }
 
 // ============ Hook State ============
@@ -74,22 +68,18 @@ export interface MaskOverlayState {
   dragRect: HTMLDivElement | null;
   dragShift: boolean;
   dragIntersectingIds: Set<string>;
+  // Segment mode: true when Command key is held
   segmentMode: boolean;
-  commandKeySegmentMode: boolean;
-  commandKeySpotlightMode: boolean;
   awaitingMaskConfirmation: boolean;
   segmentPoints: SegmentPoint[];
   previewMaskCanvas: HTMLCanvasElement | null;
   lastMaskData: MaskData | null;
-  marchingAntsCanvas: HTMLCanvasElement | null;
-  marchingAntsAnimationId: number | null;
   pointMarkersContainer: HTMLDivElement | null;
-  cursorOverlay: HTMLDivElement | null;
   segmentPending: boolean;
-  // Spotlight effect state (for Command key spotlight mode)
+  // Spotlight overlay (dark background)
   spotlightOverlay: HTMLDivElement | null;
+  // Currently spotlighted existing mask (if any)
   spotlightedMaskId: string | null;
-  spotlightDebounceId: number | null;
   documentId: string;
   embeddingsReady: boolean;
   imageWidth: number;
@@ -100,28 +90,25 @@ export interface MaskOverlayState {
   mouseUpHandler: (e: MouseEvent) => void;
   containerClickHandler: (e: MouseEvent) => void;
   keydownHandler: (e: KeyboardEvent) => void;
-  spaceKeydownHandler: (e: KeyboardEvent) => void;
-  spaceKeyupHandler: (e: KeyboardEvent) => void;
-  // Brush mode state
-  brushSize: number;
-  currentStroke: Array<{x: number; y: number; label: number}>;
-  strokeHistory: BrushStroke[];
-  brushCanvas: HTMLCanvasElement | null;
-  isDrawingStroke: boolean;
-  // Track mouse position for immediate cursor display
+  segmentModeKeydownHandler: (e: KeyboardEvent) => void;
+  segmentModeKeyupHandler: (e: KeyboardEvent) => void;
+  shiftKeyHandler: (e: KeyboardEvent) => void;
+  // Track mouse position for segment mode
   lastMousePosition: { x: number; y: number } | null;
   // Track when we're confirming a new segment to shimmer it
   pendingSegmentConfirm: boolean;
   previousMaskIds: Set<string>;
-  // Live segmentation state (for continuous inference during brush strokes)
+  // Live segmentation debounce and staleness detection
   liveSegmentDebounceId: number | null;
   lastLiveSegmentRequestId: string | null;
-  liveSegmentInProgress: boolean;
-  lastLiveSegmentTime: number;
-  // Segment mode event listener tracking for proper cleanup
-  segmentModeCursorMoveHandler: ((e: MouseEvent) => void) | null;
-  segmentModeEnterHandler: (() => void) | null;
-  segmentModeLeaveHandler: (() => void) | null;
+  // Auto-segmentation state
+  autoSegmentInProgress: boolean;
+  autoSegmentProgress: number;
+  precomputedSegments: AutoSegmentMaskResult[];
+  // Multi-point segment mode: locked/committed points from clicks
+  lockedSegmentPoints: SegmentPoint[];
+  // Track if Shift key is held (for negative point preview)
+  shiftKeyHeld: boolean;
 }
 
 // ============ Color Constants ============

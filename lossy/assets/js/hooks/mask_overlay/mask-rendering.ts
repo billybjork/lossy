@@ -15,8 +15,8 @@ import { MASK_COLORS, HOVER_COLOR } from './types';
 export function renderSegmentMasks(
   container: HTMLElement,
   maskImageCache: Map<string, CachedMask>,
-  imageWidth: number,
-  imageHeight: number
+  _imageWidth: number,
+  _imageHeight: number
 ): void {
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
   if (!img) return;
@@ -86,8 +86,13 @@ export function renderSegmentMasks(
       // Insert canvas inside the mask div
       mask.appendChild(canvas);
 
-      // Cache canvas, alpha data, and color assignment
-      maskImageCache.set(maskId, { canvas, alphaData, colorIndex });
+      // Cache canvas, alpha data, color assignment, and bbox
+      maskImageCache.set(maskId, {
+        canvas,
+        alphaData,
+        colorIndex,
+        bbox: { x: bboxX, y: bboxY, w: bboxW, h: bboxH }
+      });
     };
 
     maskImg.onerror = () => {
@@ -140,7 +145,7 @@ export function updateHighlight(
 
   // Update cursor on container
   if (state.segmentMode) {
-    container.style.cursor = 'none';
+    container.style.cursor = 'crosshair';
   } else {
     container.style.cursor = hasHover ? 'pointer' : 'crosshair';
   }
@@ -187,7 +192,7 @@ export function updateSegmentMaskHighlight(
  */
 export function triggerShimmer(
   container: HTMLElement,
-  maskImageCache: Map<string, CachedMask>,
+  _maskImageCache: Map<string, CachedMask>,
   targetMaskIds?: Set<string>
 ): void {
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
@@ -216,7 +221,6 @@ export function triggerShimmer(
   const shimmerCanvases: HTMLCanvasElement[] = [];
 
   masksToShimmer.forEach(({ mask }, index) => {
-    const maskId = mask.dataset.maskId || '';
     const maskType = mask.dataset.maskType;
     const delay = index * staggerDelay;
 
@@ -460,35 +464,97 @@ export function applyMaskWithOutline(
   ctx.globalCompositeOperation = 'source-over';
 }
 
+// Spotlight fill color for dimmed (non-spotlighted) masks
+const SPOTLIGHT_FILL_DIM = 'rgba(255, 255, 255, 0.15)';
+
 /**
  * Update spotlight effects on segment mask canvases
- * Called during spacebar hover mode to highlight/dim masks based on cursor position
+ * Called during Command key hover mode to highlight/dim masks based on cursor position
+ * Spotlighted mask shows actual image (true spotlight), others are dimmed
  */
 export function updateSegmentMaskSpotlight(
   maskImageCache: Map<string, CachedMask>,
   spotlightedMaskId: string | null
 ): void {
+  const img = document.getElementById('editor-image') as HTMLImageElement | null;
+
   maskImageCache.forEach((cached: CachedMask, maskId: string) => {
     const canvas = cached.canvas;
     const isSpotlighted = maskId === spotlightedMaskId;
 
-    // Set smooth transition timing
+    // Set smooth transition timing for filter/opacity but NOT z-index
     canvas.style.transition = 'filter 0.35s ease-out, opacity 0.35s ease-out';
 
-    if (isSpotlighted) {
-      // Intense spotlight - multi-layer glow
+    if (isSpotlighted && img) {
+      // For spotlighted mask: draw actual image with mask as cutout
+      // This shows the real image through the mask region (true spotlight effect)
+      applyImageCutout(canvas, img, cached.alphaData, cached.bbox);
+
+      // Subtle glow around the spotlighted region
       canvas.style.filter = `
-        drop-shadow(0 0 25px rgba(255, 255, 255, 0.5))
-        drop-shadow(0 0 50px rgba(255, 255, 255, 0.35))
-        drop-shadow(0 0 80px rgba(255, 255, 255, 0.2))
+        drop-shadow(0 0 4px rgba(255, 255, 255, 0.5))
+        drop-shadow(0 0 12px rgba(255, 255, 255, 0.3))
       `;
       canvas.style.opacity = '1';
+      // Ensure spotlighted mask is above the spotlight overlay (z-index 45)
+      canvas.style.zIndex = '50';
     } else {
-      // Subtle spotlight for non-hovered masks
+      // For non-spotlighted masks: apply dim fill
+      applyMaskFillOnly(maskId, maskImageCache, SPOTLIGHT_FILL_DIM);
+
+      // Subtle glow for non-hovered masks
       canvas.style.filter = `
-        drop-shadow(0 0 8px rgba(255, 255, 255, 0.15))
+        drop-shadow(0 0 4px rgba(255, 255, 255, 0.08))
+        drop-shadow(0 0 10px rgba(255, 255, 255, 0.05))
       `;
-      canvas.style.opacity = '0.25';
+      canvas.style.opacity = '0.2';
+      // Reset z-index for non-spotlighted masks
+      canvas.style.zIndex = '';
     }
   });
 }
+
+/**
+ * Draw the source image onto a canvas using mask alpha as cutout
+ * Creates true spotlight effect - shows actual image through mask region
+ *
+ * The canvas is sized to the bbox dimensions and positioned at bbox location.
+ * We must draw only the corresponding portion of the source image.
+ */
+function applyImageCutout(
+  canvas: HTMLCanvasElement,
+  img: HTMLImageElement,
+  alphaData: ImageData,
+  bbox: { x: number; y: number; w: number; h: number }
+): void {
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+
+  // Clear canvas
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw only the bbox portion of the source image
+  ctx.drawImage(
+    img,
+    bbox.x, bbox.y, bbox.w, bbox.h,  // source rect (in image coordinates)
+    0, 0, canvas.width, canvas.height  // dest rect (fill canvas)
+  );
+
+  // Use mask alpha to cut out the shape
+  // IMPORTANT: putImageData ignores globalCompositeOperation, so we must use drawImage
+  ctx.globalCompositeOperation = 'destination-in';
+
+  // Create temp canvas with alpha mask, then draw it (drawImage respects compositing)
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = alphaData.width;
+  tempCanvas.height = alphaData.height;
+  const tempCtx = tempCanvas.getContext('2d')!;
+  tempCtx.putImageData(alphaData, 0, 0);
+
+  // Draw the alpha mask using drawImage (respects composite operation)
+  ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+
+  // Reset composite operation
+  ctx.globalCompositeOperation = 'source-over';
+}
+

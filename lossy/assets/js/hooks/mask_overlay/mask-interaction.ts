@@ -193,7 +193,7 @@ export function isPointOverSegmentMask(
 
 /**
  * Create keyboard event handler with configurable callbacks
- * Handles shortcuts: Enter, Escape, Cmd+Z, Cmd+Shift+Z, Backspace, Delete, [, ]
+ * Handles shortcuts: Enter, Escape, Cmd+Z, Cmd+Shift+Z, Backspace, Delete
  */
 export function createKeyboardHandler(
   state: MaskOverlayState,
@@ -202,10 +202,7 @@ export function createKeyboardHandler(
     onDeselect: () => void,
     onUndo: () => void,
     onRedo: () => void,
-    onToggleSegmentMode: () => void,
-    onRemoveLastStroke: () => void,
     onConfirmSegment: () => void,
-    onAdjustBrushSize: (delta: number) => void,
     onDelete: () => void,
     updateHighlight: () => void
   }
@@ -237,38 +234,12 @@ export function createKeyboardHandler(
       }
     }
 
-    // In segment mode, handle segment-specific keys
+    // In segment mode, only Escape exits (Command key release handles confirm)
     if (state.segmentMode) {
-      if (e.key === 'Enter' && state.strokeHistory.length > 0) {
-        e.preventDefault();
-        callbacks.onConfirmSegment();
-        return;
-      }
-
+      // Escape exits segment mode without confirming
       if (e.key === 'Escape') {
         e.preventDefault();
-        callbacks.onToggleSegmentMode(); // Exit segment mode
-        return;
-      }
-
-      // Backspace removes last stroke
-      if (e.key === 'Backspace' && state.strokeHistory.length > 0) {
-        e.preventDefault();
-        callbacks.onRemoveLastStroke();
-        return;
-      }
-
-      // [ decreases brush size
-      if (e.key === '[') {
-        e.preventDefault();
-        callbacks.onAdjustBrushSize(-5);
-        return;
-      }
-
-      // ] increases brush size
-      if (e.key === ']') {
-        e.preventDefault();
-        callbacks.onAdjustBrushSize(5);
+        callbacks.onDeselect(); // This will trigger exitSegmentMode via the hook
         return;
       }
 

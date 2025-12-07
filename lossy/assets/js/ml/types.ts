@@ -48,6 +48,7 @@ export type WorkerMessageType =
   | 'DETECT_TEXT'
   | 'COMPUTE_EMBEDDINGS'
   | 'SEGMENT_AT_POINTS'
+  | 'AUTO_SEGMENT'
   | 'CLEAR_EMBEDDINGS';
 
 export interface WorkerMessageInit {
@@ -81,11 +82,30 @@ export interface WorkerMessageClearEmbeddings {
   documentId: string;
 }
 
+export interface AutoSegmentConfig {
+  pointsPerSide: number;
+  predIouThresh: number;
+  stabilityScoreThresh: number;
+  minMaskAreaRatio: number;
+  maxMaskAreaRatio: number;
+  boxNmsThresh: number;
+  pointsPerBatch: number;
+}
+
+export interface WorkerMessageAutoSegment {
+  type: 'AUTO_SEGMENT';
+  id: string;
+  documentId: string;
+  imageData: ImageData;
+  config?: Partial<AutoSegmentConfig>;
+}
+
 export type WorkerMessage =
   | WorkerMessageInit
   | WorkerMessageDetectText
   | WorkerMessageComputeEmbeddings
   | WorkerMessageSegmentAtPoints
+  | WorkerMessageAutoSegment
   | WorkerMessageClearEmbeddings;
 
 // Worker response types
@@ -130,10 +150,39 @@ export interface WorkerResponseProgress {
   progress: number;
 }
 
+export interface AutoSegmentMaskResult {
+  mask_png: string;
+  bbox: BoundingBox;
+  score: number;
+  stabilityScore: number;
+  area: number;
+  centroid: { x: number; y: number };
+}
+
+export interface WorkerResponseAutoSegmentBatch {
+  type: 'AUTO_SEGMENT_BATCH';
+  id: string;
+  documentId: string;
+  masks: AutoSegmentMaskResult[];
+  progress: number;
+  batchIndex: number;
+  totalBatches: number;
+}
+
+export interface WorkerResponseAutoSegmentComplete {
+  type: 'AUTO_SEGMENT_COMPLETE';
+  id: string;
+  documentId: string;
+  totalMasks: number;
+  inferenceTimeMs: number;
+}
+
 export type WorkerResponse =
   | WorkerResponseInitComplete
   | WorkerResponseTextDetected
   | WorkerResponseEmbeddingsReady
   | WorkerResponseSegmentResult
+  | WorkerResponseAutoSegmentBatch
+  | WorkerResponseAutoSegmentComplete
   | WorkerResponseError
   | WorkerResponseProgress;
