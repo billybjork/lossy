@@ -14,10 +14,7 @@ defmodule Lossy.Repo.Migrations.MigrateLegacyStatuses do
     """
 
     # Migrate legacy processing_job types
-    execute """
-    UPDATE processing_jobs SET type = 'inpainting'
-    WHERE type = 'inpaint_region'
-    """
+
 
     execute """
     UPDATE processing_jobs SET type = 'detection'

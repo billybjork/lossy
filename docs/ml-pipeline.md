@@ -18,9 +18,7 @@ This document covers all machine learning and computer vision decisions for Loss
 
 ### Cloud (Replicate)
 
-**Inpainting** (LaMa):
-- Remove original text from backgrounds
-- GPU-intensive, ~1-3 seconds per region
+
 
 **Upscaling** (Real-ESRGAN):
 - Super-resolution for exports
@@ -28,7 +26,7 @@ This document covers all machine learning and computer vision decisions for Loss
 
 ### Future
 
-- Local lightweight inpainting for small edits
+
 
 ---
 
@@ -70,65 +68,7 @@ Text detection runs locally in the web app's Web Worker using ONNX Runtime with 
 
 ---
 
-## Inpainting
 
-**Goal**: Remove original text by filling in the background seamlessly.
-
-### Model Candidates
-
-#### LaMa (Resolution-robust Large Mask Inpainting)
-- Designed to generalize to higher resolutions and large masks
-- Works well up to ~2K resolution
-- Fast inference (~1-3 seconds on GPU)
-- Many open-source wrappers (lama-cleaner, etc.)
-- **Best for**: Small to medium rectangular text masks
-
-#### Diffusion-based Inpainting (SDXL, Inpaint-Anything)
-- Higher quality and controllability
-- Heavier and slower (10-30 seconds per image)
-- Can handle complex contexts better
-- **Best for**: Large areas or photo-realistic inpainting
-
-### MVP Choice
-
-**Use LaMa** (via Replicate or dedicated microservice).
-
-**Input**:
-- Image patch around text region
-- Binary mask (expanded text bounding box with padding)
-
-**Output**:
-- Inpainted patch (same dimensions as input)
-
-**Why**:
-- Fast enough for interactive editing
-- Good quality for text removal use case
-- Lightweight enough to run on modest GPUs
-- Well-suited for rectangular masks
-
-**Integration**:
-```
-1. Extract region from original image (bbox + padding)
-2. Create binary mask for text area
-3. POST to LaMa endpoint
-4. Receive inpainted patch
-5. Composite patch back into working image
-6. Render new text on top
-```
-
-**Mask Padding Strategy**:
-Padding is calculated dynamically based on font size to balance context with precision:
-```elixir
-padding = clamp(font_size * multiplier, min, max)
-# Default: multiplier=0.4, min=6px, max=24px
-```
-
-This ensures:
-- Small text gets minimal padding (preserves details)
-- Large headings get sufficient context (better inpainting)
-- Never over-erases backgrounds
-
-**Configuration**: Padding parameters are tunable. See [Configuration](configuration.md#ml-pipeline-settings) for details.
 
 ---
 
@@ -234,11 +174,7 @@ For each captured document:
    - Creates `TextRegion` records
 
 3. **For Each Edited Region** (lazy mode):
-   - User edits text → trigger inpainting
-   - Inflate bounding box → create mask
-   - **Inpaint background** at original resolution (LaMa)
-   - Save inpainted patch to `inpainted_bg_path`
-   - Composite patch into `working_image_path`
+
 
 4. **Text Overlay Render**
    - Render new text at original resolution
@@ -257,7 +193,7 @@ For each captured document:
 - Lower API costs
 
 **Quality**:
-- Inpainting models work well at original resolution
+
 - Text is re-rendered at target resolution, so it stays crisp
 - Single upscaling pass at the end enhances the complete result
 - Avoids multiple upscaling passes (which compound artifacts)
@@ -311,9 +247,7 @@ Capture Image
      ↓
 Detect Text (cloud)
      ↓
-Enqueue inpainting jobs for ALL regions (background)
-     ↓
-User edits region ─────────────→ Text renders instantly (background already inpainted)
+
      ↓
 Export
 ```
@@ -338,10 +272,7 @@ See [Technology Stack](technology-stack.md) for platform decisions.
 - Input: Image + click points
 - Output: Binary mask
 
-**Inpainting** (Cloud):
-- LaMa model on Replicate
-- Input: Image + mask
-- Output: Inpainted image
+
 
 **Upscaling** (Cloud):
 - Real-ESRGAN model on Replicate
@@ -354,7 +285,7 @@ See [Technology Stack](technology-stack.md) for platform decisions.
 
 - **Text Detection** (local): <100ms on WebGPU, <500ms on WASM
 - **Click-to-Segment** (local): ~1s first click (encoder), ~80ms subsequent clicks
-- **Inpainting (per region)**: <3 seconds
+
 - **Upscaling (4x)**: <10 seconds
 - **Total time (single region edit)**: <20 seconds end-to-end
 
@@ -374,16 +305,13 @@ See [Technology Stack](technology-stack.md) for platform decisions.
    - Show low-res preview immediately
    - Upgrade to HD in background
 
-4. **Local Inpainting**
-   - Lightweight inpainting model in browser
-   - For small edits only
-   - Fall back to cloud for complex cases
+
 
 ---
 
 ## Why These Choices?
 
-1. **Hybrid Architecture**: Local inference for fast feedback (detection, segmentation), cloud for heavy compute (inpainting)
+1. **Hybrid Architecture**: Local inference for fast feedback (detection, segmentation)
 2. **Privacy**: Images stay in browser for detection - only sent to cloud when user triggers inpainting
 3. **Proven Models**: PP-OCRv3, EdgeSAM, LaMa, Real-ESRGAN are battle-tested
 4. **Clear Upgrade Path**: Can swap models without changing architecture

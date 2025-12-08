@@ -18,7 +18,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 | **Phase 0: Skeleton** | ✅ Complete | 100% |
 | **Phase 1: Extension MVP** | ✅ Complete | 100% |
 | **Phase 2: Text Detection** | ⚠️ In Progress | 60% (Infrastructure ready, ML stubbed) |
-| **Phase 3: Inpainting** | ❌ Not Started | 10% (Basic UI only) |
+
 | **Phase 4: Export** | ❌ Not Started | 5% (Storage ready) |
 | **Phase 5: UX Polish** | ❌ Not Started | 0% |
 | **Phase 6: Local Detection** | ❌ Not Started | 5% (Type contracts only) |
@@ -27,7 +27,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 
 **🎯 Next Critical Steps:**
 1. Complete Phase 2: Integrate real ML text detection (replace stub)
-2. Start Phase 3: Implement LaMa inpainting pipeline
+
 3. Complete Phase 4: Add export functionality
 
 **🏆 Major Achievements:**
@@ -210,71 +210,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 
 ---
 
-## Phase 3: Inpainting & Single-Region Edit (Week 4) ❌ NOT STARTED
 
-**Goal**: Enable editing text in a single region with background inpainting.
-
-**Status**: Basic editing UI exists, but no inpainting pipeline implemented
-
-### Tasks
-
-#### ML Service: Inpainting
-- [ ] Research LaMa model on Replicate
-- [ ] Implement `Lossy.ML.Inpainting` module
-  - `inpaint/2` (takes image path and bbox)
-  - Create binary mask for region
-  - Call LaMa model
-  - Download and save inpainted result
-- [ ] Test inpainting with sample images
-
-#### Image Processing
-- [ ] Implement `Lossy.ImageProcessing.Compositor`
-  - Use Mogrify (ImageMagick) to composite patches
-- [ ] Implement `Lossy.ImageProcessing.TextRenderer`
-  - Use Mogrify to render text onto image
-  - Support font family, size, weight, color
-- [ ] Wire compositing/text rendering outputs through the `assets` table instead of raw file paths so LiveView always references the latest working asset
-- [ ] Test compositing and text rendering locally
-
-#### Backend Workflow
-- [ ] Implement `Documents.inpaint_region/1`
-  - Create `ProcessingJob` for inpainting
-  - Spawn async task
-- [ ] Implement `Documents.execute_inpainting/2`
-  - Calculate inpaint bbox (region + padding)
-  - Call inpainting service
-  - Composite patch into `working_image_path`
-  - Render new text
-  - Update region status to `:rendered`
-  - Broadcast update
-
-#### Editor UI: Text Editing
-- [x] Add click handler to select region
-- [x] Show inline ~~contenteditable div~~ input field over region
-- [x] On blur/Enter, send `phx-push-event` to LiveView with new text
-- [x] Handle `update_region_text` event in LiveView
-  - [x] Update `TextRegion.current_text` in DB
-  - [ ] Enqueue inpainting job
-  - [x] Optimistically update UI
-
-#### Verification
-- [x] Click on detected text region
-- [x] Edit text in inline editor
-- [x] Press Enter or click away
-- [ ] Background is inpainted (text removed)
-- [ ] New text is rendered in place
-- [ ] Canvas updates with final result
-
-**Foundation in Place:**
-- ✅ Database schema supports `inpainted_asset_id` in TextRegion
-- ✅ Status enums support `:inpainting` and `:rendered` states
-- ✅ Basic text editing UI fully functional
-- ✅ Asset management system ready for composited images
-
-**Next Steps:**
-- 🔴 Implement LaMa inpainting integration
-- 🔴 Implement ImageMagick compositor and text renderer
-- 🔴 Wire up inpainting workflow when text is edited
 
 ---
 
@@ -335,9 +271,8 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 
 #### Optimistic Mode
 - [ ] Add toggle in editor UI: "Instant Editing"
-- [ ] When enabled, enqueue inpainting for **all** regions immediately after detection
-- [ ] Store inpainted backgrounds proactively
-- [ ] When user edits text, rendering is instant (background already inpainted)
+- [ ] When enabled, store pre-processed backgrounds proactively
+- [ ] When user edits text, rendering is instant (background already processed)
 
 #### Keyboard Shortcuts
 - [ ] Tab / Shift+Tab: Navigate between regions
@@ -352,7 +287,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - [ ] Update region and re-render text
 
 #### Visual Polish
-- [ ] Add loading spinners for inpainting/upscaling
+
 - [ ] Add success/error toasts
 - [ ] Improve region selection highlighting
 - [ ] Add hover effects and animations
@@ -419,7 +354,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - [ ] Self-hosted option
 
 ### Long-Term (v3.0+)
-- [ ] Advanced ML models (better inpainting, font recognition)
+
 - [ ] Plugin system for custom tools
 - [ ] API for third-party integrations
 - [ ] White-label solution for enterprises
@@ -443,7 +378,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
 - ✅ Region display and interaction functional
 
 ### Phase 3 (Editing) ❌ NOT ACHIEVED
-- ⏳ Inpainting quality is good (background looks natural)
+
 - ⏳ Text rendering matches original style reasonably well
 - ⏳ End-to-end edit takes <20 seconds
 - ✅ Basic text editing UI functional (no inpainting yet)
@@ -505,10 +440,7 @@ The roadmap is structured to deliver a **vertical slice** as quickly as possible
    - See [Text Detection Implementation](ml-integration.md) for details
 
 ### 🎯 Coming Next
-4. **Phase 3**: Implement LaMa inpainting pipeline
-   - LaMa model for background removal
-   - ImageMagick compositor
-   - Text rendering with font matching
+
 5. **Phase 4**: Add export and upscaling features
 6. **Test constantly**: Manual testing after each task
 7. **Iterate**: If something doesn't work, adjust and continue

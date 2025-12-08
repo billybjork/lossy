@@ -85,7 +85,7 @@ config :logger, :default_formatter,
     :output_path,
     :target_path,
     :image_path,
-    :mask_path,
+
     :working_image,
     :patch,
     # Image dimensions
@@ -110,7 +110,7 @@ config :logger, :default_formatter,
     :count,
     :failed_count,
     :model,
-    :restoring_regions,
+
     # Text rendering
     :text,
     :bbox,

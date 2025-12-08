@@ -39,7 +39,7 @@ let providerInitPromise: Promise<InferenceProvider> | null = null;
 // ============ Global Message Listener ============
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.data.type === 'LOSSY_SEGMENT_RESPONSE') {
-    const { requestId, success, mask, error } = event.data as {
+    const { requestId, success, mask } = event.data as {
       requestId: string;
       success: boolean;
       mask?: MaskData;
@@ -76,6 +76,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     // Smart Select context (centralizes selection state)
     this.smartSelectCtx = null;
+
+    // Pending mask (for new segments)
+    this.pendingMask = null;
+    this.pendingMaskElement = null;
+    this.marchAntsOffset = 0;
+    this.marchAntsLoopId = null;
 
     // Core data
     this.documentId = this.el.dataset.documentId || '';
@@ -167,7 +173,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     // Keyboard events
     this.keydownHandler = Interaction.createKeyboardHandler(this as unknown as MaskOverlayState, {
       onInpaint: () => this.pushEvent("inpaint_selected", {}),
-      onDeselect: () => {
+      onDeselect: () => { // Escape key
+        if (this.pendingMask) {
+          this.cancelPendingMask();
+          return;
+        }
         if (this.smartSelectCtx) {
           this.exitSmartSelectMode();
         } else {
@@ -178,6 +188,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         }
       },
       onDelete: () => {
+        if (this.pendingMask) {
+          this.cancelPendingMask();
+          return;
+        }
         this.pushEvent("delete_selected", {});
         this.selectedMaskIds = new Set();
         this.hoveredMaskId = null;
@@ -186,6 +200,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       onUndo: () => this.pushEvent("undo", {}),
       onRedo: () => this.pushEvent("redo", {}),
       onConfirmSegment: () => this.confirmSegmentFromPreview(),
+      onConfirmPendingMask: () => this.confirmPendingMask(),
       updateHighlight: () => this.updateHighlight()
     });
     document.addEventListener('keydown', this.keydownHandler);
@@ -197,6 +212,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
       if (isSmartSelectTrigger(e) && !this.smartSelectCtx) {
         e.preventDefault();
+        // If a mask is pending, cancel it before entering smart select
+        if (this.pendingMask) {
+          this.cancelPendingMask();
+        }
         this.enterSmartSelectMode();
       }
 
@@ -212,20 +231,14 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       if (isSmartSelectTrigger(e) && this.smartSelectCtx) {
         e.preventDefault();
 
-        if (this.smartSelectCtx.lastMaskData) {
-          // Have a preview - confirm it
-          this.pendingSegmentConfirm = true;
-          this.previousMaskIds = new Set(
-            Array.from(this.container.querySelectorAll('.mask-region'))
-              .map((m: Element) => (m as HTMLElement).dataset.maskId || '')
-              .filter(id => id !== '')
-          );
+        const newMaskData = this.smartSelectCtx.lastMaskData;
 
-          this.pushEvent("confirm_segment", {
-            mask_png: this.smartSelectCtx.lastMaskData.mask_png,
-            bbox: this.smartSelectCtx.lastMaskData.bbox
-          });
+        if (newMaskData) {
+          // A new mask was generated. Move to "pending" state instead of confirming.
           this.exitSmartSelectMode();
+          this.pendingMask = newMaskData;
+          this.createPendingMaskElement();
+          this.startMarchingAntsAnimation();
 
         } else if (
           this.smartSelectCtx.spotlightedMaskId &&
@@ -242,7 +255,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           this.pushEvent("select_region", { id: maskId, shift: false });
 
         } else {
-          // Nothing to confirm (bbox-only spotlights are not trusted for selection)
+          // Nothing to confirm or select, just exit.
           this.exitSmartSelectMode();
         }
       }
@@ -355,6 +368,10 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       SmartSelectMode.forceCleanupSmartSelectElements();
     }
 
+    if (this.pendingMask) {
+      this.cancelPendingMask();
+    }
+
     if (this.resizeObserver) this.resizeObserver.disconnect();
 
     document.removeEventListener('keydown', this.keydownHandler);
@@ -382,6 +399,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     Interaction.attachMaskListeners(this.container, this as unknown as MaskOverlayState, this.maskImageCache, {
       onHoverChange: (_maskId: string | null) => {},
       onSelect: (maskId: string, shift: boolean) => {
+        if (this.pendingMask) this.confirmPendingMask();
         this.pushEvent("select_region", { id: maskId, shift });
       },
       updateHighlight: () => this.updateHighlight()
@@ -541,6 +559,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   // ============ Mouse Handlers ============
 
   handleMouseDown(e: MouseEvent) {
+    if (this.pendingMask) {
+      this.confirmPendingMask();
+      e.stopPropagation();
+      e.preventDefault();
+      return;
+    }
+
     if (this.smartSelectCtx) {
       // Click adds a locked point in Smart Select
       SmartSelectMode.handleSmartSelectClick(this.smartSelectCtx, e, this.getSmartSelectHooks());
@@ -584,6 +609,171 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
         updateHighlight: () => this.updateHighlight()
       });
     }
+  },
+
+  // ============ Pending Mask Handlers ============
+
+  createPendingMaskElement() {
+    const jsContainer = document.getElementById('js-overlay-container');
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (!jsContainer || !this.pendingMask || !img) return;
+
+    // Remove any existing one
+    if (this.pendingMaskElement) {
+      this.pendingMaskElement.remove();
+    }
+
+    const el = document.createElement('div');
+    el.className = 'pending-mask-container';
+    el.style.cssText = `
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      z-index: 60;
+      filter: drop-shadow(0 0 10px rgba(59, 130, 246, 0.3));
+    `;
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'pending-mask-canvas';
+    canvas.style.width = '100%';
+    canvas.style.height = '100%';
+    el.appendChild(canvas);
+
+    // Size canvas drawing buffer to match the displayed image size
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = img.clientWidth * dpr;
+    canvas.height = img.clientHeight * dpr;
+
+    this.pendingMaskElement = el;
+    jsContainer.appendChild(el);
+  },
+
+  startMarchingAntsAnimation() {
+    this.stopMarchingAntsAnimation(); // Ensure no multiple loops
+    this.marchAntsOffset = 0;
+    let frameCount = 0;
+
+    const animationLoop = () => {
+      if (!this.pendingMask) {
+        this.stopMarchingAntsAnimation();
+        return;
+      }
+
+      frameCount++;
+      if (frameCount % 3 === 0) { // Update offset every 3 frames to slow it down
+        this.marchAntsOffset = (this.marchAntsOffset + 1) % 10;
+        this.drawPendingMask();
+      }
+
+      this.marchAntsLoopId = requestAnimationFrame(animationLoop);
+    };
+
+    this.drawPendingMask(); // Draw immediately to prevent flicker
+    this.marchAntsLoopId = requestAnimationFrame(animationLoop);
+  },
+
+  stopMarchingAntsAnimation() {
+    if (this.marchAntsLoopId !== null) {
+      cancelAnimationFrame(this.marchAntsLoopId);
+      this.marchAntsLoopId = null;
+    }
+  },
+
+  async drawPendingMask() {
+    if (!this.pendingMask || !this.pendingMaskElement) return;
+
+    const canvas = this.pendingMaskElement.querySelector('.pending-mask-canvas') as HTMLCanvasElement | null;
+    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    if (!canvas || !img) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const maskImg = new Image();
+    maskImg.onload = () => {
+      const tempCanvas = document.createElement('canvas');
+      tempCanvas.width = maskImg.width;
+      tempCanvas.height = maskImg.height;
+      const tempCtx = tempCanvas.getContext('2d');
+      if (!tempCtx) return;
+
+      tempCtx.drawImage(maskImg, 0, 0);
+      const imageData = tempCtx.getImageData(0, 0, maskImg.width, maskImg.height);
+      const contours = findAllContours(imageData);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      if (contours.length === 0) return;
+
+      const dpr = window.devicePixelRatio || 1;
+      const scaleX = img.clientWidth / maskImg.width;
+      const scaleY = img.clientHeight / maskImg.height;
+      const avgScale = Math.sqrt(scaleX * scaleY);
+
+      ctx.save();
+      ctx.scale(dpr, dpr);
+
+      // --- Draw marquee-style selection for all disconnected regions ---
+      for (const contour of contours) {
+        if (contour.length < 3) continue; // Need at least 3 points for a closed shape
+
+        const path = new Path2D();
+        path.moveTo(contour[0].x * scaleX, contour[0].y * scaleY);
+        for (let i = 1; i < contour.length; i++) {
+          path.lineTo(contour[i].x * scaleX, contour[i].y * scaleY);
+        }
+        path.closePath();
+
+        // 1. Blue fill (matches marquee)
+        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+        ctx.fill(path);
+
+        // 2. Solid black outline for contrast (1px)
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+        ctx.lineWidth = 1 / avgScale; // Maintain 1px perceived width
+        ctx.lineJoin = 'round';
+        ctx.stroke(path);
+
+        // 3. Blue dashed border (2px) - animated layer
+        ctx.strokeStyle = 'rgb(59, 130, 246)';
+        ctx.lineWidth = 2 / avgScale; // Maintain 2px perceived width
+        ctx.setLineDash([6, 4]); // Dash pattern: 6px dash, 4px gap
+        ctx.lineDashOffset = -this.marchAntsOffset;
+        ctx.stroke(path);
+      }
+
+      ctx.restore();
+    };
+    maskImg.src = this.pendingMask.mask_png;
+  },
+
+  confirmPendingMask() {
+    if (!this.pendingMask) return;
+
+    this.pendingSegmentConfirm = true;
+    this.previousMaskIds = new Set(
+      (Array.from(this.container.querySelectorAll('.mask-region')) as HTMLElement[])
+        .map(m => m.dataset.maskId || '')
+        .filter(id => id)
+    );
+
+    this.pushEvent("confirm_segment", {
+      mask_png: this.pendingMask.mask_png,
+      bbox: this.pendingMask.bbox
+    });
+
+    this.cancelPendingMask(); // Clean up immediately
+  },
+
+  cancelPendingMask() {
+    this.stopMarchingAntsAnimation();
+    if (this.pendingMaskElement) {
+      this.pendingMaskElement.remove();
+      this.pendingMaskElement = null;
+    }
+    this.pendingMask = null;
   },
 
   // ============ Smart Select ============
@@ -697,8 +887,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       return;
     }
 
-    const hasTextMasks = Array.from(this.container.querySelectorAll('.mask-region')).some((mask: Element) => {
-      const type = (mask as HTMLElement).dataset.maskType;
+    const hasTextMasks = (Array.from(this.container.querySelectorAll('.mask-region')) as HTMLElement[]).some(mask => {
+      const type = mask.dataset.maskType;
       return type !== 'object' && type !== 'manual';
     });
 
@@ -827,3 +1017,110 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.exitSmartSelectMode();
   }
 };
+
+/**
+ * Finds all contours in a mask from ImageData.
+ * Supports disconnected regions (e.g., separate letters).
+ * Uses Moore-Neighbor tracing for each region.
+ */
+function findAllContours(imageData: ImageData): { x: number; y: number }[][] {
+  const { data, width, height } = imageData;
+  const contours: { x: number; y: number }[][] = [];
+  const visited = new Set<number>();
+
+  const isOpaque = (px: number, py: number) => {
+    if (px < 0 || px >= width || py < 0 || py >= height) return false;
+    const index = (py * width + px) * 4 + 3;
+    return data[index] > 128;
+  };
+
+  const neighbors = [
+    { dx: 1, dy: 0 },   // E
+    { dx: 1, dy: -1 },  // NE
+    { dx: 0, dy: -1 },  // N
+    { dx: -1, dy: -1 }, // NW
+    { dx: -1, dy: 0 },  // W
+    { dx: -1, dy: 1 },  // SW
+    { dx: 0, dy: 1 },   // S
+    { dx: 1, dy: 1 },   // SE
+  ];
+
+  // Flood fill to mark entire region as visited
+  const floodFill = (startX: number, startY: number) => {
+    const stack: { x: number; y: number }[] = [{ x: startX, y: startY }];
+
+    while (stack.length > 0) {
+      const { x, y } = stack.pop()!;
+      const pixelIndex = y * width + x;
+
+      if (visited.has(pixelIndex) || !isOpaque(x, y)) continue;
+
+      visited.add(pixelIndex);
+
+      // Add 4-connected neighbors
+      if (x > 0) stack.push({ x: x - 1, y });
+      if (x < width - 1) stack.push({ x: x + 1, y });
+      if (y > 0) stack.push({ x, y: y - 1 });
+      if (y < height - 1) stack.push({ x, y: y + 1 });
+    }
+  };
+
+  const traceContour = (startX: number, startY: number): { x: number; y: number }[] => {
+    const contour: { x: number; y: number }[] = [];
+    let x = startX;
+    let y = startY;
+    let dir = 0;
+    let iterations = 0;
+    const maxIterations = width * height; // Safety limit
+
+    do {
+      contour.push({ x, y });
+
+      // Look for next pixel
+      const startDir = (dir + 6) % 8;
+      let foundNext = false;
+      for (let i = 0; i < 8; i++) {
+        const checkDir = (startDir + i) % 8;
+        const neighbor = neighbors[checkDir];
+        const nextX = x + neighbor.dx;
+        const nextY = y + neighbor.dy;
+
+        if (isOpaque(nextX, nextY)) {
+          x = nextX;
+          y = nextY;
+          dir = checkDir;
+          foundNext = true;
+          break;
+        }
+      }
+
+      if (!foundNext) break;
+
+      iterations++;
+      if (iterations > maxIterations) {
+        console.warn('[MaskOverlay] Contour tracing exceeded iteration limit');
+        break;
+      }
+
+    } while (x !== startX || y !== startY);
+
+    return contour;
+  };
+
+  // Scan for all disconnected regions
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const pixelIndex = y * width + x;
+      if (!visited.has(pixelIndex) && isOpaque(x, y)) {
+        const contour = traceContour(x, y);
+        if (contour.length > 2) {
+          contours.push(contour);
+          // Mark entire region as visited to avoid re-processing
+          floodFill(x, y);
+        }
+      }
+    }
+  }
+
+  return contours;
+}

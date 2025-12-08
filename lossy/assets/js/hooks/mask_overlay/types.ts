@@ -146,6 +146,12 @@ export interface MaskOverlayState {
   pendingSegmentConfirm: boolean;
   previousMaskIds: Set<string>;
 
+  // Pending mask state (for new segments awaiting confirmation)
+  pendingMask: MaskData | null;
+  pendingMaskElement: HTMLDivElement | null;
+  marchAntsOffset: number;
+  marchAntsLoopId: number | null;
+
   // DOM/event handlers
   resizeObserver: ResizeObserver | null;
   mouseDownHandler: (e: MouseEvent) => void;

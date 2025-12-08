@@ -103,7 +103,7 @@ This document covers key technology choices and the rationale behind them.
 **Current Architecture** (implemented):
 - Text detection: Local (ONNX Runtime Web in browser)
 - Click-to-segment: Local (EdgeSAM via ONNX Runtime Web)
-- Inpainting: Cloud (LaMa via Replicate)
+
 - Upscaling: Cloud (Real-ESRGAN via Replicate)
 
 ---
@@ -420,7 +420,7 @@ config :lossy, :ml_pipeline,
 1. **Elixir + Phoenix**: Best-in-class for real-time, concurrent apps
 2. **LiveView**: Eliminates frontend complexity while maintaining rich interactivity
 3. **PostgreSQL**: Industry standard, rock-solid, great Elixir support
-4. **Replicate**: High-performance ML inference without infrastructure burden
+- **ML Inference**: High-performance ML inference without infrastructure burden
 5. **Google Fonts**: Largest high-quality open-source font library
 6. **Plain Phoenix/Ecto**: Right-sized for MVP, clear upgrade path if needed
 

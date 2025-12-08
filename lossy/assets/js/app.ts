@@ -27,6 +27,7 @@ import topbar from "../vendor/topbar.cjs";
 import { EditableText } from "./hooks/editable_text";
 import { MaskOverlay } from "./hooks/mask_overlay";
 import { EditorArrival } from "./hooks/editor_arrival";
+import { AutoDownload } from "./hooks/auto_download";
 
 // Extend Window interface for custom properties
 declare global {
@@ -48,7 +49,8 @@ const Hooks: HooksOptions = {
   ...colocatedHooks,
   EditableText: EditableText,
   MaskOverlay: MaskOverlay,
-  EditorArrival: EditorArrival
+  EditorArrival: EditorArrival,
+  AutoDownload: AutoDownload
 };
 
 const csrfTokenMeta = document.querySelector("meta[name='csrf-token']");

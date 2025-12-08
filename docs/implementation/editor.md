@@ -99,14 +99,14 @@ defmodule LossyWeb.CaptureLive do
       # Update in DB
       {:ok, updated_region} = Documents.update_text_region(region, %{current_text: new_text})
 
-      # Enqueue inpainting job
-      :ok = Documents.inpaint_region(updated_region)
 
-      # Optimistic update in UI
-      updated_regions =
-        Enum.map(socket.assigns.text_regions, fn r ->
-          if r.id == region_id, do: %{updated_region | status: :inpainting}, else: r
-        end)
+
+
+
+        updated_regions =
+          Enum.map(socket.assigns.text_regions, fn r ->
+            if r.id == region_id, do: updated_region, else: r
+          end)
 
       {:noreply, assign(socket, :text_regions, updated_regions)}
     else
@@ -542,9 +542,6 @@ User types → Inline editor blur/enter
         LiveView.handle_event("update_region_text")
                 ↓
         Documents.update_text_region()
-        Documents.inpaint_region()
-                ↓
-        Optimistic update (status: :inpainting)
                 ↓
         Send to client immediately
                 ↓

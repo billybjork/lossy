@@ -204,6 +204,7 @@ export function createKeyboardHandler(
     onUndo: () => void,
     onRedo: () => void,
     onConfirmSegment: () => void,
+    onConfirmPendingMask: () => void,
     onDelete: () => void,
     updateHighlight: () => void
   }
@@ -212,6 +213,13 @@ export function createKeyboardHandler(
     // Only handle if no input is focused
     const target = e.target as HTMLElement;
     if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
+
+    // Handle confirming a new pending mask
+    if (e.key === 'Enter' && state.pendingMask) {
+      e.preventDefault();
+      callbacks.onConfirmPendingMask();
+      return;
+    }
 
     // If there's a preview canvas (candidate mask) and not in Smart Select, handle Enter/Escape
     const previewCanvas = state.smartSelectCtx?.previewCanvas;

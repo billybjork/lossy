@@ -11,7 +11,7 @@ defmodule Lossy.Documents.HistoryEntry do
 
   @primary_key false
 
-  @action_types [:inpaint, :brush_inpaint, :batch_inpaint, :restore]
+  @action_types [:restore]
 
   embedded_schema do
     # Path to the image state at this point in history
@@ -34,15 +34,5 @@ defmodule Lossy.Documents.HistoryEntry do
     |> validate_inclusion(:action, @action_types)
   end
 
-  @doc """
-  Creates a new history entry for an inpainting operation.
-  """
-  def new_inpaint(image_path, region_ids) when is_list(region_ids) do
-    %__MODULE__{
-      image_path: image_path,
-      timestamp: DateTime.utc_now(),
-      action: if(length(region_ids) > 1, do: :batch_inpaint, else: :inpaint),
-      metadata: %{region_ids: region_ids}
-    }
-  end
+
 end

@@ -9,7 +9,7 @@ This document outlines the core design philosophy guiding Lossy's architecture a
 **What it means**: Build systems from small, composable pieces rather than large, extensible frameworks.
 
 **In practice**:
-- Small focused modules: `CaptureService`, `DetectionPipeline`, `InpaintingService`, `FontService`
+- Small focused modules: `CaptureService`, `DetectionPipeline`, `FontService`
 - Each module does one thing well
 - Compose modules to build features
 - Avoid inheritance hierarchies; prefer function composition
@@ -20,7 +20,7 @@ This document outlines the core design philosophy guiding Lossy's architecture a
 def process_document(document) do
   document
   |> DetectionPipeline.detect_text()
-  |> InpaintingService.prepare_regions()
+
   |> RenderService.composite_image()
 end
 
@@ -195,29 +195,7 @@ ML Service Client  → Imperative shell (HTTP to ML APIs)
 - Easy to change infrastructure (swap DB, API, etc.)
 - Easy to reason about (pure functions are predictable)
 
-**Examples**:
-```elixir
-# Functional core
-defmodule Lossy.Documents.Logic do
-  def calculate_inpaint_region(text_region, padding) do
-    %{
-      x: text_region.bbox.x - padding,
-      y: text_region.bbox.y - padding,
-      w: text_region.bbox.w + 2 * padding,
-      h: text_region.bbox.h + 2 * padding
-    }
-  end
-end
 
-# Imperative shell
-defmodule Lossy.Documents do
-  def inpaint_region(region_id) do
-    region = Repo.get!(TextRegion, region_id)  # I/O
-    inpaint_bbox = Logic.calculate_inpaint_region(region, 10)  # Pure
-    ML.inpaint(region.document.image_path, inpaint_bbox)  # I/O
-    Repo.update!(region, status: :inpainted)  # I/O
-  end
-end
 ```
 
 ---
@@ -265,19 +243,7 @@ field :status, :string  # Could be anything: "detcted", "inpaint", "done", ...
 
 **Examples**:
 
-**Good**: Interface for ML service
-```elixir
-defmodule Lossy.ML.Inpainting do
-  @callback inpaint(image_path, mask) :: {:ok, result} | {:error, reason}
-end
 
-defmodule Lossy.ML.Fal.Inpainting do
-  @behaviour Lossy.ML.Inpainting
-  # Implementation
-end
-
-# Easy to swap for self-hosted later
-```
 
 **Avoid**: Tight coupling
 ```elixir

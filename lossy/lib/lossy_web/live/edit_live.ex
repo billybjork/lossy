@@ -3,9 +3,7 @@ defmodule LossyWeb.EditLive do
   LiveView for the image editor.
 
   Simplified state machine:
-    :loading → :ready → :inpainting → :ready
-
-  No more text-specific states. Focus on mask selection and inpainting.
+    :loading → :ready
   """
   use LossyWeb, :live_view
 
@@ -36,7 +34,7 @@ defmodule LossyWeb.EditLive do
           socket
           |> assign(document: document, page_title: document.name || "Edit")
           |> assign(selected_region_ids: MapSet.new())
-          |> assign(inpainting: false)
+
           |> assign(export_path: nil, export_filename: nil, exporting: false)
           |> assign(masks: masks)
           |> assign(fresh_arrival: fresh_arrival)
@@ -57,13 +55,7 @@ defmodule LossyWeb.EditLive do
      |> push_event("masks_updated", %{masks: masks})}
   end
 
-  @impl true
-  def handle_info({:inpainting_complete, _result}, socket) do
-    {:noreply,
-     socket
-     |> assign(inpainting: false, selected_region_ids: MapSet.new())
-     |> push_event("clear_selection", %{})}
-  end
+
 
   @impl true
   def handle_event("clear_fresh_arrival", _params, socket) do
@@ -125,27 +117,7 @@ defmodule LossyWeb.EditLive do
     end
   end
 
-  @impl true
-  def handle_event("inpaint_selected", _params, socket) do
-    selected = socket.assigns.selected_region_ids
 
-    if MapSet.size(selected) > 0 do
-      region_ids = MapSet.to_list(selected)
-
-      case Documents.enqueue_mask_inpainting(socket.assigns.document, region_ids) do
-        :ok ->
-          {:noreply, assign(socket, inpainting: true)}
-
-        {:error, :no_masks} ->
-          {:noreply, put_flash(socket, :error, "Selected regions have no masks")}
-
-        {:error, _reason} ->
-          {:noreply, put_flash(socket, :error, "Failed to start inpainting")}
-      end
-    else
-      {:noreply, socket}
-    end
-  end
 
   @impl true
   def handle_event("undo", _params, socket) do
@@ -267,10 +239,8 @@ defmodule LossyWeb.EditLive do
   defp maybe_push_masks(socket, _masks, false = _connected), do: socket
 
   # Convert DetectedRegion records to format expected by MaskOverlay hook
-  # Filters out already-inpainted regions (they're baked into the image now)
   defp regions_to_masks(document) do
     (document.detected_regions || [])
-    |> Enum.reject(fn region -> region.status == :inpainted end)
     |> Enum.map(fn region ->
       %{
         id: region.id,

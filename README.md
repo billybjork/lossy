@@ -15,7 +15,7 @@ Edit text baked into any image on the web.
 - **Extension**: TypeScript, Manifest V3 (capture only)
 - **Web App**: Elixir, Phoenix, LiveView
 - **Local ML**: ONNX Runtime + WebGPU (text detection, segmentation)
-- **Cloud ML**: Replicate (inpainting, upscaling)
+- **Cloud ML**: Replicate (upscaling)
 - **Database**: PostgreSQL
 
 ## Development

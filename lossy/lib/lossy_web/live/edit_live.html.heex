@@ -8,37 +8,30 @@
     <!-- Header with export - hidden during fresh arrival -->
     <header
       id="editor-header"
-      class={[
-        "mb-4 flex justify-end items-center transition-opacity duration-300",
-        @fresh_arrival && "opacity-0"
-      ]}
+      class={["editor-header-layout", @fresh_arrival && "opacity-0"]}
     >
-      <div class="flex gap-2">
-        <%= if @export_path do %>
-          <a
-            href={@export_path}
-            download={@export_filename || "lossy-export.png"}
-            class="btn btn-success"
-          >
-            Download
-          </a>
-        <% end %>
-
+      <div class="header-actions">
+        <!-- Unified download button with auto-download on export completion -->
         <button
           phx-click="export"
           disabled={@exporting}
-          class={["btn", "btn-primary"]}
+          class="download-button"
+          phx-hook="AutoDownload"
+          id="download-button"
+          data-export-path={@export_path}
+          data-export-filename={@export_filename}
+          title={if @exporting, do: "Rendering...", else: "Download"}
           style={if @exporting, do: "opacity: 0.6; cursor: not-allowed;", else: ""}
         >
           <%= if @exporting do %>
             <svg
-              class="spinner -ml-1 mr-2 h-4 w-4 text-white"
+              class="spinner icon-base"
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
               viewBox="0 0 24 24"
             >
               <circle
-                class="opacity-25"
+                class="opacity-quarter"
                 cx="12"
                 cy="12"
                 r="10"
@@ -47,17 +40,41 @@
               >
               </circle>
               <path
-                class="opacity-75"
+                class="opacity-three-quarters"
                 fill="currentColor"
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               >
               </path>
             </svg>
-            Exporting...
           <% else %>
-            Export
+            <svg
+              class="icon-base"
+              xmlns="http://www.w3.org/2000/svg"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4">
+              </path>
+              <polyline points="7 10 12 15 17 10">
+              </polyline>
+              <line x1="12" y1="15" x2="12" y2="3">
+              </line>
+            </svg>
           <% end %>
         </button>
+
+        <!-- Hidden download link for auto-download functionality -->
+        <a
+          id="export-download-link"
+          style="display: none;"
+          href={@export_path}
+          download={@export_filename || "lossy-export.png"}
+        >
+        </a>
       </div>
     </header>
     
@@ -82,7 +99,7 @@
 <!-- Mask overlay container -->
           <div
             id="mask-overlay"
-            class="absolute inset-0 w-full h-full pointer-events-auto"
+            class="mask-overlay-container"
             phx-hook="MaskOverlay"
             data-image-width={@document.width}
             data-image-height={@document.height}
@@ -98,7 +115,7 @@
                 data-bbox-y={mask.bbox["y"] || mask.bbox[:y]}
                 data-bbox-w={mask.bbox["w"] || mask.bbox[:w]}
                 data-bbox-h={mask.bbox["h"] || mask.bbox[:h]}
-                class="mask-region absolute"
+                class="mask-region"
               >
               </div>
             <% end %>
@@ -107,33 +124,7 @@
             <div id="js-overlay-container" phx-update="ignore"></div>
           </div>
           
-<!-- Loading indicator when inpainting -->
-          <%= if @inpainting do %>
-            <aside class="loading-indicator" role="status" aria-label="Processing">
-              <svg
-                class="spinner h-5 w-5 text-white"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <circle
-                  class="opacity-25"
-                  cx="12"
-                  cy="12"
-                  r="10"
-                  stroke="currentColor"
-                  stroke-width="4"
-                >
-                </circle>
-                <path
-                  class="opacity-75"
-                  fill="currentColor"
-                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                >
-                </path>
-              </svg>
-            </aside>
-          <% end %>
+
         <% else %>
           <!-- Loading skeleton: same container sizing, aspect-ratio matches dimensions -->
           <div
@@ -143,14 +134,14 @@
             aria-label="Loading image"
           >
             <svg
-              class="spinner h-8 w-8"
+              class="spinner spinner-lg"
               style="color: var(--color-zinc-500);"
               xmlns="http://www.w3.org/2000/svg"
               fill="none"
               viewBox="0 0 24 24"
             >
               <circle
-                class="opacity-25"
+                class="opacity-quarter"
                 cx="12"
                 cy="12"
                 r="10"
@@ -159,7 +150,7 @@
               >
               </circle>
               <path
-                class="opacity-75"
+                class="opacity-three-quarters"
                 fill="currentColor"
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               >

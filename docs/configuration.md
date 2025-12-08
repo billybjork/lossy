@@ -27,10 +27,8 @@ config :lossy, :ml_pipeline,
   pre_upscale_min_dimension: 500,  # pixels
   pre_upscale_factor: 2.0,
 
-  # Mask padding: dynamic padding around text regions for inpainting
-  mask_padding_multiplier: 0.4,  # multiply by font_size
-  mask_padding_min: 6,           # pixels
-  mask_padding_max: 24,          # pixels
+
+
 
   # Detection confidence threshold
   text_detection_confidence_threshold: 0.7,  # 0.0 - 1.0
@@ -51,7 +49,7 @@ config :lossy, :jobs,
 
   # Timeouts per job type
   text_detection_timeout_ms: 60_000,   # 1 minute
-  inpainting_timeout_ms: 120_000,      # 2 minutes
+
   upscaling_timeout_ms: 180_000,       # 3 minutes
 
   # Prevent duplicate job creation

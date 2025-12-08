@@ -3,7 +3,7 @@ defmodule Lossy.Documents.Document do
   Schema for documents with detection and inpainting workflow.
 
   Simplified lifecycle:
-    :loading → :ready → :inpainting → :ready
+    :loading → :ready
 
   Includes edit history for undo/redo functionality.
   """
@@ -21,8 +21,7 @@ defmodule Lossy.Documents.Document do
     :loading,
     # Image loaded, ready for editing
     :ready,
-    # Running inpainting operation
-    :inpainting,
+
     # Something went wrong
     :error
   ]

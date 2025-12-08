@@ -86,7 +86,7 @@ See [Editor Implementation Guide](implementation/editor.md) for details.
 - WebGPU with WASM fallback via ONNX Runtime Web
 
 **Cloud (Replicate)**:
-- Inpainting (LaMa) - remove original text from backgrounds
+
 - Upscaling (Real-ESRGAN) - super-resolution for exports
 
 See [ML Pipeline](ml-pipeline.md) for model choices.
@@ -116,14 +116,7 @@ Web Page → Extension (capture) → POST /api/captures → Phoenix Backend
 ```
 User edits text → LiveView event → Update TextRegion.current_text
                                             ↓
-                                    Enqueue inpainting job
-                                            ↓
-                                    Call LaMa model (Replicate)
-                                            ↓
-                                    Composite patch into working_image_path
-                                            ↓
-                                    Render new text onto image
-                                            ↓
+
                                     Broadcast completion to LiveView
                                             ↓
                                     Update canvas display
@@ -158,7 +151,7 @@ User clicks "Download" → Generate final composite image
 - **Tools**: LiveView, Phoenix PubSub, JS Hooks
 
 ### ML Layer
-- **What**: Computer vision tasks (detection, segmentation, inpainting, upscaling)
+- **What**: Computer vision tasks (detection, segmentation, upscaling)
 - **Not What**: Application logic, data persistence
 - **Tools**: ONNX Runtime Web (local), Replicate API (cloud), PP-OCRv3, EdgeSAM, LaMa, Real-ESRGAN
 
@@ -188,7 +181,7 @@ User clicks "Download" → Generate final composite image
 - Oban for job processing
 
 ### Future Optimization Paths
-1. **Local Inpainting**: Lightweight inpainting model in browser for small edits
+
 2. **CDN**: Serve processed images via CDN
 3. **Caching**: Cache detection results, font guesses
 4. **Horizontal Scaling**: Add more Phoenix nodes behind load balancer

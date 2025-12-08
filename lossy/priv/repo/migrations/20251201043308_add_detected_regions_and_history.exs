@@ -21,7 +21,7 @@ defmodule Lossy.Repo.Migrations.AddDetectedRegionsAndHistory do
       # Bounding box for quick hit-testing
       add :bbox, :map
 
-      # Path to mask PNG (binary mask for inpainting)
+
       add :mask_path, :string
 
       # Polygon outline for rendering
@@ -40,7 +40,7 @@ defmodule Lossy.Repo.Migrations.AddDetectedRegionsAndHistory do
       add :status, :string, default: "detected"
 
       # Reference to inpainted result
-      add :inpainted_asset_id, references(:assets, on_delete: :nilify_all, type: :binary_id)
+
 
       timestamps()
     end

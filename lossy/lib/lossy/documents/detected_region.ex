@@ -5,9 +5,6 @@ defmodule Lossy.Documents.DetectedRegion do
   Supports:
   - Text regions (from text detection)
   - Manual regions (from click-to-segment or brush tool)
-
-  Each region has a mask (stored as PNG) that defines the exact area
-  to be inpainted, rather than just a bounding box.
   """
 
   use Ecto.Schema
@@ -17,7 +14,8 @@ defmodule Lossy.Documents.DetectedRegion do
   @foreign_key_type :binary_id
 
   @region_types [:text, :manual, :object]
-  @statuses [:detected, :inpainted, :error]
+  @statuses [:detected, :error]
+
 
   schema "detected_regions" do
     # Region type: "text" (from text detection), "object" (from segmentation), "manual" (from click-to-segment)
@@ -26,7 +24,6 @@ defmodule Lossy.Documents.DetectedRegion do
     # Bounding box for quick hit-testing (x, y, w, h in pixels)
     field :bbox, :map
 
-    # Path to mask PNG (binary mask for inpainting)
     field :mask_path, :string
 
     # Polygon outline for rendering (array of {x, y} points)
