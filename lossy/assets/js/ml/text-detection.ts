@@ -28,9 +28,13 @@ const MEAN = [0.485, 0.456, 0.406];
 const STD = [0.229, 0.224, 0.225];
 
 // Detection parameters
-const DETECTION_THRESHOLD = 0.4;  // Probability threshold for text regions
-const MIN_BOX_SIZE = 8;           // Minimum box size in pixels
-const UNCLIP_RATIO = 1.5;         // Ratio to expand detected boxes
+const PROBABILITY_THRESHOLD = 0.5;   // Binarization + bbox confidence threshold
+const MIN_REGION_CONFIDENCE = 0.6;   // Avg probability required over the foreground mask
+const MIN_COMPONENT_PIXELS = 96;     // Absolute minimum on-mask pixels for a region
+const MIN_AREA_RATIO = 0.0001;       // Min bbox area relative to resized image (focus on words/lines)
+const MIN_SHORT_SIDE_RATIO = 0.01;   // Short side must be >= 1% of the smallest image dim
+const MIN_BOX_SIZE = 8;              // Minimum box size in pixels (hard floor)
+const UNCLIP_RATIO = 1.5;            // Ratio to expand detected boxes
 
 /**
  * Detect text regions in an image
@@ -155,7 +159,7 @@ function postprocessOutput(
   // Create binary mask from probability map
   const binaryMask = new Uint8Array(probMap.length);
   for (let i = 0; i < probMap.length; i++) {
-    binaryMask[i] = probMap[i] > DETECTION_THRESHOLD ? 255 : 0;
+    binaryMask[i] = probMap[i] > PROBABILITY_THRESHOLD ? 255 : 0;
   }
 
   // Find connected components using flood fill
@@ -165,6 +169,17 @@ function postprocessOutput(
   // IMPORTANT: Model outputs coordinates in resized space, must scale back to original
   const scaleX = originalWidth / resizedWidth;
   const scaleY = originalHeight / resizedHeight;
+
+  // Dynamic thresholds relative to the resized image so we bias toward word/line scale boxes
+  const minArea = Math.max(
+    MIN_BOX_SIZE * MIN_BOX_SIZE,
+    Math.round(resizedWidth * resizedHeight * MIN_AREA_RATIO)
+  );
+  const minShortSide = Math.max(
+    MIN_BOX_SIZE,
+    Math.round(Math.min(resizedWidth, resizedHeight) * MIN_SHORT_SIDE_RATIO)
+  );
+  const minPixels = Math.max(MIN_COMPONENT_PIXELS, Math.round(minArea * 0.6));
 
   for (let y = 0; y < resizedHeight; y++) {
     for (let x = 0; x < resizedWidth; x++) {
@@ -177,15 +192,32 @@ function postprocessOutput(
       // Found a new region, flood fill to find boundaries
       const component = floodFill(binaryMask, resizedWidth, resizedHeight, x, y, visited);
 
-      if (component.pixels.length < MIN_BOX_SIZE * MIN_BOX_SIZE) {
+      const pixelCount = component.pixels.length;
+      if (pixelCount < minPixels) {
         continue;
       }
 
       // Calculate bounding box and confidence
       const bbox = component.bbox;
-      const confidence = calculateRegionConfidence(probMap, resizedWidth, bbox);
+      const bboxArea = bbox.w * bbox.h;
 
-      if (confidence < DETECTION_THRESHOLD) {
+      // Filter out tiny or ultra-thin regions that are unlikely to be whole words/lines
+      if (bbox.w < minShortSide || bbox.h < minShortSide) {
+        continue;
+      }
+
+      if (bboxArea < minArea) {
+        continue;
+      }
+
+      const bboxConfidence = calculateRegionConfidence(probMap, resizedWidth, bbox);
+      const maskConfidence = calculateMaskConfidence(probMap, component.pixels);
+
+      if (bboxConfidence < PROBABILITY_THRESHOLD) {
+        continue;
+      }
+
+      if (maskConfidence < MIN_REGION_CONFIDENCE) {
         continue;
       }
 
@@ -220,7 +252,7 @@ function postprocessOutput(
       regions.push({
         bbox: expandedBbox,
         polygon,
-        confidence
+        confidence: Math.min(bboxConfidence, maskConfidence)
       });
     }
   }
@@ -310,6 +342,19 @@ function calculateRegionConfidence(
   }
 
   return count > 0 ? sum / count : 0;
+}
+
+/**
+ * Calculate average confidence for just the on-mask pixels
+ */
+function calculateMaskConfidence(probMap: Float32Array, pixels: number[]): number {
+  let sum = 0;
+
+  for (let i = 0; i < pixels.length; i++) {
+    sum += probMap[pixels[i]];
+  }
+
+  return pixels.length > 0 ? sum / pixels.length : 0;
 }
 
 /**
