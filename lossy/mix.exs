@@ -57,7 +57,8 @@ defmodule Lossy.MixProject do
       {:oban, "~> 2.18"},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dotenvy, "~> 0.8", only: [:dev, :test]},
-      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false}
+      {:dialyxir, "~> 1.0", only: [:dev, :test], runtime: false},
+      {:tidewave, "~> 0.5", only: :dev}
     ]
   end
 

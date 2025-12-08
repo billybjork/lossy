@@ -67,6 +67,8 @@
 
   --color-red-600: oklch(55% 0.2 25);
 
+  --color-cyan-400: oklch(75% 0.15 195);
+
   /* Spacing */
   --spacing-1: 0.25rem;
   --spacing-2: 0.5rem;
@@ -166,7 +168,8 @@
    Button Components
    ============================================================================= */
 
-.download-button {
+.download-button,
+.tidewave-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -176,6 +179,7 @@
   background-color: transparent;
   cursor: pointer;
   border: none;
+  text-decoration: none;
 }
 
 /* =============================================================================
@@ -616,6 +620,10 @@
 
 .download-button:hover .icon-base {
   color: var(--color-blue-500);
+}
+
+.tidewave-button:hover .icon-base {
+  color: var(--color-cyan-400);
 }
 
 } /* End @layer components */
