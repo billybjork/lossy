@@ -23,6 +23,7 @@ import * as Rendering from './mask-rendering';
 import * as DragSelection from './drag-selection';
 import * as SmartSelectMode from './smart-select-mode';
 import { waitForImageLoad, getEditorImage } from './image-utils';
+import { setErrorHandler, validateMLEnvironment, type MLError } from '../../ml/error-handler';
 
 // ============ Smart Select Trigger Key ============
 const SMART_SELECT_TRIGGER_KEY = 'Meta';
@@ -102,6 +103,25 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     // Resize observer
     this.resizeObserver = null;
     this.imageReadyPromise = null;
+
+    // Set up ML error handler
+    setErrorHandler({
+      onError: (error: MLError) => {
+        console.error('[MaskOverlay] ML Error:', error);
+        // TODO: Show user-visible error notification via Phoenix event
+        // this.pushEvent('ml_error', { stage: error.stage, message: error.message });
+      }
+    });
+
+    // Validate ML environment upfront
+    validateMLEnvironment().then((validation) => {
+      if (!validation.canRunML) {
+        console.error('[MaskOverlay] ML inference unavailable:', validation.issues);
+        // TODO: Show user notification that ML features are unavailable
+      } else if (validation.issues.length > 0) {
+        console.warn('[MaskOverlay] ML environment warnings:', validation.issues);
+      }
+    });
 
     // Position masks once image is loaded
     const img = getEditorImage();
@@ -359,6 +379,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   destroyed() {
+    // 1. Stop Smart Select mode
     if (this.smartSelectCtx) {
       // Ensure loops/timers are stopped and DOM is cleaned
       SmartSelectMode.exitSmartSelect(this.smartSelectCtx, this.getSmartSelectHooks());
@@ -367,12 +388,30 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       SmartSelectMode.forceCleanupSmartSelectElements();
     }
 
+    // 2. Stop marching ants animation
+    if (this.marchAntsLoopId) {
+      cancelAnimationFrame(this.marchAntsLoopId);
+      this.marchAntsLoopId = null;
+    }
+
+    // 3. Cancel pending mask
     if (this.pendingMask) {
       this.cancelPendingMask();
     }
 
-    if (this.resizeObserver) this.resizeObserver.disconnect();
+    // 4. Clear pending mask element
+    if (this.pendingMaskElement) {
+      this.pendingMaskElement.remove();
+      this.pendingMaskElement = null;
+    }
 
+    // 5. Disconnect resize observer
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+      this.resizeObserver = null;
+    }
+
+    // 6. Remove all event listeners
     document.removeEventListener('keydown', this.keydownHandler);
     document.removeEventListener('keydown', this.smartSelectKeydownHandler);
     document.removeEventListener('keyup', this.smartSelectKeyupHandler);
@@ -382,10 +421,38 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     document.removeEventListener('mousemove', this.mouseMoveHandler);
     document.removeEventListener('mouseup', this.mouseUpHandler);
 
+    if (this.containerClickHandler && this.container) {
+      this.container.removeEventListener('click', this.containerClickHandler, true);
+    }
+
+    // 7. Remove drag rect
     if (this.dragRect) {
       this.dragRect.remove();
       this.dragRect = null;
     }
+
+    // 8. Clear embeddings for this document
+    if (inferenceProvider && this.documentId) {
+      inferenceProvider.clearEmbeddings(this.documentId);
+    }
+
+    // 9. Clear mask cache (free canvas memory)
+    if (this.maskImageCache) {
+      this.maskImageCache.forEach(cached => {
+        if (cached.canvas) {
+          const ctx = cached.canvas.getContext('2d');
+          if (ctx) {
+            ctx.clearRect(0, 0, cached.canvas.width, cached.canvas.height);
+          }
+        }
+      });
+      this.maskImageCache.clear();
+    }
+
+    // 10. Clear error handler
+    setErrorHandler(null);
+
+    console.log('[MaskOverlay] Cleanup complete');
   },
 
   // ============ Delegated Methods ============

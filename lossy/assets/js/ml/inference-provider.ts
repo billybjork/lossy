@@ -13,6 +13,7 @@ import {
   type AutoSegmentCompleteResult,
 } from './inference-client';
 import type { DetectedRegion, PointPrompt, AutoSegmentConfig } from './types';
+import { reportError } from './error-handler';
 
 /**
  * Interface for inference providers
@@ -97,7 +98,14 @@ class ExtensionProvider implements InferenceProvider {
       if (pending) {
         this.pendingRequests.delete(requestId);
         if (data.error) {
-          pending.reject(new Error(data.error));
+          const error = new Error(data.error);
+          reportError({
+            stage: 'Extension Segmentation',
+            message: data.error,
+            severity: 'error',
+            cause: error,
+          });
+          pending.reject(error);
         } else {
           pending.resolve(data);
         }
@@ -109,7 +117,14 @@ class ExtensionProvider implements InferenceProvider {
       if (pending) {
         this.pendingRequests.delete(requestId);
         if (data.error) {
-          pending.reject(new Error(data.error));
+          const error = new Error(data.error);
+          reportError({
+            stage: 'Extension Text Detection',
+            message: data.error,
+            severity: 'error',
+            cause: error,
+          });
+          pending.reject(error);
         } else {
           pending.resolve(data.regions || []);
         }
@@ -165,7 +180,14 @@ class ExtensionProvider implements InferenceProvider {
       setTimeout(() => {
         if (this.pendingRequests.has(requestId)) {
           this.pendingRequests.delete(requestId);
-          reject(new Error('Extension segment request timed out'));
+          const error = new Error('Extension segment request timed out after 30s');
+          reportError({
+            stage: 'Extension Segmentation',
+            message: 'Request timed out - extension may be busy or unresponsive',
+            severity: 'error',
+            cause: error,
+          });
+          reject(error);
         }
       }, 30000);
     });
