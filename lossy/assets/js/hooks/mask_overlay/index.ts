@@ -825,32 +825,82 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       ctx.save();
       ctx.scale(dpr, dpr);
 
-      // --- Draw marquee-style selection for all disconnected regions ---
-      for (const contour of contours) {
-        if (contour.length < 3) continue; // Need at least 3 points for a closed shape
+      // Separate outer contours from holes
+      const outerContours = contours.filter(c => !c.isHole && c.points.length >= 3);
+      const holeContours = contours.filter(c => c.isHole && c.points.length >= 3);
 
+      // Build Path2D objects
+      const outerPaths: Path2D[] = [];
+      const holePaths: Path2D[] = [];
+
+      for (const contour of outerContours) {
         const path = new Path2D();
-        path.moveTo(contour[0].x * scaleX, contour[0].y * scaleY);
-        for (let i = 1; i < contour.length; i++) {
-          path.lineTo(contour[i].x * scaleX, contour[i].y * scaleY);
+        path.moveTo(contour.points[0].x * scaleX, contour.points[0].y * scaleY);
+        for (let i = 1; i < contour.points.length; i++) {
+          path.lineTo(contour.points[i].x * scaleX, contour.points[i].y * scaleY);
         }
         path.closePath();
+        outerPaths.push(path);
+      }
 
-        // 1. Blue fill (matches marquee)
-        ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+      for (const contour of holeContours) {
+        const path = new Path2D();
+        path.moveTo(contour.points[0].x * scaleX, contour.points[0].y * scaleY);
+        for (let i = 1; i < contour.points.length; i++) {
+          path.lineTo(contour.points[i].x * scaleX, contour.points[i].y * scaleY);
+        }
+        path.closePath();
+        holePaths.push(path);
+      }
+
+      // 1. Fill outer paths with blue
+      ctx.fillStyle = 'rgba(59, 130, 246, 0.15)';
+      for (const path of outerPaths) {
         ctx.fill(path);
+      }
 
-        // 2. Solid black outline for contrast (1px)
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-        ctx.lineWidth = 1 / avgScale; // Maintain 1px perceived width
-        ctx.lineJoin = 'round';
+      // 2. Punch out holes using destination-out
+      if (holePaths.length > 0) {
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.fillStyle = 'rgba(0, 0, 0, 1)';
+        for (const path of holePaths) {
+          ctx.fill(path);
+        }
+        ctx.globalCompositeOperation = 'source-over';
+      }
+
+      // 3. Stroke outer paths - solid black outline
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1 / avgScale;
+      ctx.lineJoin = 'round';
+      ctx.setLineDash([]);
+      for (const path of outerPaths) {
         ctx.stroke(path);
+      }
 
-        // 3. Blue dashed border (2px) - animated layer
-        ctx.strokeStyle = 'rgb(59, 130, 246)';
-        ctx.lineWidth = 2 / avgScale; // Maintain 2px perceived width
-        ctx.setLineDash([6, 4]); // Dash pattern: 6px dash, 4px gap
-        ctx.lineDashOffset = -this.marchAntsOffset;
+      // 4. Stroke outer paths - blue dashed (marching ants)
+      ctx.strokeStyle = 'rgb(59, 130, 246)';
+      ctx.lineWidth = 2 / avgScale;
+      ctx.setLineDash([6, 4]);
+      ctx.lineDashOffset = -this.marchAntsOffset;
+      for (const path of outerPaths) {
+        ctx.stroke(path);
+      }
+
+      // 5. Stroke hole paths - solid black outline
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+      ctx.lineWidth = 1 / avgScale;
+      ctx.setLineDash([]);
+      for (const path of holePaths) {
+        ctx.stroke(path);
+      }
+
+      // 6. Stroke hole paths - blue dashed (marching ants)
+      ctx.strokeStyle = 'rgb(59, 130, 246)';
+      ctx.lineWidth = 2 / avgScale;
+      ctx.setLineDash([6, 4]);
+      ctx.lineDashOffset = -this.marchAntsOffset;
+      for (const path of holePaths) {
         ctx.stroke(path);
       }
 
@@ -1115,105 +1165,175 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   }
 };
 
-/**
- * Finds all contours in a mask from ImageData.
- * Supports disconnected regions (e.g., separate letters).
- * Uses Moore-Neighbor tracing for each region.
- */
-function findAllContours(imageData: ImageData): { x: number; y: number }[][] {
-  const { data, width, height } = imageData;
-  const contours: { x: number; y: number }[][] = [];
-  const visited = new Set<number>();
+interface Contour {
+  points: Array<{ x: number; y: number }>;
+  isHole: boolean;
+}
 
-  const isOpaque = (px: number, py: number) => {
-    if (px < 0 || px >= width || py < 0 || py >= height) return false;
-    const index = (py * width + px) * 4 + 3;
-    return data[index] > 128;
+/**
+ * Finds all contours in a mask using marching squares algorithm.
+ * Returns ordered contours with hole classification based on winding.
+ */
+function findAllContours(imageData: ImageData): Array<Contour> {
+  return findAllContoursWithHoles(imageData);
+}
+
+function findAllContoursWithHoles(imageData: ImageData): Array<Contour> {
+  const { width, height, data } = imageData;
+  const contours: Array<Contour> = [];
+
+  const getAlpha = (x: number, y: number): boolean => {
+    if (x < 0 || x >= width || y < 0 || y >= height) return false;
+    return data[(y * width + x) * 4 + 3] > 128;
   };
 
-  const neighbors = [
-    { dx: 1, dy: 0 },   // E
-    { dx: 1, dy: -1 },  // NE
-    { dx: 0, dy: -1 },  // N
-    { dx: -1, dy: -1 }, // NW
-    { dx: -1, dy: 0 },  // W
-    { dx: -1, dy: 1 },  // SW
-    { dx: 0, dy: 1 },   // S
-    { dx: 1, dy: 1 },   // SE
-  ];
+  const getCellConfig = (cx: number, cy: number): number => {
+    const tl = getAlpha(cx, cy) ? 1 : 0;
+    const tr = getAlpha(cx + 1, cy) ? 2 : 0;
+    const br = getAlpha(cx + 1, cy + 1) ? 4 : 0;
+    const bl = getAlpha(cx, cy + 1) ? 8 : 0;
+    return tl | tr | br | bl;
+  };
 
-  // Flood fill to mark entire region as visited
-  const floodFill = (startX: number, startY: number) => {
-    const stack: { x: number; y: number }[] = [{ x: startX, y: startY }];
+  type EdgePair = [number, number];
+  const edgeTable: Record<number, EdgePair[]> = {
+    1:  [[3, 0]],
+    2:  [[0, 1]],
+    3:  [[3, 1]],
+    4:  [[1, 2]],
+    5:  [[3, 0], [1, 2]],
+    6:  [[0, 2]],
+    7:  [[3, 2]],
+    8:  [[2, 3]],
+    9:  [[2, 0]],
+    10: [[0, 1], [2, 3]],
+    11: [[2, 1]],
+    12: [[1, 3]],
+    13: [[1, 0]],
+    14: [[0, 3]],
+  };
 
-    while (stack.length > 0) {
-      const { x, y } = stack.pop()!;
-      const pixelIndex = y * width + x;
-
-      if (visited.has(pixelIndex) || !isOpaque(x, y)) continue;
-
-      visited.add(pixelIndex);
-
-      // Add 4-connected neighbors
-      if (x > 0) stack.push({ x: x - 1, y });
-      if (x < width - 1) stack.push({ x: x + 1, y });
-      if (y > 0) stack.push({ x, y: y - 1 });
-      if (y < height - 1) stack.push({ x, y: y + 1 });
+  const edgeMidpoint = (edge: number): [number, number] => {
+    switch (edge) {
+      case 0: return [0.5, 0];
+      case 1: return [1, 0.5];
+      case 2: return [0.5, 1];
+      case 3: return [0, 0.5];
+      default: return [0.5, 0.5];
     }
   };
 
-  const traceContour = (startX: number, startY: number): { x: number; y: number }[] => {
-    const contour: { x: number; y: number }[] = [];
-    let x = startX;
-    let y = startY;
-    let dir = 0;
-    let iterations = 0;
-    const maxIterations = width * height; // Safety limit
+  const edgeToNextCell = (edge: number): [number, number] => {
+    switch (edge) {
+      case 0: return [0, -1];
+      case 1: return [1, 0];
+      case 2: return [0, 1];
+      case 3: return [-1, 0];
+      default: return [0, 0];
+    }
+  };
 
-    do {
-      contour.push({ x, y });
+  const oppositeEdge = (edge: number): number => (edge + 2) % 4;
 
-      // Look for next pixel
-      const startDir = (dir + 6) % 8;
-      let foundNext = false;
-      for (let i = 0; i < 8; i++) {
-        const checkDir = (startDir + i) % 8;
-        const neighbor = neighbors[checkDir];
-        const nextX = x + neighbor.dx;
-        const nextY = y + neighbor.dy;
+  const visitedEdges = new Set<string>();
 
-        if (isOpaque(nextX, nextY)) {
-          x = nextX;
-          y = nextY;
-          dir = checkDir;
-          foundNext = true;
+  const traceContour = (startCx: number, startCy: number, startEntry: number): Array<{ x: number; y: number }> | null => {
+    const points: Array<{ x: number; y: number }> = [];
+    let cx = startCx;
+    let cy = startCy;
+    let entry = startEntry;
+
+    const maxIter = (width + 1) * (height + 1) * 4;
+    let iter = 0;
+
+    while (iter++ < maxIter) {
+      const edgeKey = `${cx},${cy},${entry}`;
+      if (visitedEdges.has(edgeKey)) {
+        break;
+      }
+      visitedEdges.add(edgeKey);
+
+      const config = getCellConfig(cx, cy);
+      if (config === 0 || config === 15) break;
+
+      const pairs = edgeTable[config];
+      if (!pairs) break;
+
+      let exitEdge = -1;
+      for (const [from, to] of pairs) {
+        if (from === entry) {
+          exitEdge = to;
+          break;
+        }
+        if (to === entry) {
+          exitEdge = from;
           break;
         }
       }
 
-      if (!foundNext) break;
+      if (exitEdge === -1) break;
 
-      iterations++;
-      if (iterations > maxIterations) {
-        console.warn('[MaskOverlay] Contour tracing exceeded iteration limit');
-        break;
-      }
+      const [px, py] = edgeMidpoint(exitEdge);
+      points.push({ x: cx + px, y: cy + py });
 
-    } while (x !== startX || y !== startY);
+      const [dx, dy] = edgeToNextCell(exitEdge);
+      cx += dx;
+      cy += dy;
+      entry = oppositeEdge(exitEdge);
 
-    return contour;
+      if (cx < -1 || cx > width || cy < -1 || cy > height) break;
+      if (cx === startCx && cy === startCy && entry === startEntry) break;
+    }
+
+    return points.length > 2 ? points : null;
   };
 
-  // Scan for all disconnected regions
-  for (let y = 0; y < height; y++) {
-    for (let x = 0; x < width; x++) {
-      const pixelIndex = y * width + x;
-      if (!visited.has(pixelIndex) && isOpaque(x, y)) {
-        const contour = traceContour(x, y);
-        if (contour.length > 2) {
-          contours.push(contour);
-          // Mark entire region as visited to avoid re-processing
-          floodFill(x, y);
+  const computeSignedArea = (points: Array<{ x: number; y: number }>): number => {
+    let area = 0;
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      area += points[i].x * points[j].y;
+      area -= points[j].x * points[i].y;
+    }
+    return area / 2;
+  };
+
+  const computePerimeter = (points: Array<{ x: number; y: number }>): number => {
+    let perimeter = 0;
+    const n = points.length;
+    for (let i = 0; i < n; i++) {
+      const j = (i + 1) % n;
+      const dx = points[j].x - points[i].x;
+      const dy = points[j].y - points[i].y;
+      perimeter += Math.sqrt(dx * dx + dy * dy);
+    }
+    return perimeter;
+  };
+
+  for (let cy = -1; cy < height; cy++) {
+    for (let cx = -1; cx < width; cx++) {
+      const config = getCellConfig(cx, cy);
+      if (config === 0 || config === 15) continue;
+
+      const pairs = edgeTable[config];
+      if (!pairs) continue;
+
+      for (const [from, to] of pairs) {
+        for (const entry of [from, to]) {
+          const edgeKey = `${cx},${cy},${entry}`;
+          if (visitedEdges.has(edgeKey)) continue;
+
+          const contourPoints = traceContour(cx, cy, entry);
+          if (contourPoints && contourPoints.length > 2) {
+            const signedArea = computeSignedArea(contourPoints);
+            const perimeter = computePerimeter(contourPoints);
+
+            if (Math.abs(signedArea) < 10 && perimeter < 10) continue;
+
+            const isHole = signedArea < 0;
+            contours.push({ points: contourPoints, isHole });
+          }
         }
       }
     }
