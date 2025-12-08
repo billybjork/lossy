@@ -33,7 +33,7 @@ defmodule LossyWeb.Layouts do
         hidden
       >
         Attempting to reconnect
-        <svg class="spinner h-4 w-4 inline-block ml-1" fill="none" viewBox="0 0 24 24">
+        <svg class="spinner spinner-sm inline-spinner" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
           </circle>
           <path
@@ -54,7 +54,7 @@ defmodule LossyWeb.Layouts do
         hidden
       >
         Attempting to reconnect
-        <svg class="spinner h-4 w-4 inline-block ml-1" fill="none" viewBox="0 0 24 24">
+        <svg class="spinner spinner-sm inline-spinner" fill="none" viewBox="0 0 24 24">
           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4">
           </circle>
           <path

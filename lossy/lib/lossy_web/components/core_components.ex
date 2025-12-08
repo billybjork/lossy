@@ -70,7 +70,7 @@ defmodule LossyWeb.CoreComponents do
           <p>{msg}</p>
         </div>
         <button type="button" class="toast-close" aria-label="close">
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg class="spinner-md" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path
               stroke-linecap="round"
               stroke-linejoin="round"
