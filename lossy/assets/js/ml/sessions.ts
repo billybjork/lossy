@@ -249,34 +249,10 @@ export async function disposeSessionByType(type: SessionType): Promise<void> {
 }
 
 /**
- * Dispose of the text detection session
- */
-export async function disposeSession(): Promise<void> {
-  await disposeSessionByType('textDetection');
-}
-
-/**
  * Dispose all sessions to free resources
  */
 export async function disposeAllSessions(): Promise<void> {
   const types: SessionType[] = ['textDetection', 'samEncoder', 'samDecoder'];
   await Promise.all(types.map((type) => disposeSessionByType(type)));
   console.log('[ML] All ONNX sessions disposed');
-}
-
-/**
- * Preload all sessions (useful for eager loading)
- */
-export async function preloadAllSessions(): Promise<void> {
-  console.log('[ML] Preloading all ONNX sessions...');
-  const startTime = performance.now();
-
-  await Promise.all([
-    getTextDetectionSession(),
-    getSamEncoderSession(),
-    getSamDecoderSession(),
-  ]);
-
-  const elapsed = performance.now() - startTime;
-  console.log(`[ML] All sessions preloaded in ${elapsed.toFixed(0)}ms`);
 }

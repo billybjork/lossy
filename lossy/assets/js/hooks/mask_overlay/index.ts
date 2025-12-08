@@ -22,6 +22,7 @@ import * as Interaction from './mask-interaction';
 import * as Rendering from './mask-rendering';
 import * as DragSelection from './drag-selection';
 import * as SmartSelectMode from './smart-select-mode';
+import { waitForImageLoad, getEditorImage } from './image-utils';
 
 // ============ Smart Select Trigger Key ============
 const SMART_SELECT_TRIGGER_KEY = 'Meta';
@@ -103,13 +104,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.imageReadyPromise = null;
 
     // Position masks once image is loaded
-    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    const img = getEditorImage();
     if (img) {
-      this.imageReadyPromise = img.complete
-        ? Promise.resolve()
-        : new Promise<void>((resolve) => {
-            img.addEventListener('load', () => resolve(), { once: true });
-          });
+      this.imageReadyPromise = waitForImageLoad(img).catch((error) => {
+        console.error('[MaskOverlay] Image load failed:', error);
+      });
 
       if (img.complete) {
         this.positionMasks();
@@ -853,15 +852,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     }
 
     // Wait for image to be ready before computing
-    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    const img = getEditorImage();
     if (!img) return;
-    if (!img.complete) {
-      if (this.imageReadyPromise) {
-        await this.imageReadyPromise;
-      } else {
-        await new Promise<void>((resolve) => img.addEventListener('load', () => resolve(), { once: true }));
-      }
-    }
+    await waitForImageLoad(img);
 
     this.embeddingsComputePromise = inferenceProvider!.computeEmbeddings(this.documentId, img)
       .then(() => {
@@ -911,16 +904,9 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       }
     }
 
-    const img = document.getElementById('editor-image') as HTMLImageElement | null;
+    const img = getEditorImage();
     if (!img) return;
-
-    if (!img.complete) {
-      if (this.imageReadyPromise) {
-        await this.imageReadyPromise;
-      } else {
-        await new Promise<void>((resolve) => img.addEventListener('load', () => resolve(), { once: true }));
-      }
-    }
+    await waitForImageLoad(img);
 
     this.textDetectionAttempted = true;
     this.textDetectionPromise = inferenceProvider.detectText(img)

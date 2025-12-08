@@ -284,13 +284,6 @@ export async function getInferenceProvider(): Promise<InferenceProvider> {
   return cachedProvider;
 }
 
-/**
- * Clear the cached provider (useful for testing)
- */
-export function clearProviderCache(): void {
-  cachedProvider = null;
-}
-
 // Re-export types for convenience
 export type { AutoSegmentBatchResult, AutoSegmentCompleteResult } from './inference-client';
 export type { AutoSegmentConfig } from './types';

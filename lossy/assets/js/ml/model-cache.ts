@@ -53,24 +53,6 @@ export async function getModel(key: ModelKey): Promise<ArrayBuffer> {
 }
 
 /**
- * Preload all models into memory
- */
-export async function preloadAllModels(): Promise<void> {
-  const keys: ModelKey[] = ['textDetection', 'samEncoder', 'samDecoder'];
-
-  console.log('[ML] Preloading all models...');
-  const startTime = performance.now();
-
-  // Load sequentially to avoid overwhelming the system
-  for (const key of keys) {
-    await getModel(key);
-  }
-
-  const elapsed = performance.now() - startTime;
-  console.log(`[ML] All models preloaded in ${elapsed.toFixed(0)}ms`);
-}
-
-/**
  * Check if a model is loaded in memory
  */
 export function isModelLoaded(key: ModelKey): boolean {

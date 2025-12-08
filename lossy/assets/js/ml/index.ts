@@ -7,7 +7,6 @@
 export {
   getInferenceProvider,
   isExtensionAvailable,
-  clearProviderCache,
   type InferenceProvider,
 } from './inference-provider';
 
