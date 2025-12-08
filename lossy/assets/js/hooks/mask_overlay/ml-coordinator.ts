@@ -32,7 +32,7 @@ export class MLCoordinator {
   private providerPromise: Promise<InferenceProvider> | null = null;
   private embeddingsReady = false;
   private embeddingsPromise: Promise<void> | null = null;
-  private textDetectionAttempted = false;
+  private textDetectionTimestamp: number | null = null;
   private textDetectionPromise: Promise<DetectedRegion[]> | null = null;
 
   constructor(private config: MLCoordinatorConfig) {}
@@ -89,9 +89,9 @@ export class MLCoordinator {
    */
   async detectText(): Promise<DetectedRegion[]> {
     if (this.textDetectionPromise) return this.textDetectionPromise;
-    if (this.textDetectionAttempted) return [];
+    if (this.textDetectionTimestamp !== null) return [];
 
-    this.textDetectionAttempted = true;
+    this.textDetectionTimestamp = Date.now();
     const img = getEditorImage();
     if (!img) return [];
 
@@ -108,7 +108,15 @@ export class MLCoordinator {
    * Check if text detection has been attempted
    */
   hasAttemptedTextDetection(): boolean {
-    return this.textDetectionAttempted;
+    return this.textDetectionTimestamp !== null;
+  }
+
+  /**
+   * Get the timestamp when text detection was attempted
+   * Returns null if not yet attempted
+   */
+  getTextDetectionTimestamp(): number | null {
+    return this.textDetectionTimestamp;
   }
 
   /**
@@ -154,7 +162,7 @@ export class MLCoordinator {
     }
     this.embeddingsReady = false;
     this.embeddingsPromise = null;
-    this.textDetectionAttempted = false;
+    this.textDetectionTimestamp = null;
     this.textDetectionPromise = null;
   }
 }

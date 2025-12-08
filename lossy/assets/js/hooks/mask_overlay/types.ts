@@ -118,8 +118,8 @@ export interface MaskOverlayState {
   maskCacheReady: boolean;
   maskCacheReadyPromise: Promise<void> | null;
   pageLoadTime: number;
-  shimmerPlayed: boolean;
-  textDetectionAttempted: boolean;
+  shimmerPlayedAt: number | null;
+  textDetectionTimestamp: number | null;
   textDetectionPromise: Promise<void> | null;
 
   // Coordinators (Phase 3 refactor)

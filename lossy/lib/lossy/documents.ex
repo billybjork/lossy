@@ -179,6 +179,7 @@ defmodule Lossy.Documents do
           polygon: normalize_polygon(region_data["polygon"] || region_data[:polygon] || []),
           confidence: region_data["confidence"] || region_data[:confidence] || 1.0,
           metadata: %{
+            source: "text_detection",
             original_text: region_data["original_text"] || region_data[:original_text]
           },
           z_index: index,
@@ -272,6 +273,7 @@ defmodule Lossy.Documents do
       polygon: [],
       confidence: get_field(region_data, :score) || 1.0,
       metadata: %{
+        source: "extension_segmentation",
         area: get_field(region_data, :area) || 0,
         stability_score: get_field(region_data, :stabilityScore)
       },
@@ -334,7 +336,7 @@ defmodule Lossy.Documents do
 
   @doc """
   Creates detected regions from auto-segmentation results.
-  Similar to create_detected_regions_from_segments but adds auto_generated flag.
+  Similar to create_detected_regions_from_segments but with source: "auto_segmentation".
   """
   def create_detected_regions_from_auto_segments(%Document{} = document, auto_segments)
       when is_list(auto_segments) do
@@ -381,10 +383,10 @@ defmodule Lossy.Documents do
       polygon: [],
       confidence: get_field(region_data, :score) || 1.0,
       metadata: %{
+        source: "auto_segmentation",
         area: get_field(region_data, :area) || 0,
         stability_score: get_field(region_data, :stability_score),
-        centroid: get_field(region_data, :centroid),
-        auto_generated: true
+        centroid: get_field(region_data, :centroid)
       },
       z_index: @auto_segment_z_index_offset + index,
       status: :detected,

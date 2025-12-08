@@ -69,8 +69,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     this.maskCacheReady = false;
     this.maskCacheReadyPromise = null;
     this.pageLoadTime = Date.now();
-    this.shimmerPlayed = false;
-    this.textDetectionAttempted = false;
+    this.shimmerPlayedAt = null;
+    this.textDetectionTimestamp = null;
     this.textDetectionPromise = null;
     this.isDragging = false;
     this.dragStart = null;
@@ -327,12 +327,12 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
     // Listen for mask updates from server
     this.handleEvent("masks_updated", ({ masks }: { masks: unknown[] }) => {
-      const shouldShimmer = !this.shimmerPlayed &&
+      const shouldShimmer = this.shimmerPlayedAt === null &&
                             masks.length > 0 &&
                             (Date.now() - this.pageLoadTime) < 2500;
 
       if (shouldShimmer) {
-        this.shimmerPlayed = true;
+        this.shimmerPlayedAt = Date.now();
       }
 
       const shouldShimmerNewSegment = this.pendingSegmentConfirm;
@@ -985,7 +985,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
   },
 
   async ensureTextDetection() {
-    if (this.textDetectionAttempted) return;
+    if (this.textDetectionTimestamp !== null) return;
     if (this.textDetectionPromise) {
       await this.textDetectionPromise;
       return;
@@ -997,7 +997,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     });
 
     if (hasTextMasks) {
-      this.textDetectionAttempted = true;
+      this.textDetectionTimestamp = Date.now();
       return;
     }
 
@@ -1019,7 +1019,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     if (!img) return;
     await waitForImageLoad(img);
 
-    this.textDetectionAttempted = true;
+    this.textDetectionTimestamp = Date.now();
     this.textDetectionPromise = inferenceProvider.detectText(img)
       .then((regions) => {
         if (regions && regions.length > 0) {

@@ -26,13 +26,13 @@ import type { Hook } from 'phoenix_live_view';
 
 interface EditorArrivalState {
   isFresh: boolean;
-  hasAnimated: boolean;
+  animatedAt: number | null;
 }
 
 export const EditorArrival: Hook<EditorArrivalState, HTMLElement> = {
   mounted() {
     this.isFresh = this.el.hasAttribute('data-fresh');
-    this.hasAnimated = false;
+    this.animatedAt = null;
 
     if (this.isFresh) {
       // Clean URL of ?fresh parameter without reload
@@ -51,7 +51,7 @@ export const EditorArrival: Hook<EditorArrivalState, HTMLElement> = {
   updated() {
     // Handle case where image loads after initial mount (async asset loading)
     // The image replaces the skeleton, so we check for the image specifically
-    if (this.isFresh && !this.hasAnimated) {
+    if (this.isFresh && this.animatedAt === null) {
       const image = this.el.querySelector('#editor-image.hero-entrance') as HTMLElement | null;
       if (image) {
         this.animateSettle(image);
@@ -60,8 +60,8 @@ export const EditorArrival: Hook<EditorArrivalState, HTMLElement> = {
   },
 
   animateSettle(hero: HTMLElement) {
-    if (this.hasAnimated) return;
-    this.hasAnimated = true;
+    if (this.animatedAt !== null) return;
+    this.animatedAt = Date.now();
 
     // Clear fresh_arrival IMMEDIATELY to prevent LiveView re-renders
     // (e.g., from ML text detection) from re-adding hero-entrance class
