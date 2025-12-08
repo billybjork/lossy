@@ -24,10 +24,10 @@ import { Socket } from "phoenix";
 import { LiveSocket, type HooksOptions, type LiveSocketInstanceInterface } from "phoenix_live_view";
 import { hooks as colocatedHooks } from "phoenix-colocated/lossy";
 import topbar from "../vendor/topbar.cjs";
-import { EditableText } from "./hooks/editable_text";
+import { EditableText } from "./hooks/editable-text";
 import { MaskOverlay } from "./hooks/mask_overlay";
-import { EditorArrival } from "./hooks/editor_arrival";
-import { AutoDownload } from "./hooks/auto_download";
+import { EditorArrival } from "./hooks/editor-arrival";
+import { AutoDownload } from "./hooks/auto-download";
 
 // Extend Window interface for custom properties
 declare global {
