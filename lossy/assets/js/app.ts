@@ -28,6 +28,7 @@ import { EditableText } from "./hooks/editable-text";
 import { MaskOverlay } from "./hooks/mask_overlay";
 import { EditorArrival } from "./hooks/editor-arrival";
 import { AutoDownload } from "./hooks/auto-download";
+import { EditorZoom } from "./hooks/editor-zoom";
 
 // Extend Window interface for custom properties
 declare global {
@@ -50,7 +51,8 @@ const Hooks: HooksOptions = {
   EditableText: EditableText,
   MaskOverlay: MaskOverlay,
   EditorArrival: EditorArrival,
-  AutoDownload: AutoDownload
+  AutoDownload: AutoDownload,
+  EditorZoom: EditorZoom
 };
 
 const csrfTokenMeta = document.querySelector("meta[name='csrf-token']");

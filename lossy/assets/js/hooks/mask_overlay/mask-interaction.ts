@@ -20,6 +20,8 @@ export function positionMasks(
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
   if (!img) return;
 
+  // Use clientWidth/clientHeight for layout dimensions (pre-transform)
+  // since mask elements are children of the transformed container and scale with it
   const displayWidth = img.clientWidth;
   const displayHeight = img.clientHeight;
   const naturalWidth = img.naturalWidth || imageWidth || displayWidth;

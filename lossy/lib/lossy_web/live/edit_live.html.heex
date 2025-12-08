@@ -1,4 +1,4 @@
-<div class="editor-container">
+<div class="editor-container" id="editor-zoom-container" phx-hook="EditorZoom">
   <!-- Arrival overlay - rendered server-side to prevent flash -->
   <%= if @fresh_arrival do %>
     <div id="arrival-overlay" class="arrival-overlay"></div>
@@ -10,6 +10,12 @@
       id="editor-header"
       class={["editor-header-layout", @fresh_arrival && "opacity-0"]}
     >
+      <!-- Document name in top left -->
+      <div class="document-name">
+        <span class="document-name-title"><%= @document.name || "Untitled" %></span>
+        <span class="document-name-subtitle">lossy</span>
+      </div>
+
       <div class="header-actions">
         <!-- Tidewave button (dev only) -->
         <%= if Code.ensure_loaded?(Tidewave) do %>

@@ -262,6 +262,11 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return;
 
+      // Block Smart Select if zoom mode is active or cursor is outside the image
+      // (zoom mode is determined by where Command was initially pressed)
+      if (window.__editorZoomState?.zoomModeActive) return;
+      if (window.__editorZoomState && !window.__editorZoomState.isCursorOverImage) return;
+
       if (isSmartSelectTrigger(e) && !this.smartSelectCtx) {
         e.preventDefault();
         // If a mask is pending, cancel it before entering smart select

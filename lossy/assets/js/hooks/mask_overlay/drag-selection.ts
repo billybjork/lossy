@@ -6,6 +6,7 @@
  */
 
 import type { MaskOverlayState, DragRect } from './types';
+import { getZoomLevel } from './types';
 import { isSmartSelectActive } from './smart-select-mode';
 
 function getMarqueeHost(container: HTMLElement): HTMLElement {
@@ -83,10 +84,13 @@ export function startDrag(
 
   state.dragRect = ensureDragRect(container, state.dragRect);
 
+  // Convert screen coordinates to layout-space coordinates for positioning
+  // (screen coords are relative to transformed bounds, layout coords are pre-transform)
   const containerRect = container.getBoundingClientRect();
+  const zoom = getZoomLevel();
   state.dragStart = {
-    x: event.clientX - containerRect.left,
-    y: event.clientY - containerRect.top
+    x: (event.clientX - containerRect.left) / zoom,
+    y: (event.clientY - containerRect.top) / zoom
   };
   state.dragShift = event.shiftKey;
 }
@@ -109,9 +113,11 @@ export function updateDrag(
 
   if (!state.dragStart) return;
 
+  // Convert screen coordinates to layout-space coordinates for positioning
   const containerRect = container.getBoundingClientRect();
-  const currentX = event.clientX - containerRect.left;
-  const currentY = event.clientY - containerRect.top;
+  const zoom = getZoomLevel();
+  const currentX = (event.clientX - containerRect.left) / zoom;
+  const currentY = (event.clientY - containerRect.top) / zoom;
 
   // Calculate distance to check if we should start showing the rect
   const dx = currentX - state.dragStart.x;
@@ -165,9 +171,11 @@ export function endDrag(
   if (!state.dragStart) return;
 
   if (state.isDragging) {
+    // Convert screen coordinates to layout-space coordinates
     const containerRect = container.getBoundingClientRect();
-    const currentX = event.clientX - containerRect.left;
-    const currentY = event.clientY - containerRect.top;
+    const zoom = getZoomLevel();
+    const currentX = (event.clientX - containerRect.left) / zoom;
+    const currentY = (event.clientY - containerRect.top) / zoom;
 
     const left = Math.min(state.dragStart.x, currentX);
     const top = Math.min(state.dragStart.y, currentY);
@@ -210,16 +218,17 @@ export function getMasksInRect(
 ): string[] {
   const masks = container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
   const containerRect = container.getBoundingClientRect();
+  const zoom = getZoomLevel();
   const result: string[] = [];
 
   masks.forEach((mask: HTMLElement) => {
     const maskRect = mask.getBoundingClientRect();
 
-    // Convert to container-relative coordinates
-    const maskLeft = maskRect.left - containerRect.left;
-    const maskTop = maskRect.top - containerRect.top;
-    const maskRight = maskLeft + maskRect.width;
-    const maskBottom = maskTop + maskRect.height;
+    // Convert screen-space coordinates to layout-space coordinates (matching rect)
+    const maskLeft = (maskRect.left - containerRect.left) / zoom;
+    const maskTop = (maskRect.top - containerRect.top) / zoom;
+    const maskRight = maskLeft + maskRect.width / zoom;
+    const maskBottom = maskTop + maskRect.height / zoom;
 
     // Check intersection (any overlap counts)
     if (!(rect.right < maskLeft || rect.left > maskRight ||

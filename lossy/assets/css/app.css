@@ -122,6 +122,17 @@
 .editor-container {
   min-height: 100vh;
   background-color: var(--color-black);
+  /* Dot grid pattern - subtle dots on dark background */
+  background-image: radial-gradient(
+    circle,
+    var(--color-zinc-800) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+  /* Disable native scrolling - editor handles its own zoom/pan */
+  overflow: hidden;
+  position: fixed;
+  inset: 0;
 }
 
 .editor-content {
@@ -133,10 +144,30 @@
 .editor-header-layout {
   margin-block-end: 1rem;
   display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  justify-content: space-between;
+  align-items: flex-start;
   transition: opacity var(--transition-normal); /* transition-opacity duration-300 */
   transition-duration: 0.3s;
+}
+
+/* Document name display in header */
+.document-name {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.document-name-title {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--color-white);
+  line-height: 1.3;
+}
+
+.document-name-subtitle {
+  font-size: 0.75rem;
+  color: var(--color-zinc-500);
+  line-height: 1.3;
 }
 
 .header-actions {

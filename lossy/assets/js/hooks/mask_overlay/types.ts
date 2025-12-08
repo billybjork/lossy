@@ -9,6 +9,45 @@ import type { BoundingBox } from '../../ml/types';
 import type { MLCoordinator } from './ml-coordinator';
 import type { PendingMaskManager } from './pending-mask';
 
+// Global state for zoom mode coordination with EditorZoom hook
+declare global {
+  interface Window {
+    __editorZoomState?: {
+      isCursorOverImage: boolean;
+      zoomModeActive: boolean;
+      zoomLevel: number;
+    };
+  }
+}
+
+/** Get current zoom level from EditorZoom hook, with fallback to computed transform */
+export function getZoomLevel(): number {
+  // Primary source: global state from EditorZoom hook
+  const stateZoom = window.__editorZoomState?.zoomLevel ?? 1;
+
+  // Fallback: derive from actual CSS transform on image container
+  // This handles cases where the global state might be out of sync
+  const imageContainer = document.querySelector('.image-container') as HTMLElement | null;
+  if (imageContainer) {
+    const transform = getComputedStyle(imageContainer).transform;
+    if (transform && transform !== 'none') {
+      const match = transform.match(/matrix\(([^,]+)/);
+      if (match) {
+        const actualZoom = parseFloat(match[1]);
+        // If there's a significant mismatch, trust the actual transform
+        if (Math.abs(actualZoom - stateZoom) > 0.01) {
+          return actualZoom;
+        }
+      }
+    } else if (stateZoom !== 1) {
+      // Transform is none but state says we're zoomed - state is stale
+      return 1;
+    }
+  }
+
+  return stateZoom;
+}
+
 // ============ Smart Select State ============
 
 /**

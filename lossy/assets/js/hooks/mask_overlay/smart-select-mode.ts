@@ -461,7 +461,8 @@ export function updateCursorPosition(ctx: SmartSelectContext, x: number, y: numb
 // ============ Coordinate Conversion ============
 
 /**
- * Convert container coordinates to image coordinates
+ * Convert container coordinates to image coordinates.
+ * Uses getBoundingClientRect() to account for CSS transforms (zoom).
  */
 function getImageCoordinates(
   pos: { x: number; y: number } | null,
@@ -472,8 +473,10 @@ function getImageCoordinates(
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
   if (!img) return null;
 
-  const displayWidth = img.clientWidth;
-  const displayHeight = img.clientHeight;
+  // Use getBoundingClientRect() for dimensions - accounts for CSS transforms
+  const imgRect = img.getBoundingClientRect();
+  const displayWidth = imgRect.width;
+  const displayHeight = imgRect.height;
   const { width: naturalWidth, height: naturalHeight } = getImageNaturalDimensions(
     img,
     hooks.imageWidth,
@@ -572,7 +575,9 @@ function removePointMarkers(ctx: SmartSelectContext): void {
 }
 
 /**
- * Render visual markers for locked points
+ * Render visual markers for locked points.
+ * Uses clientWidth/clientHeight (layout size) since markers are children of
+ * the transformed container and will be scaled by the zoom.
  */
 function renderPointMarkers(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (!ctx.pointMarkersContainer) return;
@@ -582,6 +587,8 @@ function renderPointMarkers(ctx: SmartSelectContext, hooks: SmartSelectHooks): v
   const img = document.getElementById('editor-image') as HTMLImageElement | null;
   if (!img) return;
 
+  // Use clientWidth/clientHeight for layout dimensions (pre-transform)
+  // since markers are children of the transformed container and scale with it
   const displayWidth = img.clientWidth;
   const displayHeight = img.clientHeight;
   const { width: naturalWidth, height: naturalHeight } = getImageNaturalDimensions(
@@ -634,6 +641,8 @@ function renderPreviewMask(
   `;
 
   const dpr = window.devicePixelRatio || 1;
+  // Use clientWidth/clientHeight for layout dimensions (pre-transform)
+  // since canvas is a child of the transformed container and scales with it
   const displayWidth = img.clientWidth;
   const displayHeight = img.clientHeight;
   canvas.width = Math.max(1, Math.round(displayWidth * dpr));
