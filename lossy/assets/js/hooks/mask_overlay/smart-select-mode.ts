@@ -137,7 +137,9 @@ function stopLoop(ctx: SmartSelectContext): void {
 
 /**
  * Core tick function - called by loop every 100ms.
- * Simple logic: spotlight pixel hits, segment when nothing is already under the cursor.
+ * Handles two primary modes:
+ * 1. Selection Mode: If the cursor is over an existing mask, spotlight it.
+ * 2. Segmentation Mode: If the cursor is over empty space, generate a preview.
  */
 function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (!ctx.active) return;
@@ -148,49 +150,42 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
     return;
   }
 
-  // If we have locked points, skip spotlight logic - we're in multi-point mode
-  if (ctx.lockedPoints.length === 0) {
-    // 1. Pixel hit? Spotlight and done.
-    const hit = findMaskUnderCursor(ctx.lastMouse, hooks);
-    if (hit?.hitType === 'pixel') {
-      ctx.spotlightedMaskId = hit.maskId;
-      ctx.spotlightHitType = 'pixel';
-      ctx.spotlightMaskType = hit.maskType;
-      clearPreview(ctx);
-      resetSpotlightOverlay(ctx);
-      hooks.updateHighlight();
-      updateStatus(ctx, hooks.jsContainer, 'Spotlighting…', 'ready');
-      return;
-    }
-
-    // 2. Bbox or empty - update spotlight state
-    ctx.spotlightedMaskId = hit?.maskId ?? null;
-    ctx.spotlightHitType = hit?.hitType ?? null;
-    ctx.spotlightMaskType = hit?.maskType ?? null;
-    if (hit) {
-      hooks.updateHighlight();
-
-      if (hit.maskType === 'text') {
-        clearPreview(ctx);
-        updateStatus(ctx, hooks.jsContainer, 'Text region ready', 'ready');
-        return;
-      }
-
-      resetSpotlightOverlay(ctx);
-    }
-  } else {
-    // Clear spotlight when in multi-point mode
-    if (ctx.spotlightedMaskId !== null) {
-      ctx.spotlightedMaskId = null;
-      ctx.spotlightHitType = null;
-      ctx.spotlightMaskType = null;
-      hooks.updateHighlight();
-    }
-
-    resetSpotlightOverlay(ctx);
+  // Multi-point mode has its own logic, skip normal flow
+  if (ctx.lockedPoints.length > 0) {
+    handleMultiPointTick(ctx, hooks);
+    return;
   }
 
-  // 3. Embeddings ready?
+  // --- Single-point (hover) mode ---
+
+  const hit = findMaskUnderCursor(ctx.lastMouse, hooks);
+
+  // Mode 1: Selection (a mask was found under the cursor)
+  if (hit) {
+    ctx.spotlightedMaskId = hit.maskId;
+    ctx.spotlightHitType = hit.hitType;
+    ctx.spotlightMaskType = hit.maskType;
+
+    clearPreview(ctx);
+    hooks.updateHighlight();
+    resetSpotlightOverlay(ctx);
+
+    const statusText = hit.hitType === 'pixel' ? 'Spotlighting…' :
+                       hit.maskType === 'text' ? 'Text region ready' :
+                       'Region ready';
+    updateStatus(ctx, hooks.jsContainer, statusText, 'ready');
+    return; // Done for this tick, we are in selection mode.
+  }
+
+  // Mode 2: Segmentation (no mask under cursor, generate preview)
+  if (ctx.spotlightedMaskId) {
+    ctx.spotlightedMaskId = null;
+    ctx.spotlightHitType = null;
+    ctx.spotlightMaskType = null;
+    hooks.updateHighlight();
+  }
+
+  // Embeddings ready?
   if (!hooks.embeddingsReady()) {
     hooks.ensureEmbeddings();
     updateStatus(ctx, hooks.jsContainer, 'Preparing embeddings…', 'searching');
@@ -198,7 +193,37 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
     return;
   }
 
-  // 4. Fire segmentation (or queue if in flight)
+  // Fire segmentation (or queue if in flight)
+  if (ctx.inFlight) {
+    ctx.needsSegment = true;
+  } else {
+    fireSegmentation(ctx, hooks);
+  }
+}
+
+/**
+ * Handles the logic for a tick when in multi-point selection mode.
+ */
+function handleMultiPointTick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
+  // Clear any single-point spotlighting
+  if (ctx.spotlightedMaskId !== null) {
+    ctx.spotlightedMaskId = null;
+    ctx.spotlightHitType = null;
+    ctx.spotlightMaskType = null;
+    hooks.updateHighlight();
+  }
+
+  resetSpotlightOverlay(ctx);
+
+  // Embeddings ready?
+  if (!hooks.embeddingsReady()) {
+    hooks.ensureEmbeddings();
+    updateStatus(ctx, hooks.jsContainer, 'Preparing embeddings…', 'searching');
+    ctx.needsSegment = true;
+    return;
+  }
+
+  // Fire segmentation (or queue if in flight)
   if (ctx.inFlight) {
     ctx.needsSegment = true;
   } else {
@@ -281,10 +306,14 @@ interface MaskHit {
   maskId: string;
   hitType: 'pixel' | 'bbox';
   maskType: 'text' | 'object' | 'manual';
+  area: number; // For sorting
+  score: number; // For ranking
 }
 
 /**
- * Find mask under cursor with bbox-first, pixel-refined hit testing
+ * Find the best mask under the cursor using a scoring system.
+ * This function assesses all masks under the cursor and returns the one
+ * with the highest score, prioritizing precision (pixel hits) and smaller size.
  */
 function findMaskUnderCursor(
   cursorPos: { x: number; y: number },
@@ -297,8 +326,9 @@ function findMaskUnderCursor(
   const masks = hooks.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
   if (masks.length === 0) return null;
 
-  // Check masks in reverse order (top-most first)
-  for (const mask of Array.from(masks).reverse()) {
+  const hits: MaskHit[] = [];
+
+  for (const mask of Array.from(masks)) {
     const rect = mask.getBoundingClientRect();
     const inBbox = clientX >= rect.left && clientX <= rect.right &&
                    clientY >= rect.top && clientY <= rect.bottom;
@@ -306,30 +336,42 @@ function findMaskUnderCursor(
     if (!inBbox) continue;
 
     const maskId = mask.dataset.maskId || '';
-    const maskType = mask.dataset.maskType;
+    const maskType = (mask.dataset.maskType || 'manual') as 'text' | 'object' | 'manual';
+    const area = rect.width * rect.height;
 
-    const kind = maskType === 'object' || maskType === 'manual' ? (maskType as 'object' | 'manual') : 'text';
+    let hitType: 'pixel' | 'bbox' = 'bbox';
+    let isPixelHit = false;
 
-    // Text regions: bbox is sufficient
-    if (kind === 'text') {
-      return { maskId, hitType: 'bbox', maskType: kind };
-    }
-
-    // Object/manual: try pixel hit if cache ready
+    // All masks can have pixel-perfect hit testing now
     if (hooks.maskCacheReady() && hooks.maskCache.has(maskId)) {
-      const isPixelHit = isPointOverMaskPixel(maskId, clientX, clientY, mask, hooks.maskCache);
+      isPixelHit = isPointOverMaskPixel(maskId, clientX, clientY, mask, hooks.maskCache);
       if (isPixelHit) {
-        return { maskId, hitType: 'pixel', maskType: kind };
+        hitType = 'pixel';
       }
-      // In bbox but not on pixel - continue checking other masks
-      continue;
     }
 
-    // Cache not ready - return bbox hit
-    return { maskId, hitType: 'bbox', maskType: kind };
+    // Score the hit:
+    // - Pixel hits are worth more than bbox hits.
+    // - Smaller areas are better (score is inversely proportional to area).
+    // - Text masks get a slight boost to win ties.
+    const score =
+      (isPixelHit ? 1e6 : 0) +         // Pixel hits are high priority
+      (1e6 / (area || 1)) +            // Smaller area is better
+      (maskType === 'text' ? 1 : 0);   // Text masks are slightly preferred
+
+    hits.push({
+      maskId,
+      hitType,
+      maskType,
+      area,
+      score,
+    });
   }
 
-  return null;
+  if (hits.length === 0) return null;
+
+  // Return the hit with the highest score
+  return hits.sort((a, b) => b.score - a.score)[0];
 }
 
 /**
