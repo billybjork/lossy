@@ -34,7 +34,6 @@ defmodule LossyWeb.EditLive do
           socket
           |> assign(document: document, page_title: document.name || "Edit")
           |> assign(selected_region_ids: MapSet.new())
-
           |> assign(export_path: nil, export_filename: nil, exporting: false)
           |> assign(masks: masks)
           |> assign(fresh_arrival: fresh_arrival)
@@ -54,8 +53,6 @@ defmodule LossyWeb.EditLive do
      |> assign(document: document, masks: masks)
      |> push_event("masks_updated", %{masks: masks})}
   end
-
-
 
   @impl true
   def handle_event("clear_fresh_arrival", _params, socket) do
@@ -116,8 +113,6 @@ defmodule LossyWeb.EditLive do
       {:noreply, socket}
     end
   end
-
-
 
   @impl true
   def handle_event("undo", _params, socket) do

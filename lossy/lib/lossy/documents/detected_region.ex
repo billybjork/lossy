@@ -16,7 +16,6 @@ defmodule Lossy.Documents.DetectedRegion do
   @region_types [:text, :manual, :object]
   @statuses [:detected, :error]
 
-
   schema "detected_regions" do
     # Region type: "text" (from text detection), "object" (from segmentation), "manual" (from click-to-segment)
     field :type, Ecto.Enum, values: @region_types, default: :manual

@@ -21,7 +21,6 @@ defmodule Lossy.Repo.Migrations.AddDetectedRegionsAndHistory do
       # Bounding box for quick hit-testing
       add :bbox, :map
 
-
       add :mask_path, :string
 
       # Polygon outline for rendering
@@ -40,7 +39,6 @@ defmodule Lossy.Repo.Migrations.AddDetectedRegionsAndHistory do
       add :status, :string, default: "detected"
 
       # Reference to inpainted result
-
 
       timestamps()
     end

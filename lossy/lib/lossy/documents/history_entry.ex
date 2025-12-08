@@ -33,6 +33,4 @@ defmodule Lossy.Documents.HistoryEntry do
     |> validate_required([:image_path, :timestamp, :action])
     |> validate_inclusion(:action, @action_types)
   end
-
-
 end

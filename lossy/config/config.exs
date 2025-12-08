@@ -85,7 +85,6 @@ config :logger, :default_formatter,
     :output_path,
     :target_path,
     :image_path,
-
     :working_image,
     :patch,
     # Image dimensions

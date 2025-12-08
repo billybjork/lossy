@@ -15,7 +15,6 @@ defmodule Lossy.Repo.Migrations.MigrateLegacyStatuses do
 
     # Migrate legacy processing_job types
 
-
     execute """
     UPDATE processing_jobs SET type = 'detection'
     WHERE type IN ('text_detection', 'font_guess')
