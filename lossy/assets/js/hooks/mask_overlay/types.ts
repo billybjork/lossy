@@ -38,10 +38,6 @@ export interface SmartSelectContext {
   pointMarkersContainer: HTMLDivElement | null;
   previewCanvas: HTMLCanvasElement | null;
   statusEl: HTMLDivElement | null;
-  // Flashlight effect (cursor-following feedback while seeking masks)
-  flashlightCanvas: HTMLCanvasElement | null;
-  flashlightAnimationFrame: number | null;
-  flashlightFadeStart: number | null;
 }
 
 /**
@@ -64,9 +60,6 @@ export function createSmartSelectContext(): SmartSelectContext {
     pointMarkersContainer: null,
     previewCanvas: null,
     statusEl: null,
-    flashlightCanvas: null,
-    flashlightAnimationFrame: null,
-    flashlightFadeStart: null,
   };
 }
 
@@ -183,11 +176,3 @@ export const MASK_COLORS = [
 
 // Hover state uses intense fill overlay without borders for high visibility
 export const HOVER_COLOR = { fill: 'rgba(255, 255, 255, 0.5)', stroke: 'rgb(255, 255, 255)' };
-
-// ============ Smart Select Flashlight Constants ============
-
-// Flashlight radius in display pixels (scaled for DPR)
-export const FLASHLIGHT_RADIUS = 100;
-
-// Flashlight fade-out duration in milliseconds
-export const FLASHLIGHT_FADE_DURATION = 200;

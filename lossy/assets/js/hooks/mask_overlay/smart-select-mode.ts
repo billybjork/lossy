@@ -7,7 +7,6 @@
 
 import type { SmartSelectContext, SegmentPoint, MaskData, CachedMask } from './types';
 import { getImageNaturalDimensions } from './utils';
-import { FLASHLIGHT_RADIUS, FLASHLIGHT_FADE_DURATION } from './types';
 
 // ============ Constants ============
 
@@ -53,16 +52,12 @@ export function enterSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHook
 
   // Create DOM elements
   createSpotlightOverlay(ctx, hooks.jsContainer);
-  createFlashlightCanvas(ctx, hooks.jsContainer);
   createPointMarkersContainer(ctx, hooks.jsContainer);
   resetSpotlightOverlay(ctx);
   updateStatus(ctx, hooks.jsContainer, 'Scanning…', 'searching');
 
   // Start the continuous update loop
   startLoop(ctx, hooks);
-
-  // Start flashlight animation
-  startFlashlightAnimation(ctx);
 
   // Kick off embeddings computation (async, loop will pick up when ready)
   hooks.ensureEmbeddings();
@@ -92,7 +87,6 @@ export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks
   hooks.container.classList.remove('smart-select-mode');
   hooks.container.style.cursor = '';
   removeSpotlightOverlay(ctx);
-  removeFlashlightCanvas(ctx);
   removePointMarkers(ctx);
   removePreviewMask(ctx);
   removeStatus(ctx);
@@ -209,31 +203,6 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
     ctx.needsSegment = true;
   } else {
     fireSegmentation(ctx, hooks);
-  }
-
-  // 5. Update flashlight visibility
-  updateFlashlightVisibility(ctx);
-}
-
-/**
- * Update flashlight visibility based on current state
- */
-function updateFlashlightVisibility(ctx: SmartSelectContext): void {
-  if (!ctx.flashlightCanvas) return;
-
-  if (shouldShowFlashlight(ctx)) {
-    // Show flashlight
-    if (ctx.flashlightCanvas.style.opacity === '0' || ctx.flashlightFadeStart !== null) {
-      ctx.flashlightCanvas.style.opacity = '1';
-      ctx.flashlightFadeStart = null;
-      startFlashlightAnimation(ctx);
-    }
-  } else {
-    // Hide flashlight
-    if (ctx.flashlightCanvas.style.opacity !== '0' && ctx.flashlightFadeStart === null) {
-      ctx.flashlightCanvas.style.opacity = '0';
-      stopFlashlightAnimation(ctx);
-    }
   }
 }
 
@@ -528,180 +497,6 @@ function setOverlayTransparent(ctx: SmartSelectContext): void {
   // Deprecated: keep overlay visible; text spotlight uses cutout instead.
 }
 
-// ============ Flashlight Effect ============
-
-/**
- * Determine if flashlight should be visible based on current state
- */
-function shouldShowFlashlight(ctx: SmartSelectContext): boolean {
-  // Only in active Smart Select mode
-  if (!ctx.active) return false;
-
-  // Need cursor position
-  if (!ctx.lastMouse) return false;
-
-  // Hide if multi-point mode (locked points exist)
-  if (ctx.lockedPoints.length > 0) return false;
-
-  // Hide if we have a preview mask ready
-  if (ctx.lastMaskData) return false;
-
-  // SHOW if no mask spotlighted (hovering over empty space)
-  if (!ctx.spotlightedMaskId) return true;
-
-  // SHOW if only bbox hit (not pixel-perfect, waiting for segmentation)
-  if (ctx.spotlightHitType === 'bbox' && ctx.spotlightMaskType !== 'text') return true;
-
-  // Hide if pixel-perfect hit or text bbox (those are trustworthy)
-  return false;
-}
-
-/**
- * Render flashlight gradient on canvas
- */
-function renderFlashlight(
-  canvas: HTMLCanvasElement,
-  mousePos: { x: number; y: number },
-  opacity: number = 1.0
-): void {
-  const canvasCtx = canvas.getContext('2d');
-  if (!canvasCtx) return;
-
-  const dpr = window.devicePixelRatio || 1;
-  const width = canvas.width / dpr;
-  const height = canvas.height / dpr;
-
-  // Clear canvas
-  canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
-
-  // Create radial gradient for flashlight (brightening effect)
-  const radius = FLASHLIGHT_RADIUS;
-  const gradient = canvasCtx.createRadialGradient(
-    mousePos.x, mousePos.y, 0,
-    mousePos.x, mousePos.y, radius
-  );
-
-  // Gradient stops - white at center fading to transparent
-  // This brightens the area without adding extra darkness
-  const maxBrightness = 0.6 * opacity; // Adjust brightness level
-  gradient.addColorStop(0, `rgba(255, 255, 255, ${maxBrightness})`);
-  gradient.addColorStop(0.6, `rgba(255, 255, 255, ${maxBrightness * 0.5})`);
-  gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-  // Draw brightening gradient
-  canvasCtx.fillStyle = gradient;
-  canvasCtx.fillRect(0, 0, width, height);
-}
-
-/**
- * Animation frame update for flashlight position
- */
-function updateFlashlightPosition(ctx: SmartSelectContext): void {
-  if (!ctx.flashlightCanvas || !ctx.lastMouse || !shouldShowFlashlight(ctx)) {
-    return;
-  }
-
-  let opacity = 1.0;
-
-  // Handle fade-out if triggered
-  if (ctx.flashlightFadeStart !== null) {
-    const elapsed = performance.now() - ctx.flashlightFadeStart;
-    const progress = Math.min(elapsed / FLASHLIGHT_FADE_DURATION, 1);
-    opacity = 1 - progress;
-
-    if (progress >= 1) {
-      // Fade complete, hide flashlight
-      ctx.flashlightCanvas.style.opacity = '0';
-      stopFlashlightAnimation(ctx);
-      return;
-    }
-  }
-
-  renderFlashlight(ctx.flashlightCanvas, ctx.lastMouse, opacity);
-
-  if (ctx.flashlightAnimationFrame !== null) {
-    ctx.flashlightAnimationFrame = requestAnimationFrame(() => updateFlashlightPosition(ctx));
-  }
-}
-
-/**
- * Start flashlight animation loop
- */
-function startFlashlightAnimation(ctx: SmartSelectContext): void {
-  if (ctx.flashlightAnimationFrame !== null) return;
-
-  ctx.flashlightAnimationFrame = requestAnimationFrame(() => updateFlashlightPosition(ctx));
-}
-
-/**
- * Stop flashlight animation loop
- */
-function stopFlashlightAnimation(ctx: SmartSelectContext): void {
-  if (ctx.flashlightAnimationFrame !== null) {
-    cancelAnimationFrame(ctx.flashlightAnimationFrame);
-    ctx.flashlightAnimationFrame = null;
-  }
-}
-
-/**
- * Trigger smooth fade-out of flashlight
- */
-function startFlashlightFadeOut(ctx: SmartSelectContext): void {
-  ctx.flashlightFadeStart = performance.now();
-}
-
-/**
- * Create flashlight canvas element
- */
-function createFlashlightCanvas(ctx: SmartSelectContext, jsContainer: HTMLElement | null): void {
-  if (!jsContainer || ctx.flashlightCanvas) return;
-
-  const img = document.getElementById('editor-image') as HTMLImageElement | null;
-  if (!img) return;
-
-  const canvas = document.createElement('canvas');
-  canvas.className = 'smart-select-flashlight-canvas';
-  canvas.style.cssText = `
-    position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    z-index: 47;
-    pointer-events: none;
-    transition: opacity 0.2s ease-out;
-  `;
-
-  const dpr = window.devicePixelRatio || 1;
-  const displayWidth = img.clientWidth;
-  const displayHeight = img.clientHeight;
-  canvas.width = Math.max(1, Math.round(displayWidth * dpr));
-  canvas.height = Math.max(1, Math.round(displayHeight * dpr));
-
-  const canvasCtx = canvas.getContext('2d');
-  if (canvasCtx) {
-    canvasCtx.scale(dpr, dpr);
-  }
-
-  jsContainer.appendChild(canvas);
-  ctx.flashlightCanvas = canvas;
-}
-
-/**
- * Remove flashlight canvas and stop animation
- */
-function removeFlashlightCanvas(ctx: SmartSelectContext): void {
-  stopFlashlightAnimation(ctx);
-
-  if (ctx.flashlightCanvas) {
-    ctx.flashlightCanvas.remove();
-    ctx.flashlightCanvas = null;
-  }
-
-  ctx.flashlightFadeStart = null;
-}
-
-
 /**
  * Create point markers container
  */
@@ -838,11 +633,6 @@ function renderPreviewMask(
 
     jsContainer.appendChild(canvas);
     ctx.previewCanvas = canvas;
-
-    // Trigger flashlight fade-out when preview appears
-    if (ctx.flashlightCanvas && shouldShowFlashlight(ctx)) {
-      startFlashlightFadeOut(ctx);
-    }
   };
 
   maskImg.onerror = () => {
@@ -919,7 +709,7 @@ export function forceCleanupSmartSelectElements(ctx?: SmartSelectContext): void 
     const jsContainer = document.getElementById('js-overlay-container');
     if (jsContainer) {
       const orphans = jsContainer.querySelectorAll(
-        '.smart-select-point-markers, .smart-select-preview-mask, .smart-select-spotlight-overlay, .smart-select-flashlight-canvas, .smart-select-status-indicator'
+        '.smart-select-point-markers, .smart-select-preview-mask, .smart-select-spotlight-overlay, .smart-select-status-indicator'
       );
       orphans.forEach(el => {
         try {
@@ -936,11 +726,6 @@ export function forceCleanupSmartSelectElements(ctx?: SmartSelectContext): void 
       ctx.pointMarkersContainer = null;
       ctx.previewCanvas = null;
       ctx.statusEl = null;
-
-      // Stop flashlight animation and null out references
-      stopFlashlightAnimation(ctx);
-      ctx.flashlightCanvas = null;
-      ctx.flashlightFadeStart = null;
     }
   } catch (error) {
     console.error('[SmartSelect] Error in force cleanup:', error);

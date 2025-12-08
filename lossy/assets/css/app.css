@@ -443,16 +443,6 @@ figure {
   transition: opacity 0.3s ease-out, background 0.3s ease-out;
 }
 
-/* Flashlight effect canvas - cursor-following brightness while seeking masks */
-.smart-select-flashlight-canvas {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 47;
-  opacity: 1;
-  transition: opacity 0.2s ease-out;
-}
-
 /* =============================================================================
    Smart Select Point Markers
    Visual markers for locked/committed Smart Select points during multi-point selection
