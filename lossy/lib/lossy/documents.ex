@@ -10,7 +10,6 @@ defmodule Lossy.Documents do
 
   alias Lossy.Documents.{DetectedRegion, Document, Naming}
 
-
   ## Documents
 
   @doc """
@@ -106,18 +105,6 @@ defmodule Lossy.Documents do
       {:document_updated, document}
     )
   end
-
-
-
-
-
-
-
-
-
-
-
-
 
   ## Detected Regions
 
@@ -490,8 +477,10 @@ defmodule Lossy.Documents do
       )
 
       # Create new working asset from the target image
+      opts = [document_name: document.name]
+
       with {:ok, new_asset} <-
-             Assets.save_image_from_path(document.id, target_image_path, :working),
+             Assets.save_image_from_path(document.id, target_image_path, :working, opts),
            {:ok, updated_doc} <-
              update_document(document, %{
                working_asset_id: new_asset.id,
@@ -508,8 +497,6 @@ defmodule Lossy.Documents do
       {:error, :cannot_undo}
     end
   end
-
-
 
   @doc """
   Redo is not currently supported.
