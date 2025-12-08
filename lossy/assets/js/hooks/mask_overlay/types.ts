@@ -6,6 +6,8 @@
  */
 
 import type { BoundingBox } from '../../ml/types';
+import type { MLCoordinator } from './ml-coordinator';
+import type { PendingMaskManager } from './pending-mask';
 
 // ============ Smart Select State ============
 
@@ -119,6 +121,10 @@ export interface MaskOverlayState {
   shimmerPlayed: boolean;
   textDetectionAttempted: boolean;
   textDetectionPromise: Promise<void> | null;
+
+  // Coordinators (Phase 3 refactor)
+  mlCoordinator: MLCoordinator | null;
+  pendingMaskManager: PendingMaskManager | null;
 
   // Drag selection
   isDragging: boolean;

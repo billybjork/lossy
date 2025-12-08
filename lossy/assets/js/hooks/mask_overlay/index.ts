@@ -24,6 +24,8 @@ import * as DragSelection from './drag-selection';
 import * as SmartSelectMode from './smart-select-mode';
 import { waitForImageLoad, getEditorImage } from './image-utils';
 import { setErrorHandler, validateMLEnvironment, type MLError } from '../../ml/error-handler';
+import { MLCoordinator } from './ml-coordinator';
+import { PendingMaskManager } from './pending-mask';
 
 // ============ Smart Select Trigger Key ============
 const SMART_SELECT_TRIGGER_KEY = 'Meta';
@@ -103,6 +105,37 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     // Resize observer
     this.resizeObserver = null;
     this.imageReadyPromise = null;
+
+    // Initialize coordinators (Phase 3 refactor)
+    this.mlCoordinator = new MLCoordinator({
+      documentId: this.documentId,
+      imageWidth: this.imageWidth,
+      imageHeight: this.imageHeight,
+      onProgress: (stage, progress) => {
+        // TODO: Update UI loading indicator
+        console.log(`[ML] ${stage}: ${progress}%`);
+      }
+    });
+
+    this.pendingMaskManager = new PendingMaskManager({
+      container: this.el,
+      onConfirm: (mask) => {
+        this.pendingSegmentConfirm = true;
+        this.previousMaskIds = new Set(
+          (Array.from(this.container.querySelectorAll('.mask-region')) as HTMLElement[])
+            .map(m => m.dataset.maskId || '')
+            .filter(id => id)
+        );
+
+        this.pushEvent("confirm_segment", {
+          mask_png: mask.mask_png,
+          bbox: mask.bbox
+        });
+      },
+      onCancel: () => {
+        // Cleanup handled by PendingMaskManager
+      }
+    });
 
     // Set up ML error handler
     setErrorHandler({
@@ -399,19 +432,30 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.cancelPendingMask();
     }
 
-    // 4. Clear pending mask element
+    // 4. Cleanup coordinators (Phase 3 refactor)
+    if (this.mlCoordinator) {
+      this.mlCoordinator.cleanup();
+      this.mlCoordinator = null;
+    }
+
+    if (this.pendingMaskManager) {
+      this.pendingMaskManager.cleanup();
+      this.pendingMaskManager = null;
+    }
+
+    // 5. Clear pending mask element (legacy - handled by coordinator)
     if (this.pendingMaskElement) {
       this.pendingMaskElement.remove();
       this.pendingMaskElement = null;
     }
 
-    // 5. Disconnect resize observer
+    // 6. Disconnect resize observer
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
       this.resizeObserver = null;
     }
 
-    // 6. Remove all event listeners
+    // 7. Remove all event listeners
     document.removeEventListener('keydown', this.keydownHandler);
     document.removeEventListener('keydown', this.smartSelectKeydownHandler);
     document.removeEventListener('keyup', this.smartSelectKeyupHandler);
@@ -425,18 +469,18 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.container.removeEventListener('click', this.containerClickHandler, true);
     }
 
-    // 7. Remove drag rect
+    // 8. Remove drag rect
     if (this.dragRect) {
       this.dragRect.remove();
       this.dragRect = null;
     }
 
-    // 8. Clear embeddings for this document
+    // 9. Clear embeddings for this document (legacy - handled by coordinator)
     if (inferenceProvider && this.documentId) {
       inferenceProvider.clearEmbeddings(this.documentId);
     }
 
-    // 9. Clear mask cache (free canvas memory)
+    // 10. Clear mask cache (free canvas memory)
     if (this.maskImageCache) {
       this.maskImageCache.forEach(cached => {
         if (cached.canvas) {
@@ -449,7 +493,7 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.maskImageCache.clear();
     }
 
-    // 10. Clear error handler
+    // 11. Clear error handler
     setErrorHandler(null);
 
     console.log('[MaskOverlay] Cleanup complete');
