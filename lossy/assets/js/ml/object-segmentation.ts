@@ -544,13 +544,30 @@ export async function segmentAtPoints(
 
   const stabilityScore = calculateStabilityScore(maskData);
 
-  // Extract positive points for component filtering
-  // Only keep mask regions that contain at least one positive click point
-  const positivePoints = points
-    .filter(p => p.label === 1)
-    .map(p => ({ x: p.x, y: p.y }));
+  // Extract reference points for component filtering
+  // For point prompts: use positive points (label=1)
+  // For box prompts: use the box center (labels 2,3 are top-left and bottom-right corners)
+  let referencePoints: Array<{ x: number; y: number }> = [];
 
-  const { mask, bbox, area } = postprocessMask(maskData, maskDims, resizeInfo, positivePoints);
+  const positivePoints = points.filter(p => p.label === 1);
+  const boxCorners = points.filter(p => p.label === 2 || p.label === 3);
+
+  if (positivePoints.length > 0) {
+    // Point-based prompt: use positive click points
+    referencePoints = positivePoints.map(p => ({ x: p.x, y: p.y }));
+  } else if (boxCorners.length === 2) {
+    // Box prompt: use the center of the box as the reference point
+    const topLeft = boxCorners.find(p => p.label === 2);
+    const bottomRight = boxCorners.find(p => p.label === 3);
+    if (topLeft && bottomRight) {
+      referencePoints = [{
+        x: (topLeft.x + bottomRight.x) / 2,
+        y: (topLeft.y + bottomRight.y) / 2
+      }];
+    }
+  }
+
+  const { mask, bbox, area } = postprocessMask(maskData, maskDims, resizeInfo, referencePoints);
 
   return { mask, bbox, score, stabilityScore, area };
 }

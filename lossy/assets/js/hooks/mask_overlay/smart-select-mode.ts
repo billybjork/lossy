@@ -83,6 +83,19 @@ export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks
   ctx.inFlight = false;
   ctx.needsSegment = false;
 
+  // Clean up box drag state
+  ctx.boxDragStart = null;
+  ctx.boxDragCurrent = null;
+  ctx.isDraggingBox = false;
+  ctx.boxSelectedMaskIds = new Set();
+  ctx.boxPreviewMaskData = null;
+  ctx.lastBoxSegmentTime = null;
+  ctx.boxFinalSelectionIds = [];
+  if (ctx.boxDragRect) {
+    ctx.boxDragRect.remove();
+    ctx.boxDragRect = null;
+  }
+
   // Clean up DOM
   hooks.container.classList.remove('smart-select-mode');
   hooks.container.style.cursor = '';
@@ -143,6 +156,12 @@ function stopLoop(ctx: SmartSelectContext): void {
  */
 function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (!ctx.active) return;
+
+  // Box drag mode takes precedence - disable normal tick behavior
+  // (box drag has its own visual feedback and segmentation logic)
+  if (ctx.isDraggingBox) {
+    return;
+  }
 
   // No cursor yet - show waiting message
   if (!ctx.lastMouse) {
@@ -812,6 +831,364 @@ export function undoLastPoint(ctx: SmartSelectContext, hooks: SmartSelectHooks):
   }
 
   return true;
+}
+
+// ============ Box Drag Handling ============
+
+const BOX_DRAG_THRESHOLD = 5; // Minimum distance to start box drag
+const BOX_SEGMENT_DEBOUNCE_MS = 200; // Debounce for box segmentation requests
+
+/**
+ * Handle mousedown in Smart Select - store potential drag start
+ */
+export function handleSmartSelectMouseDown(
+  ctx: SmartSelectContext,
+  event: MouseEvent,
+  hooks: SmartSelectHooks
+): void {
+  if (!ctx.active) return;
+  if (event.button !== 0) return; // Left click only
+
+  const containerRect = hooks.container.getBoundingClientRect();
+  const containerX = event.clientX - containerRect.left;
+  const containerY = event.clientY - containerRect.top;
+
+  // Store potential drag start (we'll determine click vs drag on move/up)
+  ctx.boxDragStart = { x: containerX, y: containerY };
+  ctx.boxDragCurrent = null;
+  ctx.isDraggingBox = false;
+}
+
+/**
+ * Handle mousemove in Smart Select - track drag, update visuals, request SAM2
+ */
+export function handleSmartSelectMouseMove(
+  ctx: SmartSelectContext,
+  event: MouseEvent,
+  hooks: SmartSelectHooks
+): void {
+  if (!ctx.active) return;
+  if (!ctx.boxDragStart) return;
+
+  const containerRect = hooks.container.getBoundingClientRect();
+  const currentX = event.clientX - containerRect.left;
+  const currentY = event.clientY - containerRect.top;
+
+  // Calculate distance from start
+  const dx = currentX - ctx.boxDragStart.x;
+  const dy = currentY - ctx.boxDragStart.y;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+
+  // Check threshold for starting box drag
+  if (distance < BOX_DRAG_THRESHOLD && !ctx.isDraggingBox) return;
+
+  // Enter box drag mode
+  if (!ctx.isDraggingBox) {
+    ctx.isDraggingBox = true;
+    // Clear any existing point segmentation preview
+    clearPreview(ctx);
+    ctx.spotlightedMaskId = null;
+    ctx.spotlightHitType = null;
+    ctx.spotlightMaskType = null;
+  }
+
+  ctx.boxDragCurrent = { x: currentX, y: currentY };
+
+  // Update visual feedback
+  updateBoxDragVisuals(ctx, hooks);
+
+  // Request SAM2 segmentation using box center as point prompt
+  requestBoxSegmentation(ctx, hooks);
+}
+
+/**
+ * Handle mouseup in Smart Select - finalize box selection or delegate to click
+ */
+export function handleSmartSelectMouseUp(
+  ctx: SmartSelectContext,
+  event: MouseEvent,
+  hooks: SmartSelectHooks
+): void {
+  if (!ctx.active) return;
+
+  if (ctx.isDraggingBox) {
+    // Was a box drag - finalize selection
+    finalizeBoxSelection(ctx, hooks);
+  } else if (ctx.boxDragStart) {
+    // Was a click (not a drag) - delegate to point click handler
+    handleSmartSelectClick(ctx, event, hooks);
+  }
+
+  // Reset drag start (but keep other box state for Command release)
+  ctx.boxDragStart = null;
+}
+
+/**
+ * Update visual feedback during box drag
+ */
+function updateBoxDragVisuals(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
+  if (!ctx.boxDragStart || !ctx.boxDragCurrent || !ctx.isDraggingBox) return;
+
+  const jsContainer = hooks.jsContainer;
+  if (!jsContainer) return;
+
+  // Create or reuse drag rect element
+  if (!ctx.boxDragRect) {
+    const rect = document.createElement('div');
+    rect.className = 'smart-select-box-drag';
+    rect.style.cssText = `
+      position: absolute;
+      border: 2px dashed rgb(59, 130, 246);
+      background: rgba(59, 130, 246, 0.15);
+      pointer-events: none;
+      z-index: 55;
+      box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.4), 0 0 10px rgba(59, 130, 246, 0.3);
+    `;
+    jsContainer.appendChild(rect);
+    ctx.boxDragRect = rect;
+  }
+
+  // Calculate box bounds in container coordinates
+  const left = Math.min(ctx.boxDragStart.x, ctx.boxDragCurrent.x);
+  const top = Math.min(ctx.boxDragStart.y, ctx.boxDragCurrent.y);
+  const width = Math.abs(ctx.boxDragCurrent.x - ctx.boxDragStart.x);
+  const height = Math.abs(ctx.boxDragCurrent.y - ctx.boxDragStart.y);
+
+  ctx.boxDragRect.style.left = `${left}px`;
+  ctx.boxDragRect.style.top = `${top}px`;
+  ctx.boxDragRect.style.width = `${width}px`;
+  ctx.boxDragRect.style.height = `${height}px`;
+  ctx.boxDragRect.style.display = 'block';
+
+  // Find and highlight qualifying masks (50%+ overlap)
+  const dragRect = { left, top, right: left + width, bottom: top + height };
+  const qualifyingMasks = findMasksWithOverlap(dragRect, hooks, 0.5);
+  ctx.boxSelectedMaskIds = new Set(qualifyingMasks);
+
+  // Update mask highlights
+  highlightQualifyingMasks(ctx, hooks);
+}
+
+/**
+ * Find masks with at least minOverlapRatio (e.g., 0.5 = 50%) of their bbox inside the drag rect
+ */
+function findMasksWithOverlap(
+  dragRect: { left: number; top: number; right: number; bottom: number },
+  hooks: SmartSelectHooks,
+  minOverlapRatio: number
+): string[] {
+  const masks = hooks.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+  const qualifying: string[] = [];
+
+  const img = document.getElementById('editor-image') as HTMLImageElement | null;
+  if (!img) return qualifying;
+
+  // Get scale factors for converting image coords to container coords
+  const imgRect = img.getBoundingClientRect();
+  const displayWidth = imgRect.width;
+  const displayHeight = imgRect.height;
+  const { width: naturalWidth, height: naturalHeight } = getImageNaturalDimensions(
+    img,
+    hooks.imageWidth,
+    hooks.imageHeight
+  );
+
+  const scaleX = displayWidth / naturalWidth;
+  const scaleY = displayHeight / naturalHeight;
+
+  masks.forEach((mask: HTMLElement) => {
+    const maskId = mask.dataset.maskId || '';
+    if (!maskId) return;
+
+    // Get mask bbox from dataset (in image coordinates)
+    const bboxX = parseFloat(mask.dataset.bboxX || '0');
+    const bboxY = parseFloat(mask.dataset.bboxY || '0');
+    const bboxW = parseFloat(mask.dataset.bboxW || '0');
+    const bboxH = parseFloat(mask.dataset.bboxH || '0');
+
+    if (bboxW <= 0 || bboxH <= 0) return;
+
+    // Convert mask bbox to container coordinates
+    const maskLeft = bboxX * scaleX;
+    const maskTop = bboxY * scaleY;
+    const maskRight = (bboxX + bboxW) * scaleX;
+    const maskBottom = (bboxY + bboxH) * scaleY;
+
+    // Calculate intersection area
+    const intersectLeft = Math.max(dragRect.left, maskLeft);
+    const intersectTop = Math.max(dragRect.top, maskTop);
+    const intersectRight = Math.min(dragRect.right, maskRight);
+    const intersectBottom = Math.min(dragRect.bottom, maskBottom);
+
+    if (intersectLeft >= intersectRight || intersectTop >= intersectBottom) {
+      // No intersection
+      return;
+    }
+
+    const intersectArea = (intersectRight - intersectLeft) * (intersectBottom - intersectTop);
+    const maskArea = (maskRight - maskLeft) * (maskBottom - maskTop);
+    const overlapRatio = intersectArea / maskArea;
+
+    if (overlapRatio >= minOverlapRatio) {
+      qualifying.push(maskId);
+    }
+  });
+
+  return qualifying;
+}
+
+/**
+ * Highlight masks that qualify for box selection
+ */
+function highlightQualifyingMasks(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
+  const masks = hooks.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
+
+  masks.forEach((mask: HTMLElement) => {
+    const maskId = mask.dataset.maskId || '';
+    const isQualifying = ctx.boxSelectedMaskIds.has(maskId);
+
+    mask.classList.remove('mask-hovered', 'mask-selected', 'mask-dimmed', 'mask-idle');
+
+    if (isQualifying) {
+      mask.classList.add('mask-selected');
+    } else {
+      mask.classList.add('mask-dimmed');
+    }
+  });
+
+  // Update segment mask canvas highlights via the hook
+  hooks.updateHighlight();
+}
+
+/**
+ * Request SAM2 segmentation using multiple points across the box.
+ * Uses a grid of positive points to encourage SAM2 to segment the entire region.
+ */
+async function requestBoxSegmentation(
+  ctx: SmartSelectContext,
+  hooks: SmartSelectHooks
+): Promise<void> {
+  if (!ctx.boxDragStart || !ctx.boxDragCurrent || !ctx.isDraggingBox) return;
+  if (!hooks.embeddingsReady()) {
+    hooks.ensureEmbeddings();
+    updateStatus(ctx, hooks.jsContainer, 'Preparing embeddings…', 'searching');
+    return;
+  }
+
+  // Debounce segmentation requests
+  const now = Date.now();
+  if (ctx.lastBoxSegmentTime && now - ctx.lastBoxSegmentTime < BOX_SEGMENT_DEBOUNCE_MS) {
+    ctx.needsSegment = true;
+    return;
+  }
+
+  if (ctx.inFlight) {
+    ctx.needsSegment = true;
+    return;
+  }
+
+  ctx.lastBoxSegmentTime = now;
+  ctx.inFlight = true;
+  ctx.needsSegment = false;
+
+  // Calculate box bounds in container coordinates
+  const left = Math.min(ctx.boxDragStart.x, ctx.boxDragCurrent.x);
+  const right = Math.max(ctx.boxDragStart.x, ctx.boxDragCurrent.x);
+  const top = Math.min(ctx.boxDragStart.y, ctx.boxDragCurrent.y);
+  const bottom = Math.max(ctx.boxDragStart.y, ctx.boxDragCurrent.y);
+
+  const boxWidth = right - left;
+  const boxHeight = bottom - top;
+
+  // Generate a grid of points across the box (3x3 grid = 9 points)
+  // This tells SAM2 "I want ALL of this region"
+  const gridPoints: SegmentPoint[] = [];
+  const gridSize = 3;
+
+  for (let row = 0; row < gridSize; row++) {
+    for (let col = 0; col < gridSize; col++) {
+      // Position points at 25%, 50%, 75% of the box dimensions
+      const t = (col + 1) / (gridSize + 1);
+      const s = (row + 1) / (gridSize + 1);
+
+      const containerX = left + boxWidth * t;
+      const containerY = top + boxHeight * s;
+
+      const imgCoords = getImageCoordinates({ x: containerX, y: containerY }, hooks);
+      if (imgCoords) {
+        gridPoints.push({ x: imgCoords.x, y: imgCoords.y, label: 1 });
+      }
+    }
+  }
+
+  if (gridPoints.length === 0) {
+    ctx.inFlight = false;
+    return;
+  }
+
+  updateStatus(ctx, hooks.jsContainer, 'Finding region…', 'searching');
+
+  try {
+    const result = await hooks.segment(gridPoints);
+
+    if (!ctx.active || !ctx.isDraggingBox) {
+      ctx.inFlight = false;
+      return;
+    }
+
+    if (result.success && result.maskData) {
+      ctx.boxPreviewMaskData = result.maskData;
+      renderPreviewMask(ctx, result.maskData, hooks);
+      updateStatus(ctx, hooks.jsContainer, 'Box preview ready', 'ready');
+    }
+  } catch (error) {
+    console.error('[SmartSelect] Box segmentation error:', error);
+  } finally {
+    ctx.inFlight = false;
+    if (ctx.needsSegment && ctx.active && ctx.isDraggingBox) {
+      requestBoxSegmentation(ctx, hooks);
+    }
+  }
+}
+
+/**
+ * Finalize box selection - store results for Command release handler
+ */
+function finalizeBoxSelection(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
+  // Store final selection for Command key release
+  ctx.boxFinalSelectionIds = Array.from(ctx.boxSelectedMaskIds);
+
+  // If we have a box preview mask, store it as lastMaskData for consistency
+  if (ctx.boxPreviewMaskData) {
+    ctx.lastMaskData = ctx.boxPreviewMaskData;
+  }
+
+  // Keep box visuals visible until Command is released
+  // (cleanup happens in exitSmartSelect or resetBoxDrag)
+}
+
+/**
+ * Reset box drag state
+ */
+export function resetBoxDrag(ctx: SmartSelectContext): void {
+  ctx.boxDragStart = null;
+  ctx.boxDragCurrent = null;
+  ctx.isDraggingBox = false;
+  ctx.boxSelectedMaskIds = new Set();
+  ctx.boxPreviewMaskData = null;
+  ctx.lastBoxSegmentTime = null;
+  ctx.boxFinalSelectionIds = [];
+  cleanupBoxDragVisuals(ctx);
+}
+
+/**
+ * Clean up box drag visual elements
+ */
+function cleanupBoxDragVisuals(ctx: SmartSelectContext): void {
+  if (ctx.boxDragRect) {
+    ctx.boxDragRect.remove();
+    ctx.boxDragRect = null;
+  }
 }
 
 // ============ Readiness Notifications ============

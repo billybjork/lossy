@@ -288,24 +288,40 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       if (isSmartSelectTrigger(e) && this.smartSelectCtx) {
         e.preventDefault();
 
-        const newMaskData = this.smartSelectCtx.lastMaskData;
+        const ctx = this.smartSelectCtx;
+        const newMaskData = ctx.lastMaskData; // Can be from point or box segmentation
+        const boxSelectedIds = ctx.boxFinalSelectionIds || [];
 
         if (newMaskData) {
-          // A new mask was generated. Move to "pending" state instead of confirming.
+          // A new mask was generated (from points or box). Move to "pending" state.
           this.exitSmartSelectMode();
           this.pendingMask = newMaskData;
           this.createPendingMaskElement();
           this.startMarchingAntsAnimation();
 
+          // Also select the box-selected masks if any (in addition to pending mask)
+          if (boxSelectedIds.length > 0) {
+            this.selectedMaskIds = new Set(boxSelectedIds);
+            this.updateHighlight();
+            this.pushEvent("select_regions", { ids: boxSelectedIds, shift: false });
+          }
+
+        } else if (boxSelectedIds.length > 0) {
+          // No generated mask, but have box-selected existing masks
+          this.exitSmartSelectMode();
+          this.selectedMaskIds = new Set(boxSelectedIds);
+          this.updateHighlight();
+          this.pushEvent("select_regions", { ids: boxSelectedIds, shift: false });
+
         } else if (
-          this.smartSelectCtx.spotlightedMaskId &&
+          ctx.spotlightedMaskId &&
           (
-            this.smartSelectCtx.spotlightHitType === 'pixel' ||
-            (this.smartSelectCtx.spotlightMaskType === 'text' && this.smartSelectCtx.spotlightHitType === 'bbox')
+            ctx.spotlightHitType === 'pixel' ||
+            (ctx.spotlightMaskType === 'text' && ctx.spotlightHitType === 'bbox')
           )
         ) {
-          // Select existing mask under cursor
-          const maskId = this.smartSelectCtx.spotlightedMaskId;
+          // Select existing mask under cursor (single hover selection)
+          const maskId = ctx.spotlightedMaskId;
           this.exitSmartSelectMode();
           this.selectedMaskIds = new Set([maskId]);
           this.updateHighlight();
@@ -682,8 +698,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
     }
 
     if (this.smartSelectCtx) {
-      // Click adds a locked point in Smart Select
-      SmartSelectMode.handleSmartSelectClick(this.smartSelectCtx, e, this.getSmartSelectHooks());
+      // Smart Select mode: handle potential box drag start
+      SmartSelectMode.handleSmartSelectMouseDown(this.smartSelectCtx, e, this.getSmartSelectHooks());
       return;
     }
 
@@ -692,7 +708,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   handleMouseMove(e: MouseEvent) {
     if (this.smartSelectCtx) {
-      // Cursor position is updated via container mousemove listener
+      // Smart Select mode: handle box drag move (also updates cursor position)
+      SmartSelectMode.handleSmartSelectMouseMove(this.smartSelectCtx, e, this.getSmartSelectHooks());
       return;
     }
 
@@ -713,6 +730,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   handleMouseUp(e: MouseEvent) {
     if (this.smartSelectCtx) {
+      // Smart Select mode: finalize box drag or delegate to click
+      SmartSelectMode.handleSmartSelectMouseUp(this.smartSelectCtx, e, this.getSmartSelectHooks());
       return;
     }
 

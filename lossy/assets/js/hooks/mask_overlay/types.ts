@@ -79,6 +79,16 @@ export interface SmartSelectContext {
   pointMarkersContainer: HTMLDivElement | null;
   previewCanvas: HTMLCanvasElement | null;
   statusEl: HTMLDivElement | null;
+
+  // Box drag state (for drag-to-select in Smart Select mode)
+  boxDragStart: { x: number; y: number } | null;
+  boxDragCurrent: { x: number; y: number } | null;
+  boxSelectedMaskIds: Set<string>;
+  boxPreviewMaskData: MaskData | null;
+  isDraggingBox: boolean;
+  lastBoxSegmentTime: number | null;
+  boxFinalSelectionIds: string[];
+  boxDragRect: HTMLDivElement | null;
 }
 
 /**
@@ -101,6 +111,15 @@ export function createSmartSelectContext(): SmartSelectContext {
     pointMarkersContainer: null,
     previewCanvas: null,
     statusEl: null,
+    // Box drag state
+    boxDragStart: null,
+    boxDragCurrent: null,
+    boxSelectedMaskIds: new Set(),
+    boxPreviewMaskData: null,
+    isDraggingBox: false,
+    lastBoxSegmentTime: null,
+    boxFinalSelectionIds: [],
+    boxDragRect: null,
   };
 }
 
