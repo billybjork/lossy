@@ -23,7 +23,7 @@ import {
   maskArea,
   gaussianBlurLogits,
   keepComponentsContainingPoints,
-  closeMask,
+  smoothMask,
   snapMaskToImageEdges,
 } from './mask-utils';
 
@@ -44,8 +44,9 @@ const MIN_STABILITY = 0.88;        // Minimum stability score (coherent boundari
 const MIN_COMPACTNESS = 0.85;      // Minimum compactness (solid interior)
 
 // Logit threshold for binarization (higher = tighter edges, more confidence required)
-// 0 = 50% confidence, 2.0 = ~88% confidence, 3.0 = ~95% confidence
-const LOGIT_THRESHOLD = 2.0;
+// 0 = 50% confidence, 1.0 = ~73% confidence, 2.0 = ~88% confidence, 3.0 = ~95% confidence
+// Using 1.0 for more permissive boundaries - reduces false negative holes
+const LOGIT_THRESHOLD = 1.0;
 
 // Resize info to track transformation
 interface ResizeInfo {
@@ -143,7 +144,6 @@ async function runEncoder(imageData: ImageData): Promise<{
 
   for (const name of session.outputNames) {
     const output = results[name];
-    const dims = output.dims as number[];
 
     if (name === 'image_embed') {
       imageEmbed = new Float32Array(output.data as Float32Array);
@@ -419,7 +419,7 @@ const LOGIT_BLUR_SIGMA = 1.0;
  * 1. Light Gaussian blur in logit space (reduces stair-stepping)
  * 2. Bilinear upsampling to original resolution
  * 3. Keep only component(s) containing click points (eliminates islands)
- * 4. Simple morphological cleanup (robust, predictable)
+ * 4. Comprehensive cleanup: fill holes, morphological closing, remove specks
  * 5. Snap near-frame masks flush to the image edges to remove noisy borders
  */
 function postprocessMask(
@@ -465,9 +465,16 @@ function postprocessMask(
     mask = keepComponentsContainingPoints(mask, originalWidth, originalHeight, positivePoints);
   }
 
-  // Step 4: Light morphological closing only (skip full smoothMask pipeline
-  // since keepComponentsContainingPoints already removed disconnected debris)
-  mask = closeMask(mask, originalWidth, originalHeight, 2);
+  // Step 4: Comprehensive mask cleanup with hole filling
+  // smoothMask removes small exterior debris, fills interior holes, and applies closing
+  const imageArea = originalWidth * originalHeight;
+  const scaleFactor = Math.min(originalWidth, originalHeight);
+  mask = smoothMask(mask, originalWidth, originalHeight, {
+    minComponentArea: Math.max(100, Math.floor(imageArea * 0.0005)),  // Remove tiny exterior specks
+    minHoleArea: Math.max(200, Math.floor(imageArea * 0.0015)),       // Fill holes up to 0.15% of image
+    closingRadius: Math.max(3, Math.min(5, Math.round(scaleFactor / 250))),  // Scale-aware closing
+    erodeAfterClose: 1,  // Counteract slight growth from closing
+  });
 
   // Step 5: If the mask already covers most of the frame, snap it flush to image edges
   mask = snapMaskToImageEdges(mask, originalWidth, originalHeight, {
@@ -517,8 +524,6 @@ export async function segmentAtPoints(
   points: PointPrompt[],
   imageSize: { width: number; height: number }
 ): Promise<SegmentMask> {
-  const startTime = performance.now();
-
   if (points.length === 0) {
     throw new Error('At least one point is required for segmentation');
   }
@@ -546,9 +551,6 @@ export async function segmentAtPoints(
     .map(p => ({ x: p.x, y: p.y }));
 
   const { mask, bbox, area } = postprocessMask(maskData, maskDims, resizeInfo, positivePoints);
-
-  const positiveCount = positivePoints.length;
-  const negativeCount = points.filter(p => p.label === 0).length;
 
   return { mask, bbox, score, stabilityScore, area };
 }
