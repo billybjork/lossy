@@ -13,6 +13,51 @@ defmodule Lossy.Documents do
   ## Documents
 
   @doc """
+  Creates a document from a user-uploaded image file.
+  Takes a temporary file path and original filename.
+  """
+  def create_from_upload(temp_path, filename) do
+    Logger.info("Creating document from upload", filename: filename)
+
+    name = Naming.generate_name()
+
+    # Create the document first (without asset)
+    attrs = %{
+      source: :upload,
+      capture_mode: :direct_asset,
+      status: :loading,
+      name: name
+    }
+
+    case %Document{} |> Document.changeset(attrs) |> Repo.insert() do
+      {:ok, document} ->
+        # Now save the uploaded image as an asset
+        opts = [document_name: name]
+
+        case Assets.save_image_from_path(document.id, temp_path, :original, opts) do
+          {:ok, asset} ->
+            # Update document with asset and dimensions
+            update_document(document, %{
+              original_asset_id: asset.id,
+              width: asset.width,
+              height: asset.height,
+              status: :ready
+            })
+
+          {:error, reason} ->
+            Logger.error("Failed to save uploaded image", reason: inspect(reason))
+            # Clean up the document if asset save failed
+            Repo.delete(document)
+            {:error, reason}
+        end
+
+      {:error, changeset} ->
+        Logger.error("Failed to create document for upload", errors: inspect(changeset.errors))
+        {:error, changeset}
+    end
+  end
+
+  @doc """
   Creates a document from a capture request.
   """
   def create_capture(attrs \\ %{}) do

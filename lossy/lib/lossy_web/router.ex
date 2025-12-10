@@ -19,6 +19,7 @@ defmodule LossyWeb.Router do
     pipe_through :browser
 
     get "/", PageController, :home
+    live "/edit", EditLive
     live "/edit/:id", EditLive
   end
 

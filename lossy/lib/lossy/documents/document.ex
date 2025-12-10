@@ -32,6 +32,7 @@ defmodule Lossy.Documents.Document do
     field :width, :integer
     field :height, :integer
     field :status, Ecto.Enum, values: @valid_statuses, default: :loading
+    field :source, Ecto.Enum, values: [:extension, :upload], default: :extension
 
     # Human-readable identifier: lossy-YYYYMMDD-NNN
     field :name, :string
@@ -63,12 +64,14 @@ defmodule Lossy.Documents.Document do
       :status,
       :history_index,
       :name,
-      :source_domain
+      :source_domain,
+      :source
     ])
     |> cast_embed(:history, with: &HistoryEntry.changeset/2)
-    |> validate_required([:source_url, :capture_mode])
+    |> validate_required([:capture_mode])
     |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot])
     |> validate_inclusion(:status, @valid_statuses)
+    |> validate_inclusion(:source, [:extension, :upload])
   end
 
   @doc """

@@ -44,6 +44,26 @@ defmodule LossyWeb.EditLive do
     end
   end
 
+  # Mount for /edit with no document - show upload UI
+  @impl true
+  def mount(_params, _session, socket) do
+    socket =
+      socket
+      |> assign(document: nil, page_title: "Upload")
+      |> assign(selected_region_ids: MapSet.new())
+      |> assign(export_path: nil, export_filename: nil, exporting: false)
+      |> assign(masks: [])
+      |> assign(fresh_arrival: false)
+      |> assign(smart_select_mode: false)
+      |> allow_upload(:image,
+        accept: ~w(.jpg .jpeg .png .webp),
+        max_entries: 1,
+        max_file_size: 50_000_000
+      )
+
+    {:ok, socket}
+  end
+
   @impl true
   def handle_info({:document_updated, document}, socket) do
     masks = regions_to_masks(document)
@@ -218,6 +238,45 @@ defmodule LossyWeb.EditLive do
          |> put_flash(:error, "Export failed: #{inspect(reason)}")}
     end
   end
+
+  @impl true
+  def handle_event("save-upload", _params, socket) do
+    # consume_uploaded_entries callback runs while the temp file still exists
+    results =
+      consume_uploaded_entries(socket, :image, fn %{path: path}, entry ->
+        # Create document directly inside callback while temp file exists
+        case Documents.create_from_upload(path, entry.client_name) do
+          {:ok, document} -> {:ok, {:ok, document}}
+          {:error, reason} -> {:ok, {:error, reason}}
+        end
+      end)
+
+    case results do
+      [{:ok, document}] ->
+        {:noreply, redirect(socket, to: "/edit/#{document.id}")}
+
+      [{:error, reason}] ->
+        {:noreply, put_flash(socket, :error, "Upload failed: #{inspect(reason)}")}
+
+      [] ->
+        {:noreply, put_flash(socket, :error, "No file selected")}
+    end
+  end
+
+  @impl true
+  def handle_event("cancel-upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :image, ref)}
+  end
+
+  @impl true
+  def handle_event("validate-upload", _params, socket) do
+    {:noreply, socket}
+  end
+
+  defp error_to_string(:too_large), do: "File is too large (max 50MB)"
+  defp error_to_string(:not_accepted), do: "File type not supported (use PNG, JPG, or WebP)"
+  defp error_to_string(:too_many_files), do: "Only one file at a time"
+  defp error_to_string(err), do: "Error: #{inspect(err)}"
 
   defp export_path_to_url(path) do
     # Convert file path to web-accessible URL
