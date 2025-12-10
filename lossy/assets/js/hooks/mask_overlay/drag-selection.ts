@@ -9,6 +9,8 @@ import type { MaskOverlayState, DragRect } from './types';
 import { getZoomLevel } from './types';
 import { isSmartSelectActive } from './smart-select-mode';
 
+// ============ Drag Rect Helpers ============
+
 function getMarqueeHost(container: HTMLElement): HTMLElement {
   const jsContainer = document.getElementById('js-overlay-container');
   if (jsContainer && container.contains(jsContainer)) {
@@ -149,6 +151,7 @@ export function updateDrag(
   // Preview: highlight masks that intersect
   const rect: DragRect = { left, top, right: left + width, bottom: top + height };
   const intersecting = callbacks.getMasksInRect(rect);
+
   callbacks.previewDragSelection(intersecting);
 }
 
@@ -242,6 +245,7 @@ export function getMasksInRect(
 
 /**
  * Preview drag selection by highlighting intersecting masks
+ * Uses the same mask-selected styling as final selection for consistency
  */
 export function previewDragSelection(
   container: HTMLElement,
@@ -265,10 +269,11 @@ export function previewDragSelection(
 
     mask.classList.remove('mask-hovered', 'mask-selected', 'mask-dimmed', 'mask-idle');
 
+    // Show as selected if intersecting with marquee, or if shift-held and already selected
     if (isIntersecting || (dragShift && isSelected)) {
       mask.classList.add('mask-selected');
     } else {
-      mask.classList.add('mask-dimmed');
+      mask.classList.add('mask-idle');
     }
   });
 

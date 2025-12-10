@@ -39,8 +39,6 @@ export function enterSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHook
   ctx.active = true;
   ctx.spotlightedMaskId = null;
   ctx.spotlightHitType = null;
-  ctx.spotlightMaskType = null;
-  ctx.textCutoutEl = null;
   ctx.lockedPoints = [];
   ctx.lastMaskData = null;
   ctx.inFlight = false;
@@ -77,7 +75,6 @@ export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks
   ctx.active = false;
   ctx.spotlightedMaskId = null;
   ctx.spotlightHitType = null;
-  ctx.spotlightMaskType = null;
   ctx.lockedPoints = [];
   ctx.lastMaskData = null;
   ctx.inFlight = false;
@@ -103,10 +100,6 @@ export function exitSmartSelect(ctx: SmartSelectContext, hooks: SmartSelectHooks
   removePointMarkers(ctx);
   removePreviewMask(ctx);
   removeStatus(ctx);
-  if (ctx.textCutoutEl) {
-    ctx.textCutoutEl.remove();
-    ctx.textCutoutEl = null;
-  }
 
   // Force cleanup any stragglers
   forceCleanupSmartSelectElements(ctx);
@@ -179,19 +172,16 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
 
   const hit = findMaskUnderCursor(ctx.lastMouse, hooks);
 
-  // Mode 1: Selection (a mask was found under the cursor)
+  // Mode 1: Selection (an object mask was found under the cursor)
   if (hit) {
     ctx.spotlightedMaskId = hit.maskId;
     ctx.spotlightHitType = hit.hitType;
-    ctx.spotlightMaskType = hit.maskType;
 
     clearPreview(ctx);
     hooks.updateHighlight();
     resetSpotlightOverlay(ctx);
 
-    const statusText = hit.hitType === 'pixel' ? 'Spotlighting…' :
-                       hit.maskType === 'text' ? 'Text region ready' :
-                       'Region ready';
+    const statusText = hit.hitType === 'pixel' ? 'Spotlighting…' : 'Region ready';
     updateStatus(ctx, hooks.jsContainer, statusText, 'ready');
     return; // Done for this tick, we are in selection mode.
   }
@@ -200,7 +190,6 @@ function tick(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
   if (ctx.spotlightedMaskId) {
     ctx.spotlightedMaskId = null;
     ctx.spotlightHitType = null;
-    ctx.spotlightMaskType = null;
     hooks.updateHighlight();
   }
 
@@ -228,7 +217,6 @@ function handleMultiPointTick(ctx: SmartSelectContext, hooks: SmartSelectHooks):
   if (ctx.spotlightedMaskId !== null) {
     ctx.spotlightedMaskId = null;
     ctx.spotlightHitType = null;
-    ctx.spotlightMaskType = null;
     hooks.updateHighlight();
   }
 
@@ -348,14 +336,17 @@ function findMaskUnderCursor(
   const hits: MaskHit[] = [];
 
   for (const mask of Array.from(masks)) {
+    const maskId = mask.dataset.maskId || '';
+    const maskType = (mask.dataset.maskType || 'manual') as 'text' | 'object' | 'manual';
+
+    // Skip text regions in Smart Select - they're selected via click/marquee in normal mode
+    if (maskType === 'text') continue;
+
     const rect = mask.getBoundingClientRect();
     const inBbox = clientX >= rect.left && clientX <= rect.right &&
                    clientY >= rect.top && clientY <= rect.bottom;
 
     if (!inBbox) continue;
-
-    const maskId = mask.dataset.maskId || '';
-    const maskType = (mask.dataset.maskType || 'manual') as 'text' | 'object' | 'manual';
     const area = rect.width * rect.height;
 
     let hitType: 'pixel' | 'bbox' = 'bbox';
@@ -372,11 +363,9 @@ function findMaskUnderCursor(
     // Score the hit:
     // - Pixel hits are worth more than bbox hits.
     // - Smaller areas are better (score is inversely proportional to area).
-    // - Text masks get a slight boost to win ties.
     const score =
       (isPixelHit ? 1e6 : 0) +         // Pixel hits are high priority
-      (1e6 / (area || 1)) +            // Smaller area is better
-      (maskType === 'text' ? 1 : 0);   // Text masks are slightly preferred
+      (1e6 / (area || 1));             // Smaller area is better
 
     hits.push({
       maskId,
@@ -459,7 +448,6 @@ export function handleSmartSelectClick(
   ctx.lockedPoints.push(point);
   ctx.spotlightedMaskId = null;
   ctx.spotlightHitType = null;
-  ctx.spotlightMaskType = null;
   ctx.needsSegment = true;
 
   renderPointMarkers(ctx, hooks);
@@ -557,9 +545,6 @@ function resetSpotlightOverlay(ctx: SmartSelectContext): void {
   }
 }
 
-function setOverlayTransparent(ctx: SmartSelectContext): void {
-  // Deprecated: keep overlay visible; text spotlight uses cutout instead.
-}
 
 /**
  * Create point markers container
@@ -813,7 +798,7 @@ export function undoLastPoint(ctx: SmartSelectContext, hooks: SmartSelectHooks):
     return false;
   }
 
-  const removed = ctx.lockedPoints.pop();
+  ctx.lockedPoints.pop();
 
   // Re-render point markers
   renderPointMarkers(ctx, hooks);
@@ -889,7 +874,6 @@ export function handleSmartSelectMouseMove(
     clearPreview(ctx);
     ctx.spotlightedMaskId = null;
     ctx.spotlightHitType = null;
-    ctx.spotlightMaskType = null;
   }
 
   ctx.boxDragCurrent = { x: currentX, y: currentY };
@@ -999,6 +983,10 @@ function findMasksWithOverlap(
   masks.forEach((mask: HTMLElement) => {
     const maskId = mask.dataset.maskId || '';
     if (!maskId) return;
+
+    // Skip text regions in Smart Select box drag - they're selected via marquee in normal mode
+    const maskType = mask.dataset.maskType || 'manual';
+    if (maskType === 'text') return;
 
     // Get mask bbox from dataset (in image coordinates)
     const bboxX = parseFloat(mask.dataset.bboxX || '0');
@@ -1154,7 +1142,7 @@ async function requestBoxSegmentation(
 /**
  * Finalize box selection - store results for Command release handler
  */
-function finalizeBoxSelection(ctx: SmartSelectContext, hooks: SmartSelectHooks): void {
+function finalizeBoxSelection(ctx: SmartSelectContext, _hooks: SmartSelectHooks): void {
   // Store final selection for Command key release
   ctx.boxFinalSelectionIds = Array.from(ctx.boxSelectedMaskIds);
 

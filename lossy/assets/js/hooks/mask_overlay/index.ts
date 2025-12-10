@@ -313,14 +313,8 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
           this.updateHighlight();
           this.pushEvent("select_regions", { ids: boxSelectedIds, shift: false });
 
-        } else if (
-          ctx.spotlightedMaskId &&
-          (
-            ctx.spotlightHitType === 'pixel' ||
-            (ctx.spotlightMaskType === 'text' && ctx.spotlightHitType === 'bbox')
-          )
-        ) {
-          // Select existing mask under cursor (single hover selection)
+        } else if (ctx.spotlightedMaskId && ctx.spotlightHitType === 'pixel') {
+          // Select existing object mask under cursor (pixel-precise hit)
           const maskId = ctx.spotlightedMaskId;
           this.exitSmartSelectMode();
           this.selectedMaskIds = new Set([maskId]);
@@ -539,24 +533,13 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
 
   updateHighlight() {
     const spotlightedMaskId = SmartSelectMode.getSpotlightedMaskId(this.smartSelectCtx);
-    const spotlightMaskType = this.smartSelectCtx?.spotlightMaskType ?? null;
     const isSmartSelectMode = SmartSelectMode.isSmartSelectActive(this.smartSelectCtx);
     const ctx = this.smartSelectCtx;
     const hasPreviewMask = isSmartSelectMode && Boolean(ctx?.lastMaskData);
 
-    if (ctx && ctx.textCutoutEl && !(isSmartSelectMode && spotlightMaskType === 'text' && spotlightedMaskId)) {
-      ctx.textCutoutEl.remove();
-      ctx.textCutoutEl = null;
-    }
-
     Rendering.updateHighlight(this.container, this as unknown as MaskOverlayState, () => {
       if (hasPreviewMask && this.maskCacheReady) {
         Rendering.updateSegmentMaskSpotlight(this.maskImageCache, null);
-        return;
-      }
-
-      if (isSmartSelectMode && spotlightMaskType === 'text' && spotlightedMaskId) {
-        this.applyTextSpotlight(spotlightedMaskId);
         return;
       }
 
@@ -575,84 +558,6 @@ export const MaskOverlay: Hook<MaskOverlayState, HTMLElement> = {
       this.hoveredMaskId,
       this.dragIntersectingIds
     );
-  },
-
-  applyTextSpotlight(spotlightedMaskId: string) {
-    const masks = this.container.querySelectorAll('.mask-region') as NodeListOf<HTMLElement>;
-    const ctx = this.smartSelectCtx;
-    const jsContainer = document.getElementById('js-overlay-container');
-    const img = document.getElementById('editor-image') as HTMLImageElement | null;
-
-    masks.forEach((mask: HTMLElement) => {
-      const maskType = mask.dataset.maskType;
-      const isText = maskType !== 'object' && maskType !== 'manual';
-
-      if (!isText) {
-        mask.classList.remove('mask-hovered', 'mask-dimmed', 'mask-selected');
-        mask.classList.add('mask-idle');
-        mask.style.removeProperty('z-index');
-        mask.style.removeProperty('background');
-        mask.style.removeProperty('box-shadow');
-        return;
-      }
-
-      const isSpotlight = mask.dataset.maskId === spotlightedMaskId;
-      mask.classList.remove('mask-selected', 'mask-idle');
-
-      if (isSpotlight) {
-        mask.classList.remove('mask-dimmed');
-        mask.classList.add('mask-hovered');
-        mask.style.zIndex = '50';
-        mask.style.background = 'rgba(255, 255, 255, 0.08)';
-        mask.style.boxShadow = '0 0 4px rgba(255, 255, 255, 0.5), 0 0 12px rgba(255, 255, 255, 0.3)';
-        mask.style.filter = 'drop-shadow(0 0 4px rgba(255, 255, 255, 0.5)) drop-shadow(0 0 12px rgba(255, 255, 255, 0.3))';
-
-        if (ctx && jsContainer && img) {
-          if (!ctx.textCutoutEl) {
-            const cutout = document.createElement('div');
-            cutout.className = 'text-spotlight-cutout';
-            cutout.style.position = 'absolute';
-            cutout.style.pointerEvents = 'none';
-            cutout.style.zIndex = '48';
-            cutout.style.borderRadius = '2px';
-            jsContainer.appendChild(cutout);
-            ctx.textCutoutEl = cutout;
-          }
-
-          const cutout = ctx.textCutoutEl;
-          const left = mask.offsetLeft;
-          const top = mask.offsetTop;
-          const width = mask.offsetWidth;
-          const height = mask.offsetHeight;
-
-          const imgWidth = img.clientWidth;
-          const imgHeight = img.clientHeight;
-
-          cutout.style.left = `${left}px`;
-          cutout.style.top = `${top}px`;
-          cutout.style.width = `${width}px`;
-          cutout.style.height = `${height}px`;
-          cutout.style.backgroundImage = `url(${img.currentSrc || img.src})`;
-          cutout.style.backgroundRepeat = 'no-repeat';
-          cutout.style.backgroundSize = `${imgWidth}px ${imgHeight}px`;
-          cutout.style.backgroundPosition = `-${left}px -${top}px`;
-        }
-      } else {
-        mask.classList.remove('mask-hovered');
-        mask.classList.add('mask-dimmed');
-        mask.style.removeProperty('z-index');
-        mask.style.removeProperty('background');
-        mask.style.removeProperty('box-shadow');
-        mask.style.removeProperty('filter');
-      }
-    });
-
-    if (ctx && (!spotlightedMaskId || ctx.spotlightMaskType !== 'text')) {
-      if (ctx.textCutoutEl) {
-        ctx.textCutoutEl.remove();
-        ctx.textCutoutEl = null;
-      }
-    }
   },
 
   renderSegmentMasks() {
