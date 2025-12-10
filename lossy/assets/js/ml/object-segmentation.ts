@@ -124,42 +124,40 @@ async function runEncoder(imageData: ImageData): Promise<{
   embeddings: Sam2Embeddings;
   resizeInfo: ResizeInfo;
 }> {
+  console.log('[SAM2] runEncoder: getting session...');
   const session = await getSamEncoderSession();
+  console.log('[SAM2] runEncoder: session obtained, preprocessing image...');
 
   const { tensor, resizeInfo } = preprocessImage(imageData);
+  console.log('[SAM2] runEncoder: preprocessing done, creating tensor...');
 
   // Create input tensor [1, 3, 1024, 1024]
   const inputTensor = createFloat32Tensor(tensor, [1, 3, SAM_INPUT_SIZE, SAM_INPUT_SIZE]);
+  console.log('[SAM2] runEncoder: tensor created, running inference...');
 
   // Run encoder
   const feeds: Record<string, Tensor> = {};
   feeds[session.inputNames[0]] = inputTensor;
 
+  const startInf = performance.now();
   const results = await session.run(feeds);
+  console.log(`[SAM2] runEncoder: inference done in ${(performance.now() - startInf).toFixed(0)}ms`);
 
-  // Extract all 3 outputs
-  let imageEmbed: Float32Array | null = null;
-  let highResFeats0: Float32Array | null = null;
-  let highResFeats1: Float32Array | null = null;
+  // SharpAI encoder outputs
+  const imageEmbedOutput = results['image_embed'];
+  const highResFeats0Output = results['high_res_feats_0'];
+  const highResFeats1Output = results['high_res_feats_1'];
 
-  for (const name of session.outputNames) {
-    const output = results[name];
-
-    if (name === 'image_embed') {
-      imageEmbed = new Float32Array(output.data as Float32Array);
-    } else if (name === 'high_res_feats_0') {
-      highResFeats0 = new Float32Array(output.data as Float32Array);
-    } else if (name === 'high_res_feats_1') {
-      highResFeats1 = new Float32Array(output.data as Float32Array);
-    }
-  }
-
-  if (!imageEmbed || !highResFeats0 || !highResFeats1) {
-    throw new Error('Missing encoder outputs. Expected: image_embed, high_res_feats_0, high_res_feats_1');
+  if (!imageEmbedOutput || !highResFeats0Output || !highResFeats1Output) {
+    throw new Error(`Missing SharpAI encoder outputs. Got: ${session.outputNames.join(', ')}`);
   }
 
   return {
-    embeddings: { imageEmbed, highResFeats0, highResFeats1 },
+    embeddings: {
+      imageEmbed: new Float32Array(imageEmbedOutput.data as Float32Array),
+      highResFeats0: new Float32Array(highResFeats0Output.data as Float32Array),
+      highResFeats1: new Float32Array(highResFeats1Output.data as Float32Array),
+    },
     resizeInfo,
   };
 }
@@ -205,14 +203,9 @@ async function runDecoder(
   });
 
   // Prepare inputs for SAM 2 decoder
-  // SAM 2 expects:
-  // - image_embed: [1, 256, 64, 64]
-  // - high_res_feats_0: [1, 32, 256, 256]
-  // - high_res_feats_1: [1, 64, 128, 128]
-  // - point_coords: [num_labels, num_points, 2]
-  // - point_labels: [num_labels, num_points]
-  // - mask_input: [num_labels, 1, 256, 256]
-  // - has_mask_input: [num_labels]
+  // Support both naming conventions:
+  // - g-ronimo/samexporter: image_embed, high_res_feats_0, high_res_feats_1
+  // - rectlabel/sam-cpp-macos: image_embeddings, high_res_features1, high_res_features2, orig_im_size
 
   const imageEmbedTensor = createFloat32Tensor(embeddings.imageEmbed, [1, 256, 64, 64]);
   const highRes0Tensor = createFloat32Tensor(embeddings.highResFeats0, [1, 32, 256, 256]);
@@ -226,6 +219,24 @@ async function runDecoder(
   const maskInput = createFloat32Tensor(new Float32Array(1 * 1 * 256 * 256), [1, 1, 256, 256]);
   const hasMaskInput = createFloat32Tensor(new Float32Array([0]), [1]);
 
+  const expectedInputs = [
+    'image_embed',
+    'high_res_feats_0',
+    'high_res_feats_1',
+    'point_coords',
+    'point_labels',
+    'mask_input',
+    'has_mask_input',
+  ];
+  const missingInputs = expectedInputs.filter(name => !session.inputNames.includes(name));
+  if (missingInputs.length > 0) {
+    throw new Error(`Decoder input mismatch for SharpAI SAM2: missing ${missingInputs.join(', ')}`);
+  }
+  const unexpectedInputs = session.inputNames.filter(name => !expectedInputs.includes(name));
+  if (unexpectedInputs.length > 0) {
+    throw new Error(`Decoder has unexpected inputs for SharpAI SAM2: ${unexpectedInputs.join(', ')}`);
+  }
+
   const feeds: Record<string, Tensor> = {
     image_embed: imageEmbedTensor,
     high_res_feats_0: highRes0Tensor,
@@ -238,30 +249,24 @@ async function runDecoder(
 
   const results = await session.run(feeds);
 
-  // Get mask and score outputs
-  // SAM 2 outputs: masks [1, 3, H, W] and iou_predictions [1, 3]
-  let allMasks: Float32Array | null = null;
-  let maskDims = { width: 0, height: 0 };
-  let scores: Float32Array | null = null;
-  let numMasks = 3;
+  // Get mask and score outputs (SharpAI names)
+  const maskOutput = results['masks'];
+  const scoreOutput = results['iou_predictions'];
 
-  for (const name of session.outputNames) {
-    const output = results[name];
-    const dims = output.dims as number[];
-    if (name === 'masks') {
-      allMasks = new Float32Array(output.data as Float32Array);
-      // Shape is [1, num_masks, H, W]
-      if (dims.length >= 4) {
-        numMasks = dims[1];
-        maskDims = { height: dims[2], width: dims[3] };
-      }
-    } else if (name === 'iou_predictions') {
-      scores = new Float32Array(output.data as Float32Array);
-    }
+  if (!maskOutput || !scoreOutput) {
+    throw new Error(`Missing decoder outputs (masks/iou_predictions). Got: ${session.outputNames.join(', ')}`);
   }
 
-  if (!allMasks || !scores) {
-    throw new Error('Missing decoder outputs (masks or iou_predictions)');
+  const maskDims =
+    maskOutput.dims.length >= 4
+      ? { height: maskOutput.dims[2], width: maskOutput.dims[3] }
+      : { width: 0, height: 0 };
+  const numMasks = maskOutput.dims.length >= 2 ? maskOutput.dims[1] : 3;
+  const allMasks = new Float32Array(maskOutput.data as Float32Array);
+  const scores = new Float32Array(scoreOutput.data as Float32Array);
+
+  if (maskDims.width === 0 || maskDims.height === 0) {
+    throw new Error(`Unexpected mask dimensions from decoder: ${maskOutput.dims.join('x')}`);
   }
 
   // Calculate quality metrics for each candidate mask

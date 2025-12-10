@@ -59,14 +59,9 @@ defmodule Lossy.DataCase do
     if File.exists?(upload_path) do
       upload_path
       |> File.ls!()
-      |> Enum.filter(&uuid_folder?/1)
-      |> Enum.each(fn folder ->
-        folder_path = Path.join(upload_path, folder)
-
-        if File.dir?(folder_path) do
-          File.rm_rf!(folder_path)
-        end
-      end)
+      |> Enum.map(&Path.join(upload_path, &1))
+      |> Enum.filter(&dir_with_uuid_name?/1)
+      |> Enum.each(&File.rm_rf!/1)
     end
   end
 
@@ -76,6 +71,10 @@ defmodule Lossy.DataCase do
       {:ok, _} -> true
       :error -> false
     end
+  end
+
+  defp dir_with_uuid_name?(path) do
+    File.dir?(path) && uuid_folder?(Path.basename(path))
   end
 
   @doc """

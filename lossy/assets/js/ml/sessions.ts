@@ -95,9 +95,11 @@ async function createSession(type: SessionType): Promise<InferenceSession> {
   if (useWebGPU) {
     try {
       console.log(`[ML] Attempting WebGPU backend for ${type}...`);
+      // SharpAI recommends 'disabled' for WebGPU stability on their optimized models
+      const optLevel = type === 'samEncoder' ? 'disabled' : 'all';
       const session = await ort.InferenceSession.create(modelBuffer, {
         executionProviders: ['webgpu'],
-        graphOptimizationLevel: 'all',
+        graphOptimizationLevel: optLevel,
       });
       sessions[type].backend = 'webgpu';
       console.log(`[ML] ${type} WebGPU session created successfully`);

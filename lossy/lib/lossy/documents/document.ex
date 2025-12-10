@@ -69,6 +69,7 @@ defmodule Lossy.Documents.Document do
     ])
     |> cast_embed(:history, with: &HistoryEntry.changeset/2)
     |> validate_required([:capture_mode])
+    |> validate_required_source_url()
     |> validate_inclusion(:capture_mode, [:direct_asset, :screenshot])
     |> validate_inclusion(:status, @valid_statuses)
     |> validate_inclusion(:source, [:extension, :upload])
@@ -119,5 +120,13 @@ defmodule Lossy.Documents.Document do
   def can_redo?(document) do
     history = document.history || []
     (document.history_index || 0) < length(history)
+  end
+
+  # Only require source_url for extension-sourced documents. Uploads do not have a URL.
+  defp validate_required_source_url(changeset) do
+    case get_field(changeset, :source) do
+      :extension -> validate_required(changeset, [:source_url])
+      _ -> changeset
+    end
   end
 end

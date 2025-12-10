@@ -6,7 +6,7 @@ Edit text baked into any image on the web.
 
 1. **Capture** - Browser extension grabs images from any webpage
 2. **Detect** - ML finds text regions automatically (runs locally via WebGPU)
-3. **Segment** - Click-to-select objects with EdgeSAM
+3. **Segment** - Click-to-select objects with SAM 2 (SharpAI build)
 4. **Edit** - Replace text, inpaint backgrounds (cloud)
 5. **Export** - Download high-quality edited image
 

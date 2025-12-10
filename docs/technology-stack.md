@@ -102,7 +102,7 @@ This document covers key technology choices and the rationale behind them.
 
 **Current Architecture** (implemented):
 - Text detection: Local (ONNX Runtime Web in browser)
-- Click-to-segment: Local (EdgeSAM via ONNX Runtime Web)
+- Click-to-segment: Local (SAM 2 - SharpAI via ONNX Runtime Web)
 
 - Upscaling: Cloud (Real-ESRGAN via Replicate)
 

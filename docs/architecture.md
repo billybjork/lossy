@@ -62,7 +62,7 @@ See [Extension Implementation Guide](implementation/extension.md) for details.
 **Local ML Stack**:
 - ONNX Runtime Web 1.23+ with WebGPU (WASM fallback)
 - Text detection (DBNet/PP-OCRv3) runs automatically on page load
-- Click-to-segment (EdgeSAM) with cached embeddings for fast iteration
+- Click-to-segment (SAM 2 - SharpAI) with cached embeddings for fast iteration
 - ~70MB models loaded lazily from `/models/` and `/wasm/`
 
 **State Flow**:
@@ -82,7 +82,7 @@ See [Editor Implementation Guide](implementation/editor.md) for details.
 
 **Local (Web Worker)**:
 - Text detection (DBNet/PP-OCRv3) - runs on page load
-- Click-to-segment (EdgeSAM encoder + decoder) - runs on demand
+- Click-to-segment (SAM 2 encoder + decoder via SharpAI) - runs on demand
 - WebGPU with WASM fallback via ONNX Runtime Web
 
 **Cloud (Replicate)**:
@@ -153,7 +153,7 @@ User clicks "Download" → Generate final composite image
 ### ML Layer
 - **What**: Computer vision tasks (detection, segmentation, upscaling)
 - **Not What**: Application logic, data persistence
-- **Tools**: ONNX Runtime Web (local), Replicate API (cloud), PP-OCRv3, EdgeSAM, LaMa, Real-ESRGAN
+- **Tools**: ONNX Runtime Web (local), Replicate API (cloud), PP-OCRv3, SAM 2 (SharpAI), LaMa, Real-ESRGAN
 
 ## Concurrency Model
 

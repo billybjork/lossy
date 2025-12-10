@@ -11,9 +11,10 @@ This document covers all machine learning and computer vision decisions for Loss
 - ONNX Runtime Web with WebGPU (WASM fallback)
 - <100ms inference on modern hardware
 
-**Click-to-Segment** (EdgeSAM):
-- Encoder: 21MB model, runs once to compute embeddings
-- Decoder: 15MB model, runs per click (~80ms)
+**Click-to-Segment** (SAM 2 - SharpAI):
+- SharpAI-optimized SAM 2 encoder + decoder via ONNX Runtime Web
+- Encoder runs once per image to cache embeddings
+- Decoder runs per click (~80ms)
 - Embeddings cached per document for fast iteration
 
 ### Cloud (Replicate)
@@ -267,7 +268,7 @@ See [Technology Stack](technology-stack.md) for platform decisions.
 - Output: JSON list of bounding boxes
 
 **Click-to-Segment** (Local):
-- EdgeSAM encoder + decoder via ONNX Runtime Web
+- SAM 2 encoder + decoder (SharpAI WebGPU build) via ONNX Runtime Web
 - Runs in browser Web Worker
 - Input: Image + click points
 - Output: Binary mask
@@ -313,7 +314,7 @@ See [Technology Stack](technology-stack.md) for platform decisions.
 
 1. **Hybrid Architecture**: Local inference for fast feedback (detection, segmentation)
 2. **Privacy**: Images stay in browser for detection - only sent to cloud when user triggers inpainting
-3. **Proven Models**: PP-OCRv3, EdgeSAM, LaMa, Real-ESRGAN are battle-tested
+3. **Proven Models**: PP-OCRv3, SAM 2 (SharpAI), LaMa, Real-ESRGAN are battle-tested
 4. **Clear Upgrade Path**: Can swap models without changing architecture
 5. **User Experience**: Instant detection feedback, cloud only for resource-intensive operations
 

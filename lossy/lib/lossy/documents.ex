@@ -17,7 +17,7 @@ defmodule Lossy.Documents do
   Takes a temporary file path and original filename.
   """
   def create_from_upload(temp_path, filename) do
-    Logger.info("Creating document from upload", filename: filename)
+    Logger.info("Creating document from upload", file: filename)
 
     name = Naming.generate_name()
 

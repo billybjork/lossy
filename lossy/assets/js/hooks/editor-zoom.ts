@@ -182,5 +182,22 @@ export const EditorZoom: Hook<EditorZoomState, HTMLElement> = {
       this.imageContainer.style.transformOrigin = 'center center';
       this.imageContainer.style.transform = `scale(${this.zoomLevel})`;
     }
+
+    // Scale background dot pattern to match zoom level so dots feel pinned to the image.
+    // We need to adjust both size AND position because the image zooms from its center,
+    // but the background pattern tiles from top-left by default.
+    const baseSize = 24;
+    const scaledSize = baseSize * this.zoomLevel;
+    this.el.style.backgroundSize = `${scaledSize}px ${scaledSize}px`;
+
+    // Calculate background position offset so dots stay aligned with the zoom center.
+    // The viewport center stays fixed during zoom. At zoom=1, position is 0,0.
+    // As we zoom, the pattern needs to expand outward from center, which means
+    // shifting the origin by half the viewport size * (1 - zoomLevel).
+    const viewportWidth = this.el.clientWidth;
+    const viewportHeight = this.el.clientHeight;
+    const offsetX = (viewportWidth / 2) * (1 - this.zoomLevel);
+    const offsetY = (viewportHeight / 2) * (1 - this.zoomLevel);
+    this.el.style.backgroundPosition = `${offsetX}px ${offsetY}px`;
   }
 };
