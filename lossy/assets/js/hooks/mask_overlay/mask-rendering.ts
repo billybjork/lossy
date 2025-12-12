@@ -207,11 +207,15 @@ export function updateSegmentMaskHighlight(
     if (isSelected) {
       // Selected: bold colored fill + colored outline
       const color = MASK_COLORS[cached.colorIndex];
-      applyMaskWithOutline(maskId, maskImageCache, color.fill, color.stroke, 4);
+      applyMaskVisuals(maskId, maskImageCache, {
+        fill: color.fill,
+        stroke: color.stroke,
+        strokeWidth: 4
+      });
       canvas.style.opacity = '1';
     } else if (isHovered) {
       // Hover: intense fill only, no border
-      applyMaskFillOnly(maskId, maskImageCache, HOVER_COLOR.fill);
+      applyMaskVisuals(maskId, maskImageCache, { fill: HOVER_COLOR.fill });
       canvas.style.opacity = '1';
     } else {
       // Idle: hidden
@@ -222,7 +226,7 @@ export function updateSegmentMaskHighlight(
 
 /**
  * Trigger shimmer animation effect on masks
- * Shows a sweeping gradient effect when masks are first rendered
+ * Uses CSS-based animation for better performance.
  * @param targetMaskIds - Optional set of mask IDs to shimmer. If not provided, shimmers all masks.
  */
 export function triggerShimmer(
@@ -249,134 +253,39 @@ export function triggerShimmer(
 
   // Calculate animation timing based on number of masks
   const maskCount = masksToShimmer.length;
-  const baseDuration = maskCount > 5 ? 400 : 600; // Speed up if many masks
-  const staggerDelay = maskCount > 1 ? Math.min(80, 300 / maskCount) : 0; // Adaptive stagger
-
-  const shimmerCanvases: HTMLCanvasElement[] = [];
+  const baseDuration = maskCount > 5 ? 400 : 600;
+  const staggerDelay = maskCount > 1 ? Math.min(80, 300 / maskCount) : 0;
 
   masksToShimmer.forEach(({ mask }, index) => {
-    const maskType = mask.dataset.maskType;
     const delay = index * staggerDelay;
-
-    // For text regions, use CSS shimmer with delay
-    if (maskType !== 'object' && maskType !== 'manual') {
-      setTimeout(() => {
-        mask.classList.add('mask-shimmer');
-        mask.style.animationDuration = `${baseDuration}ms`;
-      }, delay);
-      return;
-    }
-
-    // For object/manual segments, create canvas-based shimmer
-    const maskUrl = mask.dataset.maskUrl;
-    if (!maskUrl) return;
-
-    const bboxX = parseFloat(mask.dataset.bboxX || '0') || 0;
-    const bboxY = parseFloat(mask.dataset.bboxY || '0') || 0;
-    const bboxW = parseFloat(mask.dataset.bboxW || '0') || 0;
-    const bboxH = parseFloat(mask.dataset.bboxH || '0') || 0;
-    if (bboxW <= 0 || bboxH <= 0) return;
-
-    // Create shimmer canvas
-    const shimmerCanvas = document.createElement('canvas');
-    shimmerCanvas.className = 'segment-shimmer-canvas';
-    shimmerCanvas.width = bboxW;
-    shimmerCanvas.height = bboxH;
-    shimmerCanvas.style.cssText = `
-      position: absolute;
-      left: 0; top: 0;
-      width: 100%; height: 100%;
-      pointer-events: none;
-      z-index: 10;
-    `;
-    mask.appendChild(shimmerCanvas);
-    shimmerCanvases.push(shimmerCanvas);
-
-    // Load mask and animate with stagger delay
-    const maskImg = new Image();
-    maskImg.crossOrigin = 'anonymous';
-    maskImg.onload = () => {
-      // Wait for stagger delay before starting animation
-      setTimeout(() => {
-        const ctx = shimmerCanvas.getContext('2d')!;
-        const duration = baseDuration;
-        const startTime = performance.now();
-
-        const animate = (currentTime: number) => {
-          const elapsed = currentTime - startTime;
-          const progress = Math.min(elapsed / duration, 1);
-
-          // Clear canvas
-          ctx.clearRect(0, 0, bboxW, bboxH);
-
-          // Draw the mask
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.drawImage(maskImg, bboxX, bboxY, bboxW, bboxH, 0, 0, bboxW, bboxH);
-
-          // Apply gradient with mask
-          ctx.globalCompositeOperation = 'source-in';
-
-          const gradientPos = -1 + (progress * 3);
-          const centerX = gradientPos * bboxW;
-
-          const angle = ((110 - 90) * Math.PI) / 180;
-          const length = Math.max(bboxW, bboxH) * 2;
-          const cos = Math.cos(angle);
-          const sin = Math.sin(angle);
-
-          const gradient = ctx.createLinearGradient(
-            centerX - cos * length / 2,
-            -sin * length / 2,
-            centerX + cos * length / 2,
-            sin * length / 2
-          );
-          gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-          gradient.addColorStop(0.3, 'rgba(255, 255, 255, 0)');
-          gradient.addColorStop(0.5, 'rgba(255, 255, 255, 0.5)');
-          gradient.addColorStop(0.7, 'rgba(255, 255, 255, 0)');
-          gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-
-          ctx.fillStyle = gradient;
-          ctx.fillRect(0, 0, bboxW, bboxH);
-
-          // Fade out in last 25%
-          if (progress > 0.75) {
-            shimmerCanvas.style.opacity = String(1 - ((progress - 0.75) / 0.25));
-          }
-
-          if (progress < 1) {
-            requestAnimationFrame(animate);
-          }
-        };
-
-        requestAnimationFrame(animate);
-      }, delay);
-    };
-    maskImg.src = maskUrl;
-  });
-
-  // Cleanup after all animations complete (last mask's delay + duration + buffer)
-  const totalDuration = (maskCount - 1) * staggerDelay + baseDuration + 50;
-  setTimeout(() => {
-    masksToShimmer.forEach(({ mask }) => {
-      const maskType = mask.dataset.maskType;
-      if (maskType !== 'object' && maskType !== 'manual') {
-        mask.style.borderColor = 'transparent';
-        mask.style.outlineColor = 'transparent';
-      }
-      mask.classList.remove('mask-shimmer');
-      mask.style.removeProperty('animation-duration');
-    });
-
-    shimmerCanvases.forEach(canvas => canvas.remove());
+    const maskType = mask.dataset.maskType;
+    const isSegment = maskType === 'object' || maskType === 'manual';
 
     setTimeout(() => {
-      masksToShimmer.forEach(({ mask }) => {
-        mask.style.removeProperty('border-color');
-        mask.style.removeProperty('outline-color');
-      });
-    }, 200);
-  }, totalDuration);
+      if (isSegment) {
+        // For segment masks, apply shimmer to the canvas element
+        const canvas = mask.querySelector('.segment-mask-canvas') as HTMLCanvasElement | null;
+        if (canvas) {
+          canvas.classList.add('segment-shimmer');
+          canvas.style.setProperty('--shimmer-duration', `${baseDuration}ms`);
+
+          setTimeout(() => {
+            canvas.classList.remove('segment-shimmer');
+            canvas.style.removeProperty('--shimmer-duration');
+          }, baseDuration);
+        }
+      } else {
+        // For text regions, use existing CSS shimmer
+        mask.classList.add('mask-shimmer');
+        mask.style.animationDuration = `${baseDuration}ms`;
+
+        setTimeout(() => {
+          mask.classList.remove('mask-shimmer');
+          mask.style.removeProperty('animation-duration');
+        }, baseDuration);
+      }
+    }, delay);
+  });
 }
 
 /**
@@ -444,14 +353,26 @@ function buildAlphaTexture(alphaData: ImageData, targetW: number, targetH: numbe
   return target;
 }
 
+// ============ Unified Mask Rendering ============
+
+export interface MaskVisualsOptions {
+  fill: string;
+  stroke?: string;
+  strokeWidth?: number;
+}
+
 /**
- * Draw mask with just fill, no outline (for hover state)
- * Creates an intense highlight without borders
+ * Unified mask rendering function.
+ * Renders a mask with fill color and optional stroke outline.
+ *
+ * @param maskId - The mask ID to render
+ * @param maskImageCache - Cache of mask alpha data
+ * @param options - Rendering options (fill color, optional stroke)
  */
-function applyMaskFillOnly(
+export function applyMaskVisuals(
   maskId: string,
   maskImageCache: Map<string, CachedMask>,
-  fillColor: string
+  options: MaskVisualsOptions
 ): void {
   const cached = maskImageCache.get(maskId);
   if (!cached) return;
@@ -460,6 +381,7 @@ function applyMaskFillOnly(
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
+  const { fill, stroke, strokeWidth = 3 } = options;
   const w = canvas.width;
   const h = canvas.height;
   const dpr = window.devicePixelRatio || 1;
@@ -468,78 +390,42 @@ function applyMaskFillOnly(
 
   // Scale mask to device pixel ratio to avoid aliasing on high-DPI screens
   const alphaTexture = buildAlphaTexture(alphaData, targetW, targetH);
-  const fillCanvas = document.createElement('canvas');
-  fillCanvas.width = targetW;
-  fillCanvas.height = targetH;
-  const fillCtx = fillCanvas.getContext('2d')!;
-  fillCtx.imageSmoothingEnabled = true;
-  fillCtx.drawImage(alphaTexture, 0, 0);
-  fillCtx.globalCompositeOperation = 'source-in';
-  fillCtx.fillStyle = fillColor;
-  fillCtx.fillRect(0, 0, targetW, targetH);
 
-  // Clear canvas and reset state
+  // Clear canvas
   ctx.clearRect(0, 0, w, h);
   ctx.imageSmoothingEnabled = true;
   ctx.globalCompositeOperation = 'source-over';
-  ctx.drawImage(fillCanvas, 0, 0, w, h);
 
-  // Reset composite operation
-  ctx.globalCompositeOperation = 'source-over';
-}
+  // If stroke is provided, create stroke layer first
+  if (stroke) {
+    const strokeCanvas = document.createElement('canvas');
+    strokeCanvas.width = targetW;
+    strokeCanvas.height = targetH;
+    const strokeCtx = strokeCanvas.getContext('2d')!;
+    strokeCtx.imageSmoothingEnabled = true;
 
-/**
- * Draw mask with crisp colored outline and semi-transparent fill (Meta SAM style)
- * Creates proper stroke by: dilating mask → coloring → subtracting original → adding fill
- */
-function applyMaskWithOutline(
-  maskId: string,
-  maskImageCache: Map<string, CachedMask>,
-  fillColor: string,
-  strokeColor: string,
-  strokeWidth: number = 3
-): void {
-  const cached = maskImageCache.get(maskId);
-  if (!cached) return;
+    // Use dense offsets + a tiny blur to smooth jagged edges
+    strokeCtx.filter = `blur(${Math.min(0.8, 0.5 * dpr)}px)`;
+    const offsets = getStrokeOffsets(strokeWidth * dpr, 32);
+    for (const [dx, dy] of offsets) {
+      strokeCtx.drawImage(alphaTexture, dx, dy);
+    }
+    strokeCtx.filter = 'none';
 
-  const { canvas, alphaData } = cached;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
+    // Cut out the original mask to leave only the stroke
+    strokeCtx.globalCompositeOperation = 'destination-out';
+    strokeCtx.drawImage(alphaTexture, 0, 0);
 
-  const w = canvas.width;
-  const h = canvas.height;
-  const dpr = window.devicePixelRatio || 1;
-  const targetW = Math.max(1, Math.round(w * dpr));
-  const targetH = Math.max(1, Math.round(h * dpr));
+    // Apply stroke color
+    strokeCtx.globalCompositeOperation = 'source-in';
+    strokeCtx.fillStyle = stroke;
+    strokeCtx.fillRect(0, 0, targetW, targetH);
 
-  // Shared alpha texture scaled to device pixel ratio with slight feather
-  const alphaTexture = buildAlphaTexture(alphaData, targetW, targetH);
-
-  // Create stroke layer: dilated mask minus original = outline only
-  const strokeCanvas = document.createElement('canvas');
-  strokeCanvas.width = targetW;
-  strokeCanvas.height = targetH;
-  const strokeCtx = strokeCanvas.getContext('2d')!;
-  strokeCtx.imageSmoothingEnabled = true;
-
-  // Use dense offsets + a tiny blur to smooth jagged edges
-  strokeCtx.filter = `blur(${Math.min(0.8, 0.5 * dpr)}px)`;
-  const offsets = getStrokeOffsets(strokeWidth * dpr, 32);
-  for (const [dx, dy] of offsets) {
-    strokeCtx.drawImage(alphaTexture, dx, dy);
+    // Draw stroke layer
+    ctx.drawImage(strokeCanvas, 0, 0, w, h);
   }
-  strokeCtx.filter = 'none';
 
-  // Cut out the original mask to leave only the stroke
-  strokeCtx.globalCompositeOperation = 'destination-out';
-  strokeCtx.drawImage(alphaTexture, 0, 0);
-
-  // Apply stroke color
-  strokeCtx.globalCompositeOperation = 'source-in';
-  strokeCtx.fillStyle = strokeColor;
-  strokeCtx.fillRect(0, 0, targetW, targetH);
-
-  // Create fill layer
+  // Create and draw fill layer
   const fillCanvas = document.createElement('canvas');
   fillCanvas.width = targetW;
   fillCanvas.height = targetH;
@@ -547,14 +433,9 @@ function applyMaskWithOutline(
   fillCtx.imageSmoothingEnabled = true;
   fillCtx.drawImage(alphaTexture, 0, 0);
   fillCtx.globalCompositeOperation = 'source-in';
-  fillCtx.fillStyle = fillColor;
+  fillCtx.fillStyle = fill;
   fillCtx.fillRect(0, 0, targetW, targetH);
 
-  // Composite final result back to display resolution
-  ctx.clearRect(0, 0, w, h);
-  ctx.imageSmoothingEnabled = true;
-  ctx.globalCompositeOperation = 'source-over';
-  ctx.drawImage(strokeCanvas, 0, 0, w, h);
   ctx.drawImage(fillCanvas, 0, 0, w, h);
 
   // Reset composite operation
@@ -596,8 +477,8 @@ export function updateSegmentMaskSpotlight(
       // Ensure spotlighted mask is above the spotlight overlay (z-index 45)
       canvas.style.zIndex = '50';
     } else {
-      // For non-spotlighted masks: apply dim fill
-      applyMaskFillOnly(maskId, maskImageCache, SPOTLIGHT_FILL_DIM);
+      // For non-spotlighted masks: apply dim fill using unified function
+      applyMaskVisuals(maskId, maskImageCache, { fill: SPOTLIGHT_FILL_DIM });
 
       // Subtle glow for non-hovered masks
       canvas.style.filter = `

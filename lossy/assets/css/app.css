@@ -457,7 +457,7 @@
   pointer-events: none;
 }
 
-/* For object/manual segments, shimmer is handled by JS canvas animation */
+/* For object/manual segments, shimmer is handled via canvas filter animation */
 .mask-region[data-mask-type="object"].mask-shimmer::after,
 .mask-region[data-mask-type="manual"].mask-shimmer::after {
   display: none;
@@ -475,6 +475,27 @@
   transition: opacity 0.15s ease;
   /* Ensure canvas scales properly within bbox */
   object-fit: fill;
+}
+
+/* Segment mask canvas shimmer animation (CSS-based for better performance) */
+@keyframes segment-shimmer {
+  0% {
+    filter: brightness(1) drop-shadow(0 0 0 transparent);
+    opacity: 0.7;
+  }
+  50% {
+    filter: brightness(1.4) drop-shadow(0 0 12px rgba(255, 255, 255, 0.6));
+    opacity: 1;
+  }
+  100% {
+    filter: brightness(1) drop-shadow(0 0 0 transparent);
+    opacity: 0;
+  }
+}
+
+.segment-mask-canvas.segment-shimmer {
+  animation: segment-shimmer var(--shimmer-duration, 600ms) ease-out forwards;
+  opacity: 1 !important;
 }
 
 /* Smart Select mode: disable mask interaction via CSS (JS just toggles .smart-select-mode on container) */
