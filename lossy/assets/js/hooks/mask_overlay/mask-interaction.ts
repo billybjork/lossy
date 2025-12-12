@@ -7,6 +7,7 @@
 
 import type { MaskOverlayState, CachedMask } from './types';
 import { isSmartSelectActive } from './smart-select-mode';
+import { isEventOverMask } from './hit-testing';
 
 /**
  * Position all mask elements based on image dimensions
@@ -155,6 +156,8 @@ export function attachMaskListeners(
 /**
  * Check if a point is over an opaque pixel of a segment mask
  * Uses pre-computed alpha data for pixel-perfect hit testing
+ *
+ * @deprecated Use isEventOverMask from './hit-testing' directly for new code
  */
 export function isPointOverSegmentMask(
   maskId: string,
@@ -162,36 +165,8 @@ export function isPointOverSegmentMask(
   maskElement: HTMLElement,
   maskImageCache: Map<string, CachedMask>
 ): boolean {
-  const cached = maskImageCache.get(maskId);
-  if (!cached) {
-    // Cache not loaded yet - fall back to bbox detection
-    return true;
-  }
-
-  const { alphaData } = cached;
-
-  // Get mouse position relative to the mask element
-  const rect = maskElement.getBoundingClientRect();
-  const displayX = event.clientX - rect.left;
-  const displayY = event.clientY - rect.top;
-
-  // Convert from display coordinates to alpha data coordinates
-  const scaleX = alphaData.width / rect.width;
-  const scaleY = alphaData.height / rect.height;
-  const dataX = Math.floor(displayX * scaleX);
-  const dataY = Math.floor(displayY * scaleY);
-
-  // Check bounds
-  if (dataX < 0 || dataX >= alphaData.width || dataY < 0 || dataY >= alphaData.height) {
-    return false;
-  }
-
-  // Get alpha value from pre-computed data
-  const pixelIndex = (dataY * alphaData.width + dataX) * 4;
-  const alpha = alphaData.data[pixelIndex + 3];
-
-  // Consider "over mask" if alpha is above threshold
-  return alpha > 10;
+  // Delegate to unified hit testing implementation
+  return isEventOverMask(maskId, event, maskElement, maskImageCache);
 }
 
 /**

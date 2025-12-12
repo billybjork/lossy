@@ -7,6 +7,7 @@
 
 import type { SmartSelectContext, SegmentPoint, MaskData, CachedMask } from './types';
 import { getImageNaturalDimensions } from './utils';
+import { isPointOverMask } from './hit-testing';
 
 // ============ Constants ============
 
@@ -383,7 +384,8 @@ function findMaskUnderCursor(
 }
 
 /**
- * Check if a point is over an opaque pixel of a segment mask
+ * Check if a point is over an opaque pixel of a segment mask.
+ * Wrapper around shared hit-testing implementation.
  */
 function isPointOverMaskPixel(
   maskId: string,
@@ -392,32 +394,7 @@ function isPointOverMaskPixel(
   maskElement: HTMLElement,
   maskCache: Map<string, CachedMask>
 ): boolean {
-  const cached = maskCache.get(maskId);
-  if (!cached) return false;
-
-  const { alphaData } = cached;
-  const rect = maskElement.getBoundingClientRect();
-
-  // Get position relative to mask element
-  const displayX = clientX - rect.left;
-  const displayY = clientY - rect.top;
-
-  // Convert to alpha data coordinates
-  const scaleX = alphaData.width / rect.width;
-  const scaleY = alphaData.height / rect.height;
-  const dataX = Math.floor(displayX * scaleX);
-  const dataY = Math.floor(displayY * scaleY);
-
-  // Check bounds
-  if (dataX < 0 || dataX >= alphaData.width || dataY < 0 || dataY >= alphaData.height) {
-    return false;
-  }
-
-  // Get alpha value
-  const pixelIndex = (dataY * alphaData.width + dataX) * 4;
-  const alpha = alphaData.data[pixelIndex + 3];
-
-  return alpha > 10;
+  return isPointOverMask(maskId, clientX, clientY, maskElement, maskCache);
 }
 
 // ============ Point Handling ============
